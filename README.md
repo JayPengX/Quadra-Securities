@@ -78,7 +78,18 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
   - P/L by market;
   - **you vs. just buying an index**: the same deposits on the same days into 0050, VOO (in NT$), Bitcoin (in NT$) or the gold passbook.
 
-### 說明 Guide
+### 學習 Learn
+
+`public/lib/learn.mjs`: a beginner school for people who have never invested.
+
+- **13 short lessons:** what a stock is, reading a quote, order types, fees and taxes, ETFs and diversification, dividends, currency risk, government bonds, crypto and gold, time and compounding, leverage, common beginner mistakes, and a practice plan.
+- **Live examples:** each lesson uses today's real prices (a lot of TSMC with its fees and round-trip cost, the US 10-year yield, the NT$ rate…).
+- **Try it:** buttons open the relevant stock or tab.
+- **A one-question quiz** ends each lesson; the right answer marks the lesson done, with a progress bar.
+- **Beginner missions** tick themselves off from the account's history: first Taiwan stock, first ETF, a limit order, an exchange, something abroad, a government bond, a dividend or coupon, three markets at once, a 30-day hold.
+- **A glossary** of 20 terms.
+
+Below it, the reference:
 
 How it works, the fee and tax table for every market, FX spreads and loan rates, order types, trading hours, margin, dividends and splits, passbooks, crypto, how the numbers work, data sources, settings (colours, start over).
 

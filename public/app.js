@@ -16,6 +16,7 @@ import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './li
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, stackBar, SERIES } from './lib/chart.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
+import { LESSONS, MISSIONS, GLOSSARY } from './lib/learn.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { createSync, readSync, writeSync, cleanPasscode, PASSCODE_PATTERN } from './lib/sync.mjs';
 
@@ -24,7 +25,9 @@ const TABS = ['markets', 'portfolio', 'fx', 'history', 'guide'];
 const QUOTE_REFRESH_MS = 45_000;
 const LIST_REFRESH_MS = 90_000;
 const ACTIONS_EVERY_MS = 12 * 3_600_000;
-const STORE = { account: 'stockStudy.account', sync: 'stockStudy.syncCode', settings: 'stockStudy.settings', actions: 'stockStudy.actionsChecked' };
+const STORE = { account: 'stockStudy.account', sync: 'stockStudy.syncCode', settings: 'stockStudy.settings', actions: 'stockStudy.actionsChecked', learn: 'stockStudy.learn' };
+// The live examples in the lessons.
+const LEARN_SYMBOLS = ['2330.TW', '0050.TW', '^TNX', 'BTC-USD'];
 
 const locale = detectLocale();
 const t = makeT(locale);
@@ -56,6 +59,9 @@ const state = {
   activityShown: 60,
   bench: null,
   settings: loadSettings(),
+  learn: loadLearn(),
+  // Which folding cards in the Learn tab are open (they survive redraws).
+  openFolds: new Set(['lessons']),
   sync: { code: null, busy: false, error: null, at: 0 }
 };
 
@@ -69,6 +75,20 @@ function loadSettings() {
     return { updown: locale === 'zh' ? 'tw' : 'us' };
   }
 }
+function loadLearn() {
+  try {
+    const l = JSON.parse(localStorage.getItem(STORE.learn) || '{}');
+    return { done: l.done || {}, answers: l.answers || {} };
+  } catch {
+    return { done: {}, answers: {} };
+  }
+}
+function saveLearn() {
+  try {
+    localStorage.setItem(STORE.learn, JSON.stringify(state.learn));
+  } catch {}
+}
+
 function saveSettings() {
   try {
     localStorage.setItem(STORE.settings, JSON.stringify(state.settings));
@@ -232,6 +252,7 @@ async function refresh({ list = false } = {}) {
   refreshing = (async () => {
     const symbols = coreSymbols();
     const now = Date.now();
+    if (state.tab === 'guide') for (const sym of LEARN_SYMBOLS) symbols.add(sym);
     if (list || now - (state.listAt.get(state.category) || 0) > LIST_REFRESH_MS) {
       for (const s of listSymbols()) symbols.add(s);
       state.listAt.set(state.category, now);
@@ -936,7 +957,7 @@ function renderPortfolio() {
     </div>
     <div class="card">
       <h3 class="card-title">${h(t('positions'))} <span class="count">${v.positions.length}</span></h3>
-      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<p class="empty">${h(t('noPositions'))}</p>`}
+      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><button class="ghost-button" type="button" data-action="goto" data-tab="guide">${h(t('newHere'))}</button></div></div>`}
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
     <div class="card">
@@ -1484,8 +1505,9 @@ async function renderBench() {
 
 // ---- Guide tab ----------------------------------------------------------------------------
 
-function fold(icon, title, body, open = false) {
-  return `<details class="card fold"${open ? ' open' : ''}><summary><span class="fold-icon">${icon}</span><h2>${h(title)}</h2></summary><div class="guide-text">${body}</div></details>`;
+function fold(icon, title, body, open = false, id = title) {
+  const isOpen = state.openFolds.has(id) || (open && !state.openFolds.has(`closed:${id}`));
+  return `<details class="card fold" data-fold="${h(id)}"${isOpen ? ' open' : ''}><summary><span class="fold-icon">${icon}</span><h2>${h(title)}</h2></summary><div class="guide-text">${body}</div></details>`;
 }
 const para = key => `<p>${h(t(key))}</p>`;
 
@@ -1512,10 +1534,107 @@ function fxTable() {
   return `<div class="table-wrap"><table class="table"><thead><tr><th>${h(t('currency'))}</th><th>${h(t('spread'))}</th><th>${h(t('spreadClosed'))}</th><th>${h(t('loanRateCol'))}</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
+// ---- Learn: lessons with live examples, quizzes, missions, glossary -------------------------
+
+// Live numbers for the lessons' {placeholders}.
+function lessonContext() {
+  const q = sym => state.quotes.get(sym);
+  const tsmc = q('2330.TW')?.price;
+  const lot = tsmc ? tsmc * 1000 : null;
+  const buy = lot ? tradeCostsFor('TW', 'buy', 'stock', lot) : null;
+  const sell = lot ? tradeCostsFor('TW', 'sell', 'stock', lot) : null;
+  const fv = (monthly, rate, years) => (rate ? monthly * (((1 + rate / 12) ** (years * 12) - 1) / (rate / 12)) : monthly * years * 12);
+  return {
+    tsmc: tsmc ? money(tsmc, BASE) : '—',
+    tsmcLot: lot ? money(lot, BASE) : '—',
+    tsmcFee: buy ? money(buy, BASE) : '—',
+    tsmcSellCost: sell ? money(sell, BASE) : '—',
+    roundTrip: lot ? (locale === 'zh' ? `${money(buy + sell, BASE)}（${pct((buy + sell) / lot, { sign: false })}）` : `${money(buy + sell, BASE)} (${pct((buy + sell) / lot, { sign: false })})`) : '—',
+    tsmcStop: tsmc ? money(tsmc * 0.9, BASE) : '—',
+    etf: q('0050.TW') ? money(q('0050.TW').price, BASE, { digits: 2 }) : '—',
+    usd: state.rates.USD ? num(state.rates.USD, 2) : '—',
+    us10y: q('^TNX') ? `${num(q('^TNX').price, 2)}%` : '—',
+    btc: q('BTC-USD') ? money(q('BTC-USD').price, 'USD', { digits: 0 }) : '—',
+    saved: money(fv(10_000, 0, 30), BASE),
+    compound6: money(Math.round(fv(10_000, 0.06, 30) / 10_000) * 10_000, BASE)
+  };
+}
+function tradeCostsFor(market, side, kind, gross) {
+  return estimate({ market, kind, currency: BASE, side, qty: 1, price: gross }).costs;
+}
+const fillText = (text, ctx) => text.replace(/\{(\w+)\}/g, (m, k) => ctx[k] ?? m);
+
+function lessonHtml(lesson, ctx) {
+  const answered = state.learn.answers[lesson.id];
+  const done = state.learn.done[lesson.id];
+  const quiz = lesson.quiz;
+  const tries = lesson.try
+    .map(([kind, target]) =>
+      kind === 'open'
+        ? `<button class="ghost-button" type="button" data-action="open" data-symbol="${h(target)}">${h(t('tryOpen', { name: nameOf(target) }))}</button>`
+        : `<button class="ghost-button" type="button" data-action="goto" data-tab="${h(target)}">${h(t('tryGoto', { tab: t(`tab_${target}`) }))}</button>`
+    )
+    .join('');
+  const options = quiz.options
+    .map((o, i) => {
+      const cls = answered == null ? '' : i === quiz.answer ? ' right' : i === answered ? ' wrong' : '';
+      return `<button class="quiz-option${cls}" type="button" data-action="quiz" data-lesson="${h(lesson.id)}" data-i="${i}" ${answered != null && done ? 'disabled' : ''}>${h(L(o))}</button>`;
+    })
+    .join('');
+  const feedback = answered == null ? '' : `<p class="${answered === quiz.answer ? 'ok-msg' : 'warn'}">${h(answered === quiz.answer ? t('quizRight') : t('quizWrong'))} ${h(L(quiz.why))}</p>`;
+  return `<details class="card fold lesson${done ? ' done' : ''}" data-fold="lesson:${h(lesson.id)}"${state.openFolds.has(`lesson:${lesson.id}`) ? ' open' : ''}>
+    <summary><span class="fold-icon">${lesson.icon}</span><h2>${h(L(lesson.title))}</h2>${done ? '<span class="lesson-check" aria-label="done">✓</span>' : ''}</summary>
+    <div class="guide-text">
+      ${lesson.body[locale === 'zh' ? 'zh' : 'en'].map(p => `<p>${h(fillText(p, ctx))}</p>`).join('')}
+      <div class="button-row">${tries}</div>
+      <div class="quiz"><p class="quiz-q">🤔 ${h(L(quiz.q))}</p><div class="quiz-options">${options}</div>${feedback}</div>
+    </div>
+  </details>`;
+}
+
+function learnHtml() {
+  const ctx = lessonContext();
+  const doneCount = LESSONS.filter(l => state.learn.done[l.id]).length;
+  const missions = MISSIONS.map(m => ({ ...m, ok: m.done(state.account) }));
+  const missionCount = missions.filter(m => m.ok).length;
+  const next = LESSONS.find(l => !state.learn.done[l.id]);
+  return `
+    <div class="card learn-hero">
+      <h2>${h(t('learnTitle'))}</h2>
+      <p>${h(t('learnIntro'))}</p>
+      <div class="learn-progress">
+        <div><span>${h(t('lessonsDone'))}</span><strong class="num">${doneCount} / ${LESSONS.length}</strong><div class="gauge"><span class="gauge-fill ok" style="width:${(doneCount / LESSONS.length) * 100}%"></span></div></div>
+        <div><span>${h(t('missionsDone'))}</span><strong class="num">${missionCount} / ${MISSIONS.length}</strong><div class="gauge"><span class="gauge-fill ok" style="width:${(missionCount / MISSIONS.length) * 100}%"></span></div></div>
+      </div>
+      ${next ? `<button class="hero-button" type="button" data-action="lesson" data-lesson="${h(next.id)}">${h(doneCount ? t('continueLesson', { title: L(next.title) }) : t('startLesson'))}</button>` : `<p>${h(t('allLessonsDone'))}</p>`}
+    </div>
+    <h2 class="section-heading">${h(t('lessonsTitle'))}</h2>
+    ${LESSONS.map(l => lessonHtml(l, ctx)).join('')}
+    <h2 class="section-heading">${h(t('missionsTitle'))}</h2>
+    <div class="card"><p class="lede">${h(t('missionsIntro'))}</p><ul class="missions">${missions
+      .map(m => `<li class="${m.ok ? 'done' : ''}"><span class="mission-box">${m.ok ? '✓' : ''}</span>${h(L(m))}</li>`)
+      .join('')}</ul></div>
+    ${fold('📖', t('glossaryTitle'), `<dl class="glossary">${GLOSSARY.map(([term, zh, en]) => `<div><dt>${h(term)}</dt><dd>${h(locale === 'zh' ? zh : en)}</dd></div>`).join('')}</dl>`, false, 'glossary')}
+    <h2 class="section-heading">${h(t('referenceTitle'))}</h2>`;
+}
+
+function answerQuiz(id, i) {
+  const lesson = LESSONS.find(l => l.id === id);
+  if (!lesson) return;
+  state.learn.answers[id] = i;
+  if (i === lesson.quiz.answer) {
+    state.learn.done[id] = true;
+    toast(t('lessonDoneToast', { title: L(lesson.title) }), 'good');
+  }
+  saveLearn();
+  renderGuide();
+}
+
 function renderGuide() {
   const collateral = Object.entries(COLLATERAL).map(([k, x]) => `${kindLabel(k)} ${pct(x, { digits: 0, sign: false })}`).join('、');
   $('guide-body').innerHTML = [
-    fold('🚀', t('g_start'), ['g_start1', 'g_start2', 'g_start3', 'g_start4'].map(para).join(''), true),
+    learnHtml(),
+    fold('🚀', t('g_start'), ['g_start1', 'g_start2', 'g_start3', 'g_start4'].map(para).join('')),
     fold('💸', t('g_fees'), `${para('g_fees1')}${feeTable()}${para('g_fees2')}`),
     fold('💱', t('g_fx'), `${para('g_fx1')}${fxTable()}${para('g_fx2')}`),
     fold('📝', t('g_orders'), ['g_orders1', 'g_orders2', 'g_orders3', 'g_orders4'].map(para).join('')),
@@ -1760,6 +1879,7 @@ function render() {
   else if (state.tab === 'portfolio') renderPortfolio();
   else if (state.tab === 'fx') renderFx();
   else if (state.tab === 'history') renderHistory();
+  else if (state.tab === 'guide') renderGuide();
   if (state.detail && $('detail').open) refreshDetailLive();
 }
 
@@ -1783,7 +1903,7 @@ function showTab(tab) {
   } catch {}
   window.scrollTo({ top: 0 });
   render();
-  if (tab === 'markets') refresh();
+  if (tab === 'markets' || tab === 'guide') refresh();
 }
 
 function renderStatic() {
@@ -1935,6 +2055,16 @@ document.addEventListener('click', event => {
     case 'reset':
       resetAccount();
       break;
+    case 'quiz':
+      answerQuiz(el.dataset.lesson, Number(el.dataset.i));
+      break;
+    case 'lesson': {
+      const id = `lesson:${el.dataset.lesson}`;
+      state.openFolds.add(id);
+      renderGuide();
+      document.querySelector(`[data-fold="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      break;
+    }
     case 'updown':
       state.settings.updown = el.dataset.v;
       saveSettings();
@@ -1957,6 +2087,23 @@ document.addEventListener('click', event => {
       break;
   }
 });
+
+// Folding cards remember being opened or closed across redraws.
+document.addEventListener(
+  'toggle',
+  event => {
+    const id = event.target.dataset?.fold;
+    if (!id) return;
+    if (event.target.open) {
+      state.openFolds.add(id);
+      state.openFolds.delete(`closed:${id}`);
+    } else {
+      state.openFolds.delete(id);
+      state.openFolds.add(`closed:${id}`);
+    }
+  },
+  true
+);
 
 document.addEventListener('submit', event => {
   const form = event.target.closest('[data-form]');

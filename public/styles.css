@@ -574,3 +574,35 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .toast.good { border-left: 4px solid var(--accent); }
 .toast.bad { border-left: 4px solid var(--warn); }
 .toast.out { opacity: 0; transform: translateY(8px); }
+
+/* ---- Learn ----------------------------------------------------------------------------- */
+.learn-hero { background: var(--hero); color: #fff; border: 0; display: grid; gap: 12px; }
+.learn-hero h2 { font-size: 1.3rem; }
+.learn-hero p { font-size: 0.9rem; opacity: 0.92; }
+.learn-hero .hero-button { justify-self: start; }
+.learn-progress { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.learn-progress > div { display: grid; gap: 2px; background: rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 10px 12px; }
+.learn-progress span { font-size: 0.76rem; opacity: 0.85; }
+.learn-progress strong { font-size: 1.2rem; }
+.learn-progress .gauge { background: rgba(255, 255, 255, 0.2); height: 6px; margin: 4px 0 0; }
+.learn-progress .gauge-fill { background: #fff; }
+.lesson.done > summary h2 { color: var(--text-secondary); }
+.lesson-check { color: var(--accent); font-weight: 800; }
+.quiz { display: grid; gap: 8px; background: var(--surface-raised); border-radius: 12px; padding: 12px; }
+.quiz-q { font-weight: 700; color: var(--text-primary); }
+.quiz-options { display: grid; gap: 6px; }
+.quiz-option { text-align: left; border: 1px solid var(--border); background: var(--surface); border-radius: 10px; padding: 9px 12px; font-size: 0.9rem; }
+@media (hover: hover) { .quiz-option:not(:disabled):hover { border-color: var(--accent); } }
+.quiz-option.right { border-color: var(--accent); background: var(--accent-wash); font-weight: 700; }
+.quiz-option.wrong { border-color: var(--warn); background: var(--warn-wash); }
+.quiz-option:disabled { opacity: 1; cursor: default; }
+.quiz .ok-msg, .quiz .warn { margin: 0; }
+.missions { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.missions li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; padding: 8px 10px; border-radius: 10px; background: var(--surface-raised); }
+.missions li.done { color: var(--text-muted); text-decoration: line-through; }
+.mission-box { flex: none; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--axis); display: grid; place-items: center; font-weight: 800; color: #fff; font-size: 0.8rem; }
+.missions li.done .mission-box { background: var(--accent); border-color: var(--accent); }
+.glossary { display: grid; gap: 10px; margin: 0; }
+.glossary dt { font-weight: 700; color: var(--text-primary); }
+.glossary dd { margin: 2px 0 0; }
+.button-row.center { justify-content: center; margin-top: 10px; }

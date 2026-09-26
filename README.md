@@ -34,7 +34,8 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - **Price alert** (🔔): tell me when it rises or falls to a price. Checked on every refresh and, for the time the page was closed, against the price bars since (reported with when it happened). With notifications allowed, it notifies through the service worker.
 - **Monthly plan** (📅 定期定額): buy NT$X on day N of every month. Each month buys at the first price after 00:00 Taiwan time on its day, as many units as the money covers after costs (a foreign one exchanges only the NT$ it needs, at that moment's rate). Missed months are bought from the price history when the page opens again; a month without enough NT$ is skipped and recorded.
 - **Time machine** link: what buying this years ago would be worth now.
-- **About the company / fund:** market value, P/E, EPS, dividend yield, margins, ROE, revenue growth, beta, P/B, sector, with a one-line explanation of each; for funds the expense ratio, size, yield, issuer and top 10 holdings; what it does; recent news (English).
+- **About the company / fund:** a quick read first (is the price cheap or pricey, profitability, growth, dividends, balance sheet, swings; for funds fees, size, how spread out, dividends), rough rules of thumb shown as calm/middling/worth-a-look tags. Then the next earnings and ex-dividend dates, four years (or quarters) of revenue and net income as bars, the analysts' average target price and range against today's price, and the numbers grouped (price and value, profitability, dividends, balance sheet, performance against the S&P 500), each with a line on what it means. Funds show past returns (this year, 3 and 5 years), the sector mix, the stock/bond/cash mix and the top 10 holdings. Then what it does (English) and recent news.
+- **How fresh the price is:** "live" or "delayed N minutes", per market, from Yahoo's own figures.
 - Indexes and futures are watch-only and point to what tracks them (TAIEX → 0050, S&P 500 → VOO/SPY/00646, gold → the gold passbook/GLD/00635U …).
 
 ### 外匯 Forex
@@ -150,7 +151,7 @@ Two devices' copies merge by uniting their logs:
 
 **What's still limited:**
 
-- **Price delays:** some exchanges' prices on Yahoo are delayed. The Taiwan exchange's own real-time feed refuses requests from servers, so it can't go through the Worker.
+- **Price delays** (Yahoo's `exchangeDataDelayedBy`): US stocks and funds, forex, crypto and the US yields are live; Taiwan, Tokyo, Seoul and Sydney 20 minutes; Hong Kong, Shanghai, London, Paris, Frankfurt, Milan, Madrid, Zurich, Toronto and India 15; Singapore and COMEX metals 10; Amsterdam and Copenhagen live. Orders fill at those prices. The Taiwan exchange's own real-time feed refuses requests from servers, so it can't go through the Worker.
 - **Holidays:** a closed market's next opening time is estimated as the next weekday (no free holiday calendar), except when Yahoo already knows the next session.
 - **Non-US government bonds** use reference yields, not live ones.
 

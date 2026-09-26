@@ -47,77 +47,82 @@ export function normalizeCurrency(code) {
 // brokers' usual 0.1425%, their sub-brokerage 複委託 rates abroad). `buy` and
 // `sell`: taxes and exchange fees by kind of security (`all` for every kind).
 // `withholding`: tax kept from dividends paid to a Taiwan resident.
+// `delay`: minutes Yahoo's prices from this market run behind (Yahoo's own
+// exchangeDataDelayedBy): US stocks, forex and crypto are live; Taiwan,
+// Tokyo, Seoul and Sydney 20 minutes; most others 15; unknown markets 15.
 export const MARKETS = {
   TW: {
-    zh: '台股', en: 'Taiwan', flag: '🇹🇼', currency: 'TWD', suffixes: ['.TW', '.TWO'],
+    delay: 20, zh: '台股', en: 'Taiwan', flag: '🇹🇼', currency: 'TWD', suffixes: ['.TW', '.TWO'],
     commission: { rate: 0.001425, min: 20 }, floorFees: true,
     sell: { stock: { tax: 0.003 }, etf: { tax: 0.001 }, bond: { tax: 0 } },
     withholding: 0, nhi: true
   },
   US: {
-    zh: '美股', en: 'US', flag: '🇺🇸', currency: 'USD', suffixes: [''],
+    delay: 0, zh: '美股', en: 'US', flag: '🇺🇸', currency: 'USD', suffixes: [''],
     commission: { rate: 0.001, min: 3 },
     sell: { all: { fee: 0.0000278 } },
     withholding: 0.3
   },
-  JP: { zh: '日股', en: 'Japan', flag: '🇯🇵', currency: 'JPY', suffixes: ['.T'], commission: { rate: 0.0025, min: 500 }, withholding: 0.15315 },
+  JP: { delay: 20, zh: '日股', en: 'Japan', flag: '🇯🇵', currency: 'JPY', suffixes: ['.T'], commission: { rate: 0.0025, min: 500 }, withholding: 0.15315 },
   HK: {
-    zh: '港股', en: 'Hong Kong', flag: '🇭🇰', currency: 'HKD', suffixes: ['.HK'], commission: { rate: 0.0025, min: 100 },
+    delay: 15, zh: '港股', en: 'Hong Kong', flag: '🇭🇰', currency: 'HKD', suffixes: ['.HK'], commission: { rate: 0.0025, min: 100 },
     buy: { stock: { tax: 0.001, fee: 0.000085 }, all: { fee: 0.000085 } },
     sell: { stock: { tax: 0.001, fee: 0.000085 }, all: { fee: 0.000085 } },
     withholding: 0
   },
   CN: {
-    zh: '陸股', en: 'China A-shares', flag: '🇨🇳', currency: 'CNY', suffixes: ['.SS', '.SZ'], commission: { rate: 0.003, min: 50 },
+    delay: 15, zh: '陸股', en: 'China A-shares', flag: '🇨🇳', currency: 'CNY', suffixes: ['.SS', '.SZ'], commission: { rate: 0.003, min: 50 },
     sell: { stock: { tax: 0.0005 } }, withholding: 0.1
   },
   KR: {
-    zh: '韓股', en: 'Korea', flag: '🇰🇷', currency: 'KRW', suffixes: ['.KS', '.KQ'], commission: { rate: 0.003, min: 5000 },
+    delay: 20, zh: '韓股', en: 'Korea', flag: '🇰🇷', currency: 'KRW', suffixes: ['.KS', '.KQ'], commission: { rate: 0.003, min: 5000 },
     sell: { stock: { tax: 0.0015 } }, withholding: 0.22
   },
   UK: {
-    zh: '英股', en: 'UK', flag: '🇬🇧', currency: 'GBP', suffixes: ['.L'], commission: { rate: 0.0025, min: 5 },
+    delay: 15, zh: '英股', en: 'UK', flag: '🇬🇧', currency: 'GBP', suffixes: ['.L'], commission: { rate: 0.0025, min: 5 },
     buy: { stock: { tax: 0.005 } }, withholding: 0
   },
   FR: {
-    zh: '法股', en: 'France', flag: '🇫🇷', currency: 'EUR', suffixes: ['.PA'], commission: { rate: 0.0025, min: 5 },
+    delay: 15, zh: '法股', en: 'France', flag: '🇫🇷', currency: 'EUR', suffixes: ['.PA'], commission: { rate: 0.0025, min: 5 },
     buy: { stock: { tax: 0.004 } }, withholding: 0.25
   },
-  DE: { zh: '德股', en: 'Germany', flag: '🇩🇪', currency: 'EUR', suffixes: ['.DE', '.F'], commission: { rate: 0.0025, min: 5 }, withholding: 0.26375 },
-  NL: { zh: '荷股', en: 'Netherlands', flag: '🇳🇱', currency: 'EUR', suffixes: ['.AS'], commission: { rate: 0.0025, min: 5 }, withholding: 0.15 },
+  DE: { delay: 15, zh: '德股', en: 'Germany', flag: '🇩🇪', currency: 'EUR', suffixes: ['.DE', '.F'], commission: { rate: 0.0025, min: 5 }, withholding: 0.26375 },
+  NL: { delay: 0, zh: '荷股', en: 'Netherlands', flag: '🇳🇱', currency: 'EUR', suffixes: ['.AS'], commission: { rate: 0.0025, min: 5 }, withholding: 0.15 },
   IT: {
-    zh: '義股', en: 'Italy', flag: '🇮🇹', currency: 'EUR', suffixes: ['.MI'], commission: { rate: 0.0025, min: 5 },
+    delay: 15, zh: '義股', en: 'Italy', flag: '🇮🇹', currency: 'EUR', suffixes: ['.MI'], commission: { rate: 0.0025, min: 5 },
     buy: { stock: { tax: 0.001 } }, withholding: 0.26
   },
   ES: {
-    zh: '西股', en: 'Spain', flag: '🇪🇸', currency: 'EUR', suffixes: ['.MC'], commission: { rate: 0.0025, min: 5 },
+    delay: 15, zh: '西股', en: 'Spain', flag: '🇪🇸', currency: 'EUR', suffixes: ['.MC'], commission: { rate: 0.0025, min: 5 },
     buy: { stock: { tax: 0.002 } }, withholding: 0.19
   },
-  CH: { zh: '瑞士股', en: 'Switzerland', flag: '🇨🇭', currency: 'CHF', suffixes: ['.SW'], commission: { rate: 0.0025, min: 5 }, withholding: 0.35 },
-  DK: { zh: '丹麥股', en: 'Denmark', flag: '🇩🇰', currency: 'DKK', suffixes: ['.CO'], commission: { rate: 0.0025, min: 40 }, withholding: 0.27 },
-  CA: { zh: '加股', en: 'Canada', flag: '🇨🇦', currency: 'CAD', suffixes: ['.TO', '.V'], commission: { rate: 0.0025, min: 5 }, withholding: 0.25 },
-  AU: { zh: '澳股', en: 'Australia', flag: '🇦🇺', currency: 'AUD', suffixes: ['.AX'], commission: { rate: 0.0025, min: 5 }, withholding: 0.3 },
-  SG: { zh: '星股', en: 'Singapore', flag: '🇸🇬', currency: 'SGD', suffixes: ['.SI'], commission: { rate: 0.0025, min: 5 }, withholding: 0 },
+  CH: { delay: 15, zh: '瑞士股', en: 'Switzerland', flag: '🇨🇭', currency: 'CHF', suffixes: ['.SW'], commission: { rate: 0.0025, min: 5 }, withholding: 0.35 },
+  DK: { delay: 0, zh: '丹麥股', en: 'Denmark', flag: '🇩🇰', currency: 'DKK', suffixes: ['.CO'], commission: { rate: 0.0025, min: 40 }, withholding: 0.27 },
+  CA: { delay: 15, zh: '加股', en: 'Canada', flag: '🇨🇦', currency: 'CAD', suffixes: ['.TO', '.V'], commission: { rate: 0.0025, min: 5 }, withholding: 0.25 },
+  AU: { delay: 20, zh: '澳股', en: 'Australia', flag: '🇦🇺', currency: 'AUD', suffixes: ['.AX'], commission: { rate: 0.0025, min: 5 }, withholding: 0.3 },
+  SG: { delay: 10, zh: '星股', en: 'Singapore', flag: '🇸🇬', currency: 'SGD', suffixes: ['.SI'], commission: { rate: 0.0025, min: 5 }, withholding: 0 },
   IN: {
-    zh: '印度股', en: 'India', flag: '🇮🇳', currency: 'INR', suffixes: ['.NS', '.BO'], commission: { rate: 0.003, min: 100 },
+    delay: 15, zh: '印度股', en: 'India', flag: '🇮🇳', currency: 'INR', suffixes: ['.NS', '.BO'], commission: { rate: 0.003, min: 100 },
     buy: { all: { tax: 0.001 } }, sell: { all: { tax: 0.001 } }, withholding: 0.2
   },
-  CRYPTO: { zh: '加密貨幣', en: 'Crypto', flag: '🪙', currency: 'USD', suffixes: [], commission: { rate: 0.001, min: 0 }, withholding: 0 },
+  CRYPTO: { delay: 0, zh: '加密貨幣', en: 'Crypto', flag: '🪙', currency: 'USD', suffixes: [], commission: { rate: 0.001, min: 0 }, withholding: 0 },
   // Gold and silver passbooks (黃金存摺): grams priced in NT$, bought at the
   // bank's selling price and sold at its buying price, no commission.
-  METAL: { zh: '黃金存摺', en: 'Metal passbook', flag: '🥇', currency: 'TWD', suffixes: [], commission: { rate: 0, min: 0 }, spread: 0.006, withholding: 0 },
+  METAL: { delay: 10, zh: '黃金存摺', en: 'Metal passbook', flag: '🥇', currency: 'TWD', suffixes: [], commission: { rate: 0, min: 0 }, spread: 0.006, withholding: 0 },
   // Government bonds, over the counter through a broker: a small commission
   // and the dealer's bid-ask spread. Coupon tax depends on the issuer
   // (bonds.mjs).
-  BOND: { zh: '公債', en: 'Government bonds', flag: '🏛️', currency: null, suffixes: [], commission: { rate: 0.001, min: 0 }, spread: 0.0005, withholding: 0 },
+  BOND: { delay: 0, zh: '公債', en: 'Government bonds', flag: '🏛️', currency: null, suffixes: [], commission: { rate: 0.001, min: 0 }, spread: 0.0005, withholding: 0 },
   // Currency pairs (外匯): EUR/USD is bought and sold in US$, a unit per
   // euro. No commission; the dealer's spread each way, like a forex broker.
-  FX: { zh: '外匯', en: 'Forex', flag: '💱', currency: null, suffixes: [], commission: { rate: 0, min: 0 }, spread: 0.0002, withholding: 0 },
+  FX: { delay: 0, zh: '外匯', en: 'Forex', flag: '💱', currency: null, suffixes: [], commission: { rate: 0, min: 0 }, spread: 0.0002, withholding: 0 },
   // Anywhere else search turns up: a generic sub-brokerage rate.
   INTL: { zh: '其他市場', en: 'Other markets', flag: '🌐', currency: null, suffixes: [], commission: { rate: 0.003, min: 0 }, withholding: 0.2 }
 };
 
 const SUFFIX_MARKET = Object.entries(MARKETS).flatMap(([id, m]) => m.suffixes.filter(Boolean).map(s => [s, id]));
+
+export const delayOf = market => (MARKETS[market] || MARKETS.INTL).delay ?? 15;
 
 export function marketOf(symbol, kind) {
   if (kind === 'crypto') return 'CRYPTO';

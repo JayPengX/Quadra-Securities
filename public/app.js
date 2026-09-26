@@ -10,7 +10,7 @@ import {
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
-  SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice
+  SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf
 } from './lib/markets.mjs';
 import { BONDS, ISSUERS } from './lib/bonds.mjs';
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol } from './lib/quotes.mjs';
@@ -781,7 +781,7 @@ function renderDetail() {
         ? `<div class="price-block">
       <div><strong class="big-price num">${fmtPrice(q.price, q.currency)}</strong> <span class="cur">${h(q.currency)}${METALS[d.symbol] ? ` / ${h(unitOf(d.symbol))}` : ''}</span></div>
       <div>${changeHtml(q, { big: true })}</div>
-      <div class="price-meta">${marketStatus(q)}${q.marketTime ? ` · <span>${h(t('asOf', { time: dateTime(q.marketTime) }))}</span>` : ''}</div>
+      <div class="price-meta">${marketStatus(q)}${q.marketTime ? ` · <span>${h(t('asOf', { time: dateTime(q.marketTime) }))}</span>` : ''} · ${delayOf(q.market) ? `<span class="delay-tag" title="${h(t('delayHelp'))}">${h(t('delayed', { n: delayOf(q.market) }))}</span>` : `<span class="delay-tag live" title="${h(t('liveHelp'))}">${h(t('livePrice'))}</span>`}</div>
     </div>`
         : `<p class="empty">${h(t('loadingQuote'))}</p>`
     }
@@ -803,6 +803,7 @@ function renderDetail() {
     ${q ? toolsHtml(d.symbol, q) : ''}
     ${q ? aboutHtml(d.symbol, q) : ''}
     ${ownTradesHtml(d.symbol)}
+    ${q && !BONDS[d.symbol] ? `<div class="button-row tools-row"><button class="ghost-button" type="button" data-action="tm-open" data-symbol="${h(d.symbol)}">⏳ ${h(t('tmFromDetail'))}</button></div>` : ''}
   `;
   renderChart();
   if (q && isTradable(q.kind)) renderTicket();
@@ -943,7 +944,7 @@ function trackersHtml(symbol) {
 const canPlan = q => isTradable(q.kind) && !BONDS[q.symbol];
 
 function toolsHtml(symbol, q) {
-  return [alertCardHtml(symbol, q), canPlan(q) ? planCardHtml(symbol, q) : '', `<div class="button-row tools-row"><button class="ghost-button" type="button" data-action="tm-open" data-symbol="${h(symbol)}">⏳ ${h(t('tmFromDetail'))}</button></div>`].join('');
+  return [alertCardHtml(symbol, q), canPlan(q) ? planCardHtml(symbol, q) : ''].join('');
 }
 
 function alertCardHtml(symbol, q) {
@@ -1042,67 +1043,222 @@ function addPlan() {
 
 // ---- Detail sheet: what the company does, its numbers, news ------------------------
 
-// Yahoo's sectors, in Chinese.
+// Yahoo's sectors, in Chinese (by name and by fund-weighting id).
 const SECTORS_ZH = {
   Technology: '科技', 'Financial Services': '金融', Healthcare: '醫療保健', 'Consumer Cyclical': '非必需消費', 'Consumer Defensive': '必需消費',
   'Communication Services': '通訊服務', Industrials: '工業', Energy: '能源', Utilities: '公用事業', 'Real Estate': '不動產', 'Basic Materials': '原物料'
 };
+const SECTOR_IDS = {
+  technology: 'Technology', financial_services: 'Financial Services', healthcare: 'Healthcare', consumer_cyclical: 'Consumer Cyclical',
+  consumer_defensive: 'Consumer Defensive', communication_services: 'Communication Services', industrials: 'Industrials', energy: 'Energy',
+  utilities: 'Utilities', realestate: 'Real Estate', basic_materials: 'Basic Materials'
+};
+const sectorName = name => (locale === 'zh' ? SECTORS_ZH[name] || name : name);
+const RATINGS = ['strong_buy', 'buy', 'hold', 'underperform', 'sell'];
+
+// Big amounts, short: NT$64.18兆 / US$4.98T.
+const compactMoney = (x, cur) => `${currencyInfo(cur).symbol || `${cur} `}${compact(x)}`;
 
 function aboutHtml(symbol, q) {
   if (!ABOUT_KINDS.has(q.kind) || BONDS[symbol]) return '';
   const a = state.about.get(symbol);
   const fund = q.kind !== 'stock';
+  const icon = fund ? '📦' : '🏢';
   const title = fund ? t('aboutFund') : t('aboutCompany');
-  if (!a || a.loading) return fold(fund ? '📦' : '🏢', title, `<p class="muted">${h(t('aboutLoading'))}</p>`, true, 'about');
+  if (!a || a.loading) return fold(icon, title, `<p class="muted">${h(t('aboutLoading'))}</p>`, true, 'about');
   const f = a.facts;
-  const cur = f?.currency || q.currency;
-  const inTwd = x => (x != null && cur !== BASE && state.rates[cur] ? ` (≈ ${compactMoney(x * state.rates[cur], BASE)})` : '');
-  const rows = [];
-  const add = (key, value, explain) => value != null && value !== '' && rows.push([t(key), value, explain ? t(explain) : '']);
-  if (f) {
-    if (fund) {
-      add('expenseRatio', f.expenseRatio != null ? pct(f.expenseRatio, { sign: false, digits: 2 }) : null, 'expenseRatioHelp');
-      add('fundSize', f.totalAssets != null ? compactMoney(f.totalAssets, cur) + inTwd(f.totalAssets) : null, 'fundSizeHelp');
-      add('divYield', f.dividendYield != null ? pct(f.dividendYield, { sign: false }) : null, 'divYieldHelp');
-      add('peRatio', f.pe != null ? num(f.pe, 1) : null, 'peFundHelp');
-      add('issuer', f.family, '');
-      add('fundCategory', f.category, '');
-      add('inception', f.inception ? fmtDate(f.inception) : null, '');
-    } else {
-      add('marketCap', f.marketCap != null ? compactMoney(f.marketCap, cur) + inTwd(f.marketCap) : null, 'marketCapHelp');
-      add('peRatio', f.pe != null ? num(f.pe, 1) : null, 'peHelp');
-      add('eps', f.eps != null ? `${fmtPrice(f.eps, cur)} ${cur}` : null, 'epsHelp');
-      add('divYield', f.dividendYield != null ? pct(f.dividendYield, { sign: false }) : null, 'divYieldHelp');
-      add('profitMargin', f.margin != null ? pct(f.margin, { sign: false, digits: 1 }) : null, 'profitMarginHelp');
-      add('roe', f.roe != null ? pct(f.roe, { sign: false, digits: 1 }) : null, 'roeHelp');
-      add('revenueGrowth', f.growth != null ? pct(f.growth, { digits: 1 }) : null, 'revenueGrowthHelp');
-      add('beta', f.beta != null ? num(f.beta, 2) : null, 'betaHelp');
-      add('pbRatio', f.pb != null ? num(f.pb, 2) : null, 'pbHelp');
-      add('sector', f.sector ? `${locale === 'zh' ? SECTORS_ZH[f.sector] || f.sector : f.sector}${f.industry ? ` · ${f.industry}` : ''}` : null, '');
-      add('employees', f.employees ? num(f.employees) : null, '');
-    }
-  }
-  const grid = rows.length
-    ? `<dl class="about-grid">${rows.map(([k, v, e]) => `<div><dt>${h(k)}</dt><dd class="num">${h(v)}</dd>${e ? `<p>${h(e)}</p>` : ''}</div>`).join('')}</dl>`
-    : `<p class="muted">${h(t('aboutNone'))}</p>`;
-  const top = f?.holdings?.length
-    ? `<h3 class="card-title">${h(t('topHoldings'))}</h3><ul class="bars-list holdings">${f.holdings
-        .map(x => `<li><button class="link bar-label" type="button" data-action="open" data-symbol="${h(x.symbol)}">${h(catalogInfo(x.symbol) ? nameOf(x.symbol) : x.name)}</button><span class="bar-track"><span class="bar flat" style="width:${Math.min(100, (x.weight / f.holdings[0].weight) * 100)}%"></span></span><strong class="num">${h(pct(x.weight, { sign: false, digits: 1 }))}</strong></li>`)
-        .join('')}</ul><p class="note">${h(t('topHoldingsNote', { pct: pct(f.holdings.reduce((sum, x) => sum + x.weight, 0), { sign: false, digits: 0 }) }))}</p>`
-    : '';
+  const body = !f ? `<p class="muted">${h(t('aboutNone'))}</p>` : fund ? fundAboutHtml(f, q) : stockAboutHtml(f, q);
   const summary = f?.summary
     ? `<details class="summary-text"><summary>${h(t('whatItDoes'))}</summary><p lang="en">${h(f.summary)}</p>${f.website ? `<p><a href="${h(f.website)}" target="_blank" rel="noopener">${h(f.website.replace(/^https?:\/\//, ''))}</a></p>` : ''}</details>`
     : '';
   const news = a.news?.length
-    ? `<h3 class="card-title">${h(t('newsTitle'))}</h3><ul class="news">${a.news
+    ? `<h3 class="about-h">📰 ${h(t('newsTitle'))}</h3><ul class="news">${a.news
         .slice(0, 5)
         .map(n => `<li><a href="${h(n.link)}" target="_blank" rel="noopener">${h(n.title)}</a><small>${h(n.publisher)} · ${h(dateTime(n.t))}</small></li>`)
         .join('')}</ul>`
     : '';
-  return fold(fund ? '📦' : '🏢', title, `${grid}${top}${summary}${news}<p class="note">${h(t('aboutSource'))}</p>`, true, 'about');
+  return fold(icon, title, `${body}${summary}${news}<p class="note">${h(t('aboutSource'))}</p>`, true, 'about');
 }
-// Big amounts, short: NT$6,418兆 / US$4.98T.
-const compactMoney = (x, cur) => `${currencyInfo(cur).symbol || `${cur} `}${compact(x)}`;
+
+// One quick read: a label, a verdict and the number behind it.
+const verdict = (label, word, tone, detail) => `<div class="verdict ${tone}"><span>${h(label)}</span><strong>${h(word)}</strong><small class="num">${h(detail)}</small></div>`;
+const band = (x, lo, hi) => (x < lo ? 0 : x <= hi ? 1 : 2);
+
+// A group of numbers, each with a line on what it means.
+function factGroup(title, rows) {
+  const list = rows.filter(([, v]) => v != null && v !== '');
+  if (!list.length) return '';
+  return `<h3 class="about-h">${h(title)}</h3><dl class="about-grid">${list.map(([k, v, e]) => `<div><dt>${h(t(k))}</dt><dd class="num">${h(v)}</dd>${e ? `<p>${h(t(e))}</p>` : ''}</div>`).join('')}</dl>`;
+}
+
+function stockAboutHtml(f, q) {
+  const cur = f.currency || q.currency;
+  const rc = f.reportCurrency || cur;
+  const inTwd = (x, c) => (x != null && c !== BASE && state.rates[c] ? ` (≈ ${compactMoney(x * state.rates[c], BASE)})` : '');
+  const pctOf = (x, digits = 1) => (x != null ? pct(x, { sign: false, digits }) : null);
+  const profile = [
+    f.sector ? `${sectorName(f.sector)}${f.industry ? ` · ${f.industry}` : ''}` : '',
+    [f.city, f.country].filter(Boolean).join(', '),
+    f.ceo ? t('ceoIs', { name: f.ceo }) : '',
+    f.employees ? t('employeesN', { n: num(f.employees) }) : ''
+  ].filter(Boolean);
+  // The quick read.
+  const v = [];
+  if (f.pe > 0) v.push(verdict(t('vValue'), [t('vCheap'), t('vFair'), t('vPricey')][band(f.pe, 15, 30)], ['good', 'mid', 'warn'][band(f.pe, 15, 30)], `${t('peRatio')} ${num(f.pe, 1)}`));
+  else if (f.eps != null && f.eps < 0) v.push(verdict(t('vValue'), t('vLoss'), 'warn', `EPS ${fmtPrice(f.eps, cur)}`));
+  if (f.margin != null) v.push(verdict(t('vProfit'), f.margin < 0 ? t('vLoss') : [t('vThin'), t('vOk'), t('vStrong')][band(f.margin, 0.05, 0.2)], f.margin < 0 ? 'warn' : ['warn', 'mid', 'good'][band(f.margin, 0.05, 0.2)], `${t('profitMargin')} ${pctOf(f.margin)}`));
+  if (f.growth != null) v.push(verdict(t('vGrowth'), f.growth < 0 ? t('vShrinking') : f.growth > 0.15 ? t('vFast') : t('vSteady'), f.growth < 0 ? 'warn' : f.growth > 0.15 ? 'good' : 'mid', `${t('revenueGrowth')} ${pct(f.growth, { digits: 1 })}`));
+  v.push(verdict(t('vDividend'), !f.dividendYield ? t('vNoDiv') : [t('vSmallDiv'), t('vSomeDiv'), t('vHighDiv')][band(f.dividendYield, 0.01, 0.04)], !f.dividendYield ? 'info' : ['info', 'mid', 'good'][band(f.dividendYield, 0.01, 0.04)], `${t('divYield')} ${pctOf(f.dividendYield || 0, 2)}`));
+  if (f.debtToEquity != null || (f.cash != null && f.debt != null)) {
+    const netCash = f.cash != null && f.debt != null && f.cash >= f.debt;
+    const b = f.debtToEquity != null ? band(f.debtToEquity, 50, 150) : 1;
+    v.push(verdict(t('vBalance'), netCash ? t('vNetCash') : [t('vSolid'), t('vOk'), t('vHeavy')][b], netCash || b === 0 ? 'good' : b === 1 ? 'mid' : 'warn', f.debtToEquity != null ? `${t('debtToEquity')} ${num(f.debtToEquity, 0)}%` : ''));
+  }
+  if (f.beta != null) v.push(verdict(t('vRisk'), [t('vCalm'), t('vMarket'), t('vWild')][band(f.beta, 0.8, 1.3)], ['good', 'mid', 'warn'][band(f.beta, 0.8, 1.3)], `Beta ${num(f.beta, 2)}`));
+  const quick = v.length ? `<div class="verdicts">${v.join('')}</div><p class="note">${h(t('verdictNote'))}</p>` : '';
+  // Coming up.
+  const now = Date.now();
+  const soon = [
+    f.earningsDate > now - 86_400_000 ? `📣 ${t('nextEarnings', { date: fmtDate(f.earningsDate) })}` : '',
+    f.exDividendDate > now - 86_400_000 ? `💰 ${t('nextExDiv', { date: fmtDate(f.exDividendDate) })}` : ''
+  ].filter(Boolean);
+  return `
+    ${profile.length ? `<p class="about-profile">${profile.map(x => `<span>${h(x)}</span>`).join('')}</p>` : ''}
+    ${quick}
+    ${soon.length ? `<ul class="about-soon">${soon.map(x => `<li>${h(x)}</li>`).join('')}</ul>` : ''}
+    ${financialsHtml(f, rc)}
+    ${targetHtml(f, q)}
+    ${factGroup(t('gValue'), [
+      ['marketCap', f.marketCap != null ? compactMoney(f.marketCap, cur) + inTwd(f.marketCap, cur) : null, 'marketCapHelp'],
+      ['peRatio', f.pe != null ? num(f.pe, 1) : null, 'peHelp'],
+      ['forwardPe', f.forwardPe != null ? num(f.forwardPe, 1) : null, 'forwardPeHelp'],
+      ['eps', f.eps != null ? `${fmtPrice(f.eps, cur)} ${cur}` : null, 'epsHelp'],
+      ['pbRatio', f.pb != null ? num(f.pb, 2) : null, 'pbHelp']
+    ])}
+    ${factGroup(t('gProfit'), [
+      ['grossMargin', pctOf(f.grossMargin), 'grossMarginHelp'],
+      ['operatingMargin', pctOf(f.operatingMargin), 'operatingMarginHelp'],
+      ['profitMargin', pctOf(f.margin), 'profitMarginHelp'],
+      ['roe', pctOf(f.roe), 'roeHelp'],
+      ['revenueGrowth', f.growth != null ? pct(f.growth, { digits: 1 }) : null, 'revenueGrowthHelp'],
+      ['earningsGrowth', f.earningsGrowth != null ? pct(f.earningsGrowth, { digits: 1 }) : null, 'earningsGrowthHelp']
+    ])}
+    ${factGroup(t('gDividend'), [
+      ['divYield', f.dividendYield != null ? pctOf(f.dividendYield, 2) : null, 'divYieldHelp'],
+      ['dividendRate', f.dividendRate ? `${fmtPrice(f.dividendRate, cur)} ${cur}` : null, 'dividendRateHelp'],
+      ['payoutRatio', f.payoutRatio ? pctOf(f.payoutRatio, 0) : null, 'payoutRatioHelp'],
+      ['avgYield5', f.avgYield5 ? pctOf(f.avgYield5, 2) : null, 'avgYield5Help']
+    ])}
+    ${factGroup(t('gBalance'), [
+      ['cashHeld', f.cash != null ? compactMoney(f.cash, rc) : null, 'cashHeldHelp'],
+      ['debtOwed', f.debt != null ? compactMoney(f.debt, rc) : null, 'debtOwedHelp'],
+      ['debtToEquity', f.debtToEquity != null ? `${num(f.debtToEquity, 0)}%` : null, 'debtToEquityHelp'],
+      ['freeCashflow', f.freeCashflow != null ? compactMoney(f.freeCashflow, rc) : null, 'freeCashflowHelp']
+    ])}
+    ${factGroup(t('gRisk'), [
+      ['change52', f.change52 != null ? `${pct(f.change52, { digits: 1 })}${f.sp52 != null ? ` · ${t('vsSp', { pct: pct(f.sp52, { digits: 1 }) })}` : ''}` : null, 'change52Help'],
+      ['beta', f.beta != null ? num(f.beta, 2) : null, 'betaHelp']
+    ])}`;
+}
+
+// Revenue and profit over the last four years (or quarters).
+function financialsHtml(f, rc) {
+  const quarterly = state.aboutPeriod === 'quarter' && f.quarterly.length;
+  const rows = quarterly ? f.quarterly : f.yearly;
+  if (rows.length < 2) return '';
+  const W = 560;
+  const H = 180;
+  const pad = { l: 8, r: 8, t: 22, b: 26 };
+  const max = Math.max(...rows.flatMap(r => [r.revenue, r.earnings || 0]), 1);
+  const min = Math.min(0, ...rows.map(r => r.earnings || 0));
+  const Y = x => pad.t + ((max - x) / (max - min)) * (H - pad.t - pad.b);
+  const slot = (W - pad.l - pad.r) / rows.length;
+  const bw = Math.min(40, slot * 0.32);
+  const bars = rows
+    .map((r, i) => {
+      const x = pad.l + slot * i + slot / 2;
+      const rev = `<rect class="fin-rev" x="${x - bw - 2}" y="${Y(r.revenue)}" width="${bw}" height="${Y(0) - Y(r.revenue)}" rx="3"/><text class="fin-label" x="${x - bw / 2 - 2}" y="${Y(r.revenue) - 5}" text-anchor="middle">${h(compact(r.revenue))}</text>`;
+      const e = r.earnings || 0;
+      const earn = `<rect class="fin-earn${e < 0 ? ' neg' : ''}" x="${x + 2}" y="${Math.min(Y(e), Y(0))}" width="${bw}" height="${Math.abs(Y(0) - Y(e))}" rx="3"/><text class="fin-label" x="${x + bw / 2 + 2}" y="${(e < 0 ? Y(e) + 12 : Y(e) - 5)}" text-anchor="middle">${h(compact(e))}</text>`;
+      return `${rev}${earn}<text class="axis-label" x="${x}" y="${H - 8}" text-anchor="middle">${h(r.label)}</text>`;
+    })
+    .join('');
+  const first = rows[0];
+  const last = rows.at(-1);
+  const growth = first.revenue > 0 ? last.revenue / first.revenue - 1 : null;
+  return `<div class="about-fin">
+    <div class="card-head"><h3 class="about-h">📊 ${h(t('finTitle'))} <small>(${h(rc)})</small></h3>
+      ${f.quarterly.length ? `<div class="segmented small" role="group"><button type="button" data-action="about-period" data-v="year" aria-pressed="${!quarterly}">${h(t('finYear'))}</button><button type="button" data-action="about-period" data-v="quarter" aria-pressed="${Boolean(quarterly)}">${h(t('finQuarter'))}</button></div>` : ''}
+    </div>
+    <ul class="legend-inline"><li><i class="sw fin-rev"></i>${h(t('finRevenue'))}</li><li><i class="sw fin-earn"></i>${h(t('finEarnings'))}</li></ul>
+    <svg class="chart-svg fin-chart" viewBox="0 0 ${W} ${H}" role="img"><line class="grid" x1="${pad.l}" x2="${W - pad.r}" y1="${Y(0)}" y2="${Y(0)}"/>${bars}</svg>
+    ${growth != null ? `<p class="note">${h(t(quarterly ? 'finGrowthQ' : 'finGrowthY', { from: first.label, to: last.label, pct: pct(growth, { digits: 0 }) }))}</p>` : ''}
+  </div>`;
+}
+
+// What analysts expect the price to be in a year, against today's.
+function targetHtml(f, q) {
+  const tg = f.target;
+  if (!tg?.mean || !tg.low || !tg.high || !(q.price > 0)) return '';
+  const lo = Math.min(tg.low, q.price);
+  const hi = Math.max(tg.high, q.price);
+  const x = v => `${((v - lo) / (hi - lo || 1)) * 100}%`;
+  const cur = q.currency;
+  const rating = RATINGS.includes(tg.rating) ? t(`rating_${tg.rating}`) : null;
+  return `<div class="about-target">
+    <h3 class="about-h">🎯 ${h(t('targetTitle'))}</h3>
+    <p>${h(t('targetLine', { n: tg.analysts || '?', mean: fmtPrice(tg.mean, cur), pct: pct(tg.mean / q.price - 1, { digits: 0 }) }))}${rating ? ` · ${h(t('ratingIs', { rating }))}` : ''}</p>
+    <div class="target-bar"><span class="target-range" style="left:${x(tg.low)};right:calc(100% - ${x(tg.high)})"></span><i class="target-mean" style="left:${x(tg.mean)}" title="${h(t('targetMean'))}"></i><i class="target-now" style="left:${x(q.price)}" title="${h(t('targetNow'))}"></i></div>
+    <div class="target-scale num"><span>${h(t('targetLow'))} ${h(fmtPrice(tg.low, cur))}</span><span>${h(t('targetNow'))} ${h(fmtPrice(q.price, cur))}</span><span>${h(t('targetHigh'))} ${h(fmtPrice(tg.high, cur))}</span></div>
+    <p class="note">${h(t('targetNote'))}</p>
+  </div>`;
+}
+
+function fundAboutHtml(f, q) {
+  const cur = f.currency || q.currency;
+  const sizeTwd = f.totalAssets != null ? f.totalAssets * (cur === BASE ? 1 : state.rates[cur] || 0) : null;
+  const top = f.holdings?.[0]?.weight || 0;
+  const top10 = (f.holdings || []).reduce((sum, x) => sum + x.weight, 0);
+  const v = [];
+  if (f.expenseRatio != null) v.push(verdict(t('vCost'), f.expenseRatio < 0.002 ? t('vVeryCheap') : f.expenseRatio < 0.006 ? t('vOk') : t('vPricey'), f.expenseRatio < 0.002 ? 'good' : f.expenseRatio < 0.006 ? 'mid' : 'warn', `${t('expenseRatio')} ${pct(f.expenseRatio, { sign: false, digits: 2 })}`));
+  if (sizeTwd) v.push(verdict(t('vSize'), sizeTwd > 3e10 ? t('vBig') : sizeTwd > 3e9 ? t('vMid') : t('vSmall'), sizeTwd > 3e10 ? 'good' : sizeTwd > 3e9 ? 'mid' : 'warn', compactMoney(sizeTwd, BASE)));
+  if (f.holdings?.length) v.push(verdict(t('vSpread'), top > 0.3 || top10 > 0.65 ? t('vConcentrated') : t('vDiversified'), top > 0.3 || top10 > 0.65 ? 'warn' : 'good', t('top10Share', { pct: pct(top10, { sign: false, digits: 0 }) })));
+  v.push(verdict(t('vDividend'), !f.dividendYield ? t('vNoDiv') : [t('vSmallDiv'), t('vSomeDiv'), t('vHighDiv')][band(f.dividendYield, 0.01, 0.04)], !f.dividendYield ? 'info' : ['info', 'mid', 'good'][band(f.dividendYield, 0.01, 0.04)], `${t('divYield')} ${pct(f.dividendYield || 0, { sign: false })}`));
+  const returns = [
+    ['retYtd', f.ytd],
+    ['ret3y', f.return3y],
+    ['ret5y', f.return5y]
+  ].filter(([, x]) => x != null);
+  const sectors = f.sectors?.length
+    ? `<h3 class="about-h">🧩 ${h(t('sectorMix'))}</h3>${stackBar(
+        (f.sectors.length > 8 ? [...f.sectors.slice(0, 7), { id: 'others', weight: f.sectors.slice(7).reduce((sum, x) => sum + x.weight, 0) }] : f.sectors).map((x, i) => ({
+          label: x.id === 'others' ? t('others') : sectorName(SECTOR_IDS[x.id] || x.id),
+          value: x.weight,
+          color: SERIES[i]
+        })),
+        { format: () => '' }
+      )}`
+    : '';
+  const mix = f.mix && (f.mix.bond > 0.02 || f.mix.cash > 0.02) ? `<p class="muted">${h(t('assetMix', { stock: pct(f.mix.stock, { sign: false, digits: 0 }), bond: pct(f.mix.bond, { sign: false, digits: 0 }), cash: pct(f.mix.cash, { sign: false, digits: 0 }) }))}</p>` : '';
+  const holdings = f.holdings?.length
+    ? `<h3 class="about-h">🏆 ${h(t('topHoldings'))}</h3><ul class="bars-list holdings">${f.holdings
+        .map(x => `<li><button class="link bar-label" type="button" data-action="open" data-symbol="${h(x.symbol)}">${h(catalogInfo(x.symbol) ? nameOf(x.symbol) : x.name)}</button><span class="bar-track"><span class="bar flat" style="width:${Math.min(100, (x.weight / f.holdings[0].weight) * 100)}%"></span></span><strong class="num">${h(pct(x.weight, { sign: false, digits: 1 }))}</strong></li>`)
+        .join('')}</ul><p class="note">${h(t('topHoldingsNote', { pct: pct(top10, { sign: false, digits: 0 }) }))}</p>`
+    : '';
+  const profile = [f.family, f.category, f.inception ? t('since', { date: fmtDate(f.inception) }) : ''].filter(Boolean);
+  return `
+    ${profile.length ? `<p class="about-profile">${profile.map(x => `<span>${h(x)}</span>`).join('')}</p>` : ''}
+    ${v.length ? `<div class="verdicts">${v.join('')}</div><p class="note">${h(t('verdictNote'))}</p>` : ''}
+    ${returns.length ? `<div class="kpis about-returns">${returns.map(([k, x]) => kpi(t(k), pct(x, { digits: 1 }), '', dirClass(x))).join('')}</div>` : ''}
+    ${sectors}${mix}${holdings}
+    ${factGroup(t('gFund'), [
+      ['expenseRatio', f.expenseRatio != null ? pct(f.expenseRatio, { sign: false, digits: 2 }) : null, 'expenseRatioHelp'],
+      ['fundSize', f.totalAssets != null ? compactMoney(f.totalAssets, cur) + (sizeTwd && cur !== BASE ? ` (≈ ${compactMoney(sizeTwd, BASE)})` : '') : null, 'fundSizeHelp'],
+      ['divYield', f.dividendYield != null ? pct(f.dividendYield, { sign: false }) : null, 'divYieldHelp'],
+      ['peRatio', f.pe != null ? num(f.pe, 1) : null, 'peFundHelp'],
+      ['beta', f.beta != null ? num(f.beta, 2) : null, 'betaHelp']
+    ])}`;
+}
 
 function ownTradesHtml(symbol) {
   if (!state.account) return '';
@@ -2608,6 +2764,10 @@ document.addEventListener('click', event => {
     case 'chart-style':
       state.settings.chart = el.dataset.v;
       saveSettings();
+      redrawDetail();
+      break;
+    case 'about-period':
+      state.aboutPeriod = el.dataset.v;
       redrawDetail();
       break;
     case 'chart-ma':

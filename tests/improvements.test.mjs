@@ -119,6 +119,13 @@ test('company numbers parse for a stock and a fund', () => {
   assert.ok(etf.expenseRatio > 0 && etf.expenseRatio < 0.01);
   assert.equal(etf.holdings[0].symbol, '2330.TW');
   assert.ok(etf.holdings[0].weight > 0.3);
+  assert.equal(tsmc.yearly.length, 4);
+  assert.ok(tsmc.target.mean > 0 && tsmc.target.analysts > 0);
+  assert.equal(tsmc.reportCurrency, 'TWD');
+  assert.ok(tsmc.earningsDate > 0);
+  const voo = parseFundamentals(fixture('summary-VOO.json'));
+  assert.equal(voo.sectors[0].id, 'technology');
+  assert.ok(voo.mix.stock > 0.9 && voo.return5y > 0);
 });
 
 test('candles draw from chart bars, with volume', () => {

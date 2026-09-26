@@ -647,6 +647,7 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .about-grid dd { margin: 2px 0 4px; font-size: 1.02rem; font-weight: 700; }
 .about-grid p { margin: 0; font-size: 0.78rem; color: var(--text-secondary); line-height: 1.45; }
 .holdings li { grid-template-columns: minmax(110px, 42%) 1fr auto; }
+.holdings .bar-label { text-align: left; }
 .holdings .bar { background: var(--c1); }
 .summary-text summary { cursor: pointer; font-weight: 600; color: var(--accent); }
 .summary-text p { font-size: 0.86rem; line-height: 1.55; color: var(--text-secondary); }
@@ -668,3 +669,37 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .tm-card > .primary-button { justify-self: start; }
 .tm-result { display: grid; gap: 10px; border-top: 1px solid var(--grid); padding-top: 12px; }
 .tm-line { font-weight: 700; margin: 0; }
+
+/* ---- Company card: quick read, results, analysts ---------------------------------------- */
+.about-h { font-size: 0.92rem; margin: 16px 0 8px; display: flex; align-items: center; gap: 6px; }
+.about-h small { color: var(--text-muted); font-weight: 500; }
+.about-profile { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.about-profile span { background: var(--surface-raised); border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; color: var(--text-secondary); }
+.verdicts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; }
+.verdict { display: grid; gap: 1px; border-radius: 12px; padding: 9px 11px; background: var(--surface-raised); border-left: 4px solid var(--axis); }
+.verdict span { font-size: 0.72rem; color: var(--text-muted); }
+.verdict strong { font-size: 1rem; }
+.verdict small { font-size: 0.74rem; color: var(--text-secondary); }
+/* Tones say "reassuring / middling / worth a look", never up or down. */
+.verdict.good { border-left-color: var(--accent); }
+.verdict.good strong { color: var(--accent); }
+.verdict.warn { border-left-color: var(--warn); }
+.verdict.warn strong { color: var(--warn); }
+.verdict.info { border-left-color: var(--c1); }
+.about-soon { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.86rem; font-weight: 600; }
+.about-fin .card-head { margin-top: 16px; }
+.about-fin .about-h { margin: 0; }
+.fin-chart { width: 100%; height: auto; }
+.fin-chart .fin-rev, .sw.fin-rev { fill: var(--c1); background: var(--c1); }
+.fin-chart .fin-earn, .sw.fin-earn { fill: var(--c3); background: var(--c3); }
+.fin-chart .fin-earn.neg { fill: var(--warn); }
+.fin-chart .fin-label { font-size: 11px; fill: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.target-bar { position: relative; height: 10px; border-radius: 5px; background: var(--surface-sunken); margin: 14px 6px 6px; }
+.target-range { position: absolute; top: 0; bottom: 0; border-radius: 5px; background: var(--accent-wash); outline: 1px solid var(--accent); }
+.target-bar i { position: absolute; top: -5px; width: 4px; height: 20px; border-radius: 2px; transform: translateX(-50%); }
+.target-mean { background: var(--accent); }
+.target-now { background: var(--text-primary); }
+.target-scale { display: flex; justify-content: space-between; gap: 8px; font-size: 0.74rem; color: var(--text-secondary); }
+.about-returns { margin: 12px 0 0; }
+.delay-tag { color: var(--warn); }
+.delay-tag.live { color: var(--accent); }

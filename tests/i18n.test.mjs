@@ -26,6 +26,7 @@ test('every key the page asks for exists', () => {
     status_: ['open', 'filled', 'cancelled', 'rejected'],
     alloc_: ['kind', 'currency', 'market'],
     hview_: ['activity', 'orders', 'stats'],
+    rating_: ['strong_buy', 'buy', 'hold', 'underperform', 'sell'],
     af_: ['all', 'trades', 'fx', 'income', 'loans', 'cash'],
     cost_: ['commission', 'tax', 'fee', 'fx', 'interest', 'withheld', 'nhi', 'borrow'],
     margin_: ['ok', 'call', 'liquidate'],

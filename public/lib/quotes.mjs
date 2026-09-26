@@ -335,6 +335,8 @@ export function parseFundamentals(json) {
   const ap = r.assetProfile || {};
   const fp = r.fundProfile || {};
   const th = r.topHoldings || {};
+  const ce = r.calendarEvents || {};
+  const er = r.earnings || {};
   const currency = sd.currency || fd.financialCurrency || null;
   const { factor } = normalizeCurrency(currency || 'USD');
   const money = x => (raw(x) == null ? null : raw(x) / factor);
@@ -350,7 +352,7 @@ export function parseFundamentals(json) {
     margin: raw(fd.profitMargins) ?? raw(ks.profitMargins),
     roe: raw(fd.returnOnEquity),
     growth: raw(fd.revenueGrowth),
-    revenue: money(fd.totalRevenue),
+    revenue: raw(fd.totalRevenue),
     debtToEquity: raw(fd.debtToEquity),
     sector: ap.sector || null,
     industry: ap.industry || null,
@@ -364,13 +366,42 @@ export function parseFundamentals(json) {
     expenseRatio: raw(fp.feesExpensesInvestment?.annualReportExpenseRatio) ?? raw(ks.annualReportExpenseRatio) ?? raw(ks.netExpenseRatio),
     totalAssets: money(sd.totalAssets) ?? money(ks.totalAssets),
     inception: raw(ks.fundInceptionDate) ? raw(ks.fundInceptionDate) * 1000 : null,
-    holdings: (th.holdings || []).map(h => ({ symbol: h.symbol || '', name: h.holdingName || h.symbol || '', weight: raw(h.holdingPercent) })).filter(h => h.weight > 0).slice(0, 10)
+    holdings: (th.holdings || []).map(h => ({ symbol: h.symbol || '', name: h.holdingName || h.symbol || '', weight: raw(h.holdingPercent) })).filter(h => h.weight > 0).slice(0, 10),
+    // More of a company: margins, cash and debt, dividends, what analysts
+    // expect, dates coming up, the last four years and quarters.
+    grossMargin: raw(fd.grossMargins),
+    operatingMargin: raw(fd.operatingMargins),
+    earningsGrowth: raw(fd.earningsGrowth),
+    // Company-wide amounts are in its reporting currency, not in pence.
+    cash: raw(fd.totalCash),
+    debt: raw(fd.totalDebt),
+    freeCashflow: raw(fd.freeCashflow),
+    dividendRate: money(sd.dividendRate),
+    payoutRatio: raw(sd.payoutRatio),
+    // Yahoo gives the 5-year average yield in percent (1.67 = 1.67%).
+    avgYield5: raw(sd.fiveYearAvgDividendYield) != null ? raw(sd.fiveYearAvgDividendYield) / 100 : null,
+    change52: raw(ks['52WeekChange']),
+    sp52: raw(ks.SandP52WeekChange),
+    target: raw(fd.targetMeanPrice) != null ? { mean: money(fd.targetMeanPrice), high: money(fd.targetHighPrice), low: money(fd.targetLowPrice), analysts: raw(fd.numberOfAnalystOpinions), rating: fd.recommendationKey || null } : null,
+    earningsDate: raw(ce.earnings?.earningsDate?.[0]) ? raw(ce.earnings.earningsDate[0]) * 1000 : null,
+    exDividendDate: raw(ce.exDividendDate) ? raw(ce.exDividendDate) * 1000 : raw(sd.exDividendDate) ? raw(sd.exDividendDate) * 1000 : null,
+    ceo: (ap.companyOfficers || []).find(o => /CEO|Chief Executive/i.test(o.title || ''))?.name?.replace(/\s+/g, ' ').replace(/^(Mr|Ms|Mrs|Dr)\.\s*/, '') || null,
+    city: ap.city || null,
+    yearly: (er.financialsChart?.yearly || []).map(y => ({ label: String(y.date), revenue: raw(y.revenue), earnings: raw(y.earnings) })).filter(y => y.revenue != null),
+    quarterly: (er.financialsChart?.quarterly || []).map(y => ({ label: y.date, revenue: raw(y.revenue), earnings: raw(y.earnings) })).filter(y => y.revenue != null),
+    reportCurrency: er.financialCurrency || fd.financialCurrency || null,
+    // Funds: past returns and what's inside.
+    ytd: raw(ks.ytdReturn),
+    return3y: raw(ks.threeYearAverageReturn),
+    return5y: raw(ks.fiveYearAverageReturn),
+    sectors: (th.sectorWeightings || []).map(x => Object.entries(x)[0]).map(([k, v]) => ({ id: k, weight: raw(v) })).filter(x => x.weight > 0.0005).sort((a, b) => b.weight - a.weight),
+    mix: raw(th.stockPosition) != null ? { stock: raw(th.stockPosition), bond: raw(th.bondPosition) || 0, cash: raw(th.cashPosition) || 0, other: raw(th.otherPosition) || 0 } : null
   };
   return out;
 }
 
 export async function fetchFundamentals(symbol) {
-  const modules = 'assetProfile,summaryDetail,defaultKeyStatistics,financialData,fundProfile,topHoldings';
+  const modules = 'assetProfile,summaryDetail,defaultKeyStatistics,financialData,fundProfile,topHoldings,calendarEvents,earnings';
   return parseFundamentals(await getJson(`${YAHOO}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`));
 }
 

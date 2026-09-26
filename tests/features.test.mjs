@@ -24,7 +24,8 @@ test('short selling: proceeds in cash, owed at market, borrowing fee, profit whe
   let a = newAccount(1_000_000, T0, 'acc');
   const q = quote('2330.TW', 2000);
   let v = val(a, T0, [['2330.TW', q]]);
-  const r = placeOrder(a, { side: 'sell', qty: 100 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' });
+  // Limit orders at the price, so the numbers are the fee and the borrowing cost alone.
+  const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 2000, qty: 100 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' });
   assert.equal(r.error, undefined);
   assert.equal(r.order.short, true);
   a = r.account;
@@ -37,7 +38,7 @@ test('short selling: proceeds in cash, owed at market, borrowing fee, profit whe
   // A month later at 1,800: bought back, 3% a year on NT$199,115 for 30 days.
   const later = T0 + 30 * DAY;
   const q2 = quote('2330.TW', 1800, { at: later });
-  const b = placeOrder(a, { side: 'buy', qty: 100 }, { quote: q2, rates: RATES, now: later, id: 'b' });
+  const b = placeOrder(a, { side: 'buy', type: 'limit', limit: 1800, qty: 100 }, { quote: q2, rates: RATES, now: later, id: 'b' });
   s = replay(b.account, later);
   assert.equal(s.positions['2330.TW'], undefined);
   const fee = (199_115 * 0.03 * 30) / 365;
@@ -146,7 +147,7 @@ test('orders placed while the page was closed fill from the price history, at th
 test('net worth history from daily closes', () => {
   let a = newAccount(100_000, T0, 'acc');
   a = exchange(a, { from: 'TWD', to: 'USD', amount: 32_000 }, { rates: RATES, now: T0 + 1, id: 'x' }).account;
-  a = placeOrder(a, { side: 'buy', qty: 100 }, { quote: quote('0050.TW', 100), rates: RATES, now: T0 + 2, id: 'b' }).account;
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 100 }, { quote: quote('0050.TW', 100), rates: RATES, now: T0 + 2, id: 'b' }).account;
   const days = [T0 - DAY, T0 + HOUR, T0 + DAY, T0 + 2 * DAY];
   const closes = { '0050.TW': [100, 110, 120] };
   const series = netWorthSeries(a, days, (sym, t) => closes[sym][Math.round((t - T0) / DAY)] ?? null, (cur, t) => (cur === 'USD' ? 32 + Math.round((t - T0) / DAY) : 1));

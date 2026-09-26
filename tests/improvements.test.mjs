@@ -268,3 +268,70 @@ test('a fill found in the past must have fitted the cash at that moment', async 
   const ok = fillFromHistory({ ...a, events: a.events.filter(e => e.type !== 'fx') }, 'o', { t: at + DAY, price: 950 }, 1, at + 3 * DAY);
   assert.equal(ok.fill.t, at + DAY);
 });
+
+test('sale proceeds settle T+2 in Taiwan: they buy again at once but can’t be exchanged until then', async () => {
+  const { placeOrder, exchange, unsettled } = await import('../public/lib/account.mjs');
+  const fri = Date.parse('2026-09-25T10:00:00+08:00');
+  const q = { symbol: '0050.TW', name: '0050', kind: 'etf', market: 'TW', currency: 'TWD', price: 100, prev: 100, session: { start: fri - 3_600_000, end: fri + 3_600_000 }, marketTime: fri };
+  let a = newAccount(100_000, fri - DAY, 's');
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 900 }, { quote: { ...q, marketTime: fri - DAY + 1, session: { start: fri - DAY, end: fri - DAY + 3_600_000 } }, rates: { TWD: 1 }, now: fri - DAY + 1, id: 'b' }).account;
+  const sold = placeOrder(a, { side: 'sell', type: 'limit', limit: 100, qty: 900 }, { quote: q, rates: { TWD: 1 }, now: fri, id: 's' });
+  a = sold.account;
+  assert.equal(new Date(sold.fill.settle + 8 * 3_600_000).toISOString().slice(0, 10), '2026-09-29');
+  assert.ok(unsettled(a, fri + 1).TWD > 89_000);
+  const rates = { TWD: 1, USD: 32 };
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: fri + 1 }).error, 'unsettled');
+  // What was never invested can go.
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 9000 }, { rates, now: fri + 1 }).error, undefined);
+  // The proceeds buy again right away.
+  assert.equal(placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 800 }, { quote: q, rates: { TWD: 1 }, now: fri + 1, id: 'b2' }).fill.qty, 800);
+  // Settled on Tuesday: free to exchange.
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: Date.parse('2026-09-30T09:00:00+08:00') }).error, undefined);
+});
+
+test('market orders cross the spread, limit orders never fill worse than their price', async () => {
+  const { placeOrder } = await import('../public/lib/account.mjs');
+  const { marketSlip } = await import('../public/lib/markets.mjs');
+  assert.equal(marketSlip('TW', 'stock', 2475), 2.5);
+  assert.ok(Math.abs(marketSlip('US', 'stock', 300) - 0.03) < 1e-12);
+  assert.equal(marketSlip('METAL', 'metal', 4400), 0);
+  const at = Date.parse('2026-09-22T10:00:00+08:00');
+  const q = { symbol: '2330.TW', name: 'TSMC', kind: 'stock', market: 'TW', currency: 'TWD', price: 2475, prev: 2475, session: { start: at - 3_600_000, end: at + 3_600_000 }, marketTime: at };
+  let a = newAccount(10_000_000, at, 'p');
+  const buy = placeOrder(a, { side: 'buy', qty: 1000 }, { quote: q, rates: { TWD: 1 }, now: at, id: 'b' });
+  assert.equal(buy.fill.price, 2477.5);
+  const sell = placeOrder(buy.account, { side: 'sell', qty: 1000 }, { quote: q, rates: { TWD: 1 }, now: at + 1, id: 's' });
+  assert.equal(sell.fill.price, 2472.5);
+  const lim = placeOrder(a, { side: 'buy', type: 'limit', limit: 2480, qty: 1000 }, { quote: q, rates: { TWD: 1 }, now: at, id: 'l' });
+  assert.equal(lim.fill.price, 2475);
+});
+
+test('Taiwan odd lots wait for the 09:10 odd-lot session', async () => {
+  const { triggerPrice, backfillPrice } = await import('../public/lib/account.mjs');
+  const open = Date.parse('2026-09-22T09:01:00+08:00');
+  const q = { symbol: '2330.TW', kind: 'stock', market: 'TW', currency: 'TWD', price: 2475, prev: 2475, session: { start: open - 60_000, end: open + 4 * 3_600_000 }, marketTime: open };
+  const odd = { side: 'buy', type: 'market', qty: 10, market: 'TW', kind: 'stock', t: open - 60_000 };
+  assert.equal(triggerPrice(odd, q, open), null);
+  assert.equal(triggerPrice({ ...odd, qty: 1000 }, q, open), 2475);
+  assert.equal(triggerPrice(odd, { ...q, marketTime: open + 10 * 60_000 }, open + 10 * 60_000), 2475);
+  const bars = [{ t: open, o: 2470, h: 2480, l: 2465, c: 2475 }, { t: open + 9 * 60_000, o: 2490, h: 2495, l: 2485, c: 2490 }];
+  assert.deepEqual(backfillPrice(odd, bars), { t: open + 9 * 60_000, price: 2490 });
+});
+
+test('NT$ cash earns the demand-deposit rate, paid June 21 and December 21', async () => {
+  const { applyCashInterest } = await import('../public/lib/account.mjs');
+  const start = Date.parse('2026-01-01T00:00:00+08:00');
+  const a = newAccount(1_000_000, start, 'i');
+  const r = applyCashInterest(a, Date.parse('2026-12-31T00:00:00+08:00'));
+  assert.deepEqual(r.added.map(e => e.id), ['int:2026-06', 'int:2026-12']);
+  const june = r.added[0];
+  const days = (Date.parse('2026-06-21T00:00:00+08:00') - start) / DAY;
+  assert.equal(june.gross, Math.floor((1_000_000 * 0.008 * days) / 365));
+  assert.equal(june.withheld, 0);
+  assert.equal(applyCashInterest(r.account, Date.parse('2026-12-31T00:00:00+08:00')).added.length, 0);
+  const s = replay(r.account, Date.parse('2026-12-31T00:00:00+08:00'));
+  assert.equal(s.cash.TWD, 1_000_000 + june.net + r.added[1].net);
+  // June's interest earns interest too until December (a few NT$).
+  const extra = r.added[0].gross + r.added[1].gross - Math.floor((1_000_000 * 0.008 * 354) / 365);
+  assert.ok(extra >= 0 && extra < 30);
+});

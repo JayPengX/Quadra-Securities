@@ -157,6 +157,57 @@ export function priceLimits(quote) {
   return { up: toTick(up, tickSize('TW', quote.kind, up), -1), down: toTick(down, tickSize('TW', quote.kind, down), 1) };
 }
 
+// Business days until a trade settles (T+n): Taiwan T+2, the US, Canada,
+// India and mainland China T+1, most others T+2. Crypto, passbook metals and
+// forex here settle at once. Sale proceeds can buy again right away (the
+// broker nets them), but can't leave the market (be exchanged) until settled.
+export const SETTLE_DAYS = { TW: 2, US: 1, CA: 1, IN: 1, CN: 1, JP: 2, HK: 2, KR: 2, UK: 2, FR: 2, DE: 2, NL: 2, IT: 2, ES: 2, CH: 2, DK: 2, AU: 2, SG: 2, BOND: 1, CRYPTO: 0, METAL: 0, FX: 0 };
+export const settleDays = market => SETTLE_DAYS[market] ?? 2;
+// The moment a trade at `t` settles: n weekdays later, at the end of that
+// day in Taiwan (holidays aren't known ahead, so they aren't skipped).
+export function settleDate(market, t) {
+  let n = settleDays(market);
+  if (!n) return t;
+  let d = new Date(t + 8 * 3_600_000);
+  while (n > 0) {
+    d = new Date(d.getTime() + 86_400_000);
+    const w = d.getUTCDay();
+    if (w !== 0 && w !== 6) n--;
+  }
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59) - 8 * 3_600_000;
+}
+
+// Half the bid-ask spread, which a market order pays on top of the last
+// price (buys at the ask, sells at the bid): at least half a tick, and a
+// typical share of the price for each market. Limit orders don't pay it
+// (they fill at their price or better); metals, bonds and forex already
+// trade at the dealer's buy and sell prices (`spread` above).
+const HALF_SPREAD = { US: 0.0001, TW: 0, JP: 0.0005, HK: 0.0005, CN: 0.0005, KR: 0.0005, UK: 0.0005, FR: 0.0005, DE: 0.0005, NL: 0.0005, IT: 0.0005, ES: 0.0005, CH: 0.0005, DK: 0.0005, CA: 0.0005, AU: 0.0005, SG: 0.001, IN: 0.0005, CRYPTO: 0.0002, METAL: 0, BOND: 0, FX: 0 };
+export function marketSlip(market, kind, price) {
+  if (MARKETS[market]?.spread) return 0;
+  const tick = tickSize(market, kind, price) || 0;
+  return Math.max(tick / 2, price * (HALF_SPREAD[market] ?? 0.001));
+}
+// What a market order fills at, from the last price.
+export const marketFill = (market, kind, side, price) => (side === 'buy' ? price + marketSlip(market, kind, price) : Math.max(0, price - marketSlip(market, kind, price)));
+
+// Taiwan's intraday odd-lot session (盤中零股): from 09:10 to 13:30, matched
+// by call auction; an order of fewer than 1,000 shares (or a part that
+// isn't whole lots) can't fill before 09:10.
+export const ODD_LOT_OPEN = { h: 9, m: 10 };
+export function isOddLot(market, kind, qty) {
+  return market === 'TW' && (kind === 'stock' || kind === 'etf' || kind === 'bond') && Math.round(qty) % 1000 !== 0;
+}
+export function oddLotOpen(t) {
+  const d = new Date(t + 8 * 3_600_000);
+  return d.getUTCHours() * 60 + d.getUTCMinutes() >= ODD_LOT_OPEN.h * 60 + ODD_LOT_OPEN.m;
+}
+
+// NT$ cash in the settlement account earns the bank's demand-deposit rate,
+// accrued daily and paid twice a year (June 21 and December 21, as Taiwan's
+// banks do).
+export const CASH_RATE = 0.008;
+
 export const delayOf = market => (MARKETS[market] || MARKETS.INTL).delay ?? 15;
 
 export function marketOf(symbol, kind) {

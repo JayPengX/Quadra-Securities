@@ -41,12 +41,15 @@ test('buying Taiwan stock at market: price, commission, cash and holding', () =>
   const r = placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100 }, { quote: quote('2330.TW', 2475), rates: RATES, now: T0, id: 'o1' });
   assert.equal(r.error, undefined);
   assert.equal(r.order.status, 'filled');
-  assert.equal(r.fill.gross, 247_500);
-  assert.equal(r.fill.commission, 352);
+  // A market order buys at the ask: half a tick (NT$2.5) above the last price.
+  assert.equal(r.fill.price, 2477.5);
+  assert.equal(r.fill.quote, 2475);
+  assert.equal(r.fill.gross, 247_750);
+  assert.equal(r.fill.commission, 353);
   const s = replay(r.account, T0);
-  assert.equal(s.cash.TWD, 1_000_000 - 247_852);
+  assert.equal(s.cash.TWD, 1_000_000 - 248_103);
   assert.equal(s.positions['2330.TW'].qty, 100);
-  assert.equal(s.positions['2330.TW'].cost, 247_852);
+  assert.equal(s.positions['2330.TW'].cost, 248_103);
 });
 
 test('not enough cash, not enough shares, bad quantities', () => {
@@ -83,12 +86,13 @@ test('exchanging NT$ for US$: the spread is the cost, twice as wide while FX is 
 test('buy abroad, sell later: realized profit in NT$ includes the currency move', () => {
   let a = newAccount(1_000_000, T0, 'acc');
   a = exchange(a, { from: 'TWD', to: 'USD', amount: 320_000 }, { rates: RATES, now: T0, id: 'x' }).account;
-  a = placeOrder(a, { side: 'buy', qty: 10 }, { quote: quote('AAPL', 300), rates: RATES, now: T0 + 1, id: 'b' }).account;
+  // Limit orders at the price: no spread, so only the fees and the currency move count.
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 300, qty: 10 }, { quote: quote('AAPL', 300), rates: RATES, now: T0 + 1, id: 'b' }).account;
   let s = replay(a, T0 + 1);
   assert.equal(s.cash.USD, 9980 - 3003);
   const later = T0 + 30 * DAY;
   const rates2 = { ...RATES, USD: 33 };
-  const r = placeOrder(a, { side: 'sell', qty: 10 }, { quote: quote('AAPL', 330, { at: later }), rates: rates2, now: later, id: 's' });
+  const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 330, qty: 10 }, { quote: quote('AAPL', 330, { at: later }), rates: rates2, now: later, id: 's' });
   s = replay(r.account, later);
   assert.equal(s.positions.AAPL, undefined);
   const proceeds = 3300 - 3.3 - 0.09;
@@ -112,7 +116,8 @@ test('orders placed while the market is shut wait, hold their cash and fill at t
   const open = quote('2330.TW', 2500, { at: T0 + DAY });
   const p = processOrders(r.account, new Map([['2330.TW', open]]), RATES, T0 + DAY);
   assert.equal(p.filled.length, 1);
-  assert.equal(p.filled[0].price, 2500);
+  // At the ask: half a tick above the opening price.
+  assert.equal(p.filled[0].price, 2502.5);
   assert.equal(p.account.orders[0].status, 'filled');
   // Cancelled orders free their cash.
   const c = cancelOrder(r.account, 'm', T0 + 5);
@@ -147,7 +152,7 @@ test('a buy that no longer fits the cash when it fills is rejected', () => {
 test('valuation in NT$: holdings, cash, day change, allocation, currency exposure', () => {
   let a = newAccount(1_000_000, T0, 'acc');
   a = exchange(a, { from: 'TWD', to: 'USD', amount: 320_000 }, { rates: RATES, now: T0, id: 'x' }).account;
-  a = placeOrder(a, { side: 'buy', qty: 10 }, { quote: quote('AAPL', 300), rates: RATES, now: T0, id: 'b' }).account;
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 300, qty: 10 }, { quote: quote('AAPL', 300), rates: RATES, now: T0, id: 'b' }).account;
   const quotes = new Map([['AAPL', { ...quote('AAPL', 310, { at: T0 + DAY }), prev: 305, pct: 310 / 305 - 1 }]]);
   const v = valuate(replay(a, T0 + DAY), quotes, RATES);
   assert.equal(v.positions[0].valueTWD, 3100 * 32);
@@ -163,7 +168,7 @@ test('valuation in NT$: holdings, cash, day change, allocation, currency exposur
 
 test('loans: borrowing power from holdings, interest by the day, repaying', () => {
   let a = newAccount(2_000_000, T0, 'acc');
-  a = placeOrder(a, { side: 'buy', qty: 400 }, { quote: quote('2330.TW', 2475), rates: RATES, now: T0, id: 'b' }).account;
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 2475, qty: 400 }, { quote: quote('2330.TW', 2475), rates: RATES, now: T0, id: 'b' }).account;
   const quotes = new Map([['2330.TW', quote('2330.TW', 2475)]]);
   let v = valuate(replay(a, T0), quotes, RATES);
   assert.equal(v.capacity, 990_000 * 0.6);
@@ -221,7 +226,7 @@ test('repayAll exchanges other cash to pay a foreign-currency loan', () => {
 test('dividends while held: split-adjusted amounts, US withholding, NT$ at today’s rate; splits multiply shares', () => {
   let a = newAccount(1_000_000, T0, 'acc');
   a = exchange(a, { from: 'TWD', to: 'USD', amount: 320_000 }, { rates: RATES, now: T0, id: 'x' }).account;
-  a = placeOrder(a, { side: 'buy', qty: 10 }, { quote: quote('NVDA', 900), rates: RATES, now: T0, id: 'b' }).account;
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 900, qty: 10 }, { quote: quote('NVDA', 900), rates: RATES, now: T0, id: 'b' }).account;
   const split = { date: T0 + 10 * DAY, ratio: 10 };
   const actions = {
     splits: [split],
@@ -288,7 +293,7 @@ test('crypto in fractions, gold passbook at the bank’s spread', () => {
   let a = newAccount(1_000_000, T0, 'acc');
   a = exchange(a, { from: 'TWD', to: 'USD', amount: 320_000 }, { rates: RATES, now: T0, id: 'x' }).account;
   const btc = { ...closed(quote('BTC-USD', 80_000)), kind: 'crypto', market: 'CRYPTO' };
-  const r = placeOrder(a, { side: 'buy', qty: 0.05 }, { quote: btc, rates: RATES, now: T0, id: 'c' });
+  const r = placeOrder(a, { side: 'buy', type: 'limit', limit: 80_000, qty: 0.05 }, { quote: btc, rates: RATES, now: T0, id: 'c' });
   assert.equal(r.fill.gross, 4000);
   assert.equal(r.fill.commission, 4);
   const gold = { ...quote('XAU', 4400), kind: 'metal', market: 'METAL', currency: 'TWD' };

@@ -5,12 +5,12 @@ import {
   repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot,
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
-  applyIncome, startIncome, incomeAmount, nextPayday, startAmount, INCOME_RATE,
+  applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
   START_PRESETS, MIN_START, MAX_START, PLAN_MIN, taipeiDay
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
-  SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits
+  SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE
 } from './lib/markets.mjs';
 import { BONDS, ISSUERS } from './lib/bonds.mjs';
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol } from './lib/quotes.mjs';
@@ -400,9 +400,11 @@ async function checkAlertHistory() {
 function checkIncome() {
   if (!state.account) return;
   const r = applyIncome(startIncome(state.account));
-  if (r.account === state.account) return;
-  commit(r.account);
-  if (!r.added.length) return;
+  const i = applyCashInterest(r.account);
+  if (i.account === state.account) return;
+  commit(i.account);
+  for (const e of i.added) toast(t('toastInterest', { amount: money(e.net, BASE) }), 'good');
+  if (!r.added.length) return render();
   const total = r.added.reduce((sum, e) => sum + e.amount, 0);
   toast(r.added.length > 1 ? t('toastPaydays', { n: r.added.length, amount: money(total, BASE) }) : t('toastPayday', { amount: money(total, BASE) }), 'good');
   render();
@@ -1313,7 +1315,10 @@ function ticketInfo() {
   const s = snap();
   const avail = s ? available(state.account, s) : { cash: {}, qty: {} };
   const qty = Number(d.qty);
-  const ref = d.type === 'limit' ? Number(d.limit) : d.type === 'stop' ? Math.max(Number(d.stop), d.side === 'buy' ? q.price : 0) || q.price : q.price;
+  // What it fills at: a limit at its price; a market (or triggered stop)
+  // order at the ask to buy or the bid to sell.
+  const last = d.type === 'stop' ? (d.side === 'buy' ? Math.max(Number(d.stop), q.price) : Number(d.stop)) || q.price : q.price;
+  const ref = d.type === 'limit' ? Number(d.limit) : marketFill(q.market, q.kind, d.side, last);
   const est = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref }) : null;
   const cash = Math.max(0, avail.cash[q.currency] || 0);
   const shares = Math.max(0, avail.qty[d.symbol] || 0);
@@ -1338,7 +1343,7 @@ function ticketInfo() {
     const room = Math.max(0, (v.assets - 1.5 * (v.debtTWD + v.shortTWD)) / 0.5);
     shortRoom = v.margin === 'ok' ? roundQty(room / (q.price * state.rates[q.currency]), q.kind) : 0;
   }
-  return { q, est, cash, shares, max, short, topUp, qty, ref, shortRoom };
+  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom };
 }
 
 function renderTicket() {
@@ -1349,7 +1354,7 @@ function renderTicket() {
     box.innerHTML = `<div class="card ticket"><p>${h(t('needAccount'))}</p><button class="primary-button" type="button" data-action="setup">${h(t('openAccount'))}</button></div>`;
     return;
   }
-  const { q, est, cash, shares, max, short, topUp, qty, shortRoom } = ticketInfo();
+  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom } = ticketInfo();
   const open = isOpen(q);
   const unit = unitOf(d.symbol);
   const presets =
@@ -1417,6 +1422,8 @@ function renderTicket() {
     ${problems.map(p => `<p class="warn">${h(p)}</p>`).join('')}
     ${topUp ? `<button class="ghost-button topup" type="button" data-action="topup" data-need="${topUp.need}" data-cur="${h(q.currency)}">${h(t('topUp', { get: money(topUp.get, q.currency), pay: money(topUp.need, BASE) }))}</button>` : ''}
     ${!open ? `<p class="note">${h(q.kind === 'metal' ? t('closedMetal') : t('closedQueue'))}</p>` : ''}
+    ${qty > 0 && isOddLot(q.market, q.kind, qty) ? `<p class="note">${h(open && !oddLotOpen(Date.now()) ? t('oddLotWait') : t('oddLotNote'))}</p>` : ''}
+    ${d.type !== 'limit' && est ? `<p class="note">${h(t('spreadNote', { price: fmtPrice(ref, q.currency), last: fmtPrice(last, q.currency) }))}</p>` : ''}
     ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
     <button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
@@ -1460,6 +1467,8 @@ function errorText(r) {
       return t('err_capacity', { cap: money(r.capacity, BASE) });
     case 'shortMargin':
       return t('err_shortMargin', { max: fmtQty(r.max) });
+    case 'unsettled':
+      return t('err_unsettled', { have: money(r.have ?? 0, r.currency || BASE) });
     case 'tick':
       return t('err_tick', { tick: num(r.tick, 4, 0) });
     case 'priceLimit':
@@ -1482,6 +1491,7 @@ function renderPortfolio() {
   const incomplete = v.missingRates.length || !state.loaded;
   const open = state.account.orders.filter(o => o.status === 'open');
   const avail = available(state.account, s);
+  const unsettledNow = unsettled(state.account);
   box.innerHTML = `
     <div class="card hero-card">
       <p class="hero-label">${h(t('netWorth'))}${incomplete ? ` <small>${h(t('pricesLoading'))}</small>` : ''}</p>
@@ -1528,7 +1538,7 @@ function renderPortfolio() {
     ${alertsListHtml()}
     <div class="card">
       <h3 class="card-title">${h(t('wallets'))}</h3>
-      <div class="wallets">${v.cash.map(c => walletRow(c, c.amount - (avail.cash[c.currency] ?? c.amount))).join('')}${v.loans.map(loanWalletRow).join('')}</div>
+      <div class="wallets">${v.cash.map(c => walletRow(c, c.amount - (avail.cash[c.currency] ?? c.amount), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
       <p class="note">${h(t('walletsNote'))}</p>
     </div>
     ${syncCardHtml()}
@@ -1589,12 +1599,12 @@ function positionRow(p) {
   </button>`;
 }
 
-function walletRow(c, reserved = 0) {
+function walletRow(c, reserved = 0, settling = 0) {
   const info = currencyInfo(c.currency);
   return `<button class="wallet" type="button" data-action="fx-from" data-cur="${h(c.currency)}">
     <span class="wallet-flag">${info.flag}</span>
     <span class="wallet-main"><strong>${h(c.currency)}</strong><small>${h(L(info))}</small></span>
-    <span class="wallet-amt"><strong class="num">${h(money(c.amount, c.currency))}</strong>${c.currency !== BASE ? `<small class="num">≈ ${h(money(c.twd, BASE))}</small>` : ''}${reserved > 1e-9 ? `<small class="num">${h(t('reserved', { amount: money(reserved, c.currency) }))}</small>` : ''}</span>
+    <span class="wallet-amt"><strong class="num">${h(money(c.amount, c.currency))}</strong>${c.currency !== BASE ? `<small class="num">≈ ${h(money(c.twd, BASE))}</small>` : ''}${reserved > 1e-9 ? `<small class="num">${h(t('reserved', { amount: money(reserved, c.currency) }))}</small>` : ''}${settling > 1e-9 ? `<small class="num">${h(t('settling', { amount: money(settling, c.currency) }))}</small>` : ''}</span>
   </button>`;
 }
 
@@ -1747,7 +1757,9 @@ function renderFx() {
   const avail = s ? available(state.account, s) : { cash: {} };
   const amount = Number(f.amount);
   const q = amount > 0 ? quoteExchange(f.from, f.to, amount, state.rates, state.fxOpen) : null;
-  const have = Math.max(0, avail.cash[f.from] || 0);
+  // Unsettled sale proceeds can't be exchanged yet.
+  const have = s ? Math.max(0, withdrawable(state.account, s)[f.from] || 0) : 0;
+  const waiting = state.account ? unsettled(state.account)[f.from] || 0 : 0;
   const mid = state.rates[f.from] && state.rates[f.to] ? state.rates[f.from] / state.rates[f.to] : null;
   const spread = Math.max(currencyInfo(f.from).spread, currencyInfo(f.to).spread) * (state.fxOpen ? 1 : CLOSED_FX_MULTIPLIER);
   const tooMuch = amount > have + 1e-9;
@@ -1772,6 +1784,7 @@ function renderFx() {
           <div class="preview-total"><dt>${h(t('youGet'))}</dt><dd class="num"><strong>${h(money(q.received, f.to))}</strong></dd></div>` : ''}
         </dl>
         ${tooMuch ? `<p class="warn">${h(t('notEnoughCur', { cur: f.from, have: money(have, f.from) }))}</p>` : ''}
+        ${waiting > 0 ? `<p class="note">${h(t('unsettledNote', { amount: money(waiting, f.from) }))}</p>` : ''}
         <p class="note">${h(state.fxOpen ? t('fxOpenNote') : t('fxClosedNote'))}${usd?.marketTime ? ` ${h(t('asOf', { time: dateTime(usd.marketTime) }))}` : ''}</p>
         ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
         <button class="primary-button" type="button" data-action="fx-go" ${q && q.received > 0 && !tooMuch && f.from !== f.to && pricesLive() ? '' : 'disabled'}>${h(t('doExchange'))}</button>`}
@@ -1899,6 +1912,12 @@ function activityRow(e) {
       sub = [`${fmtQty(e.shares)} × ${fmtPrice(e.perShare, e.currency)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, e.currency)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, e.currency)}` : ''].filter(Boolean).join(' · ');
       amount = `<strong class="num ${e.net < 0 ? '' : 'up-ink'}">${e.net < 0 ? '' : '+'}${h(money(e.net, e.currency))}</strong>`;
       break;
+    case 'interest':
+      icon = '<span class="side-tag div">🏦</span>';
+      title = t('interestRow');
+      sub = [t('interestRate', { rate: pct(e.rate, { sign: false, digits: 2 }) }), e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : ''].filter(Boolean).join(' · ');
+      amount = `<strong class="num up-ink">+${h(money(e.net, BASE))}</strong>`;
+      break;
     case 'split':
       icon = '<span class="side-tag div">✂️</span>';
       title = `${nameOf(e.symbol, q)} ${t('split')} ${num(e.ratio, 4)} : 1`;
@@ -1935,7 +1954,7 @@ const ACTIVITY_FILTERS = {
   all: () => true,
   trades: e => e.type === 'fill',
   fx: e => e.type === 'fx',
-  income: e => e.type === 'div' || e.type === 'split',
+  income: e => e.type === 'div' || e.type === 'split' || e.type === 'interest',
   loans: e => e.type === 'borrow' || e.type === 'repay',
   cash: e => e.type === 'deposit'
 };
@@ -2354,6 +2373,7 @@ function renderGuide() {
     fold('💸', t('g_fees'), `${para('g_fees1')}${feeTable()}${para('g_fees2')}`),
     fold('💱', t('g_fx'), `${para('g_fx1')}${fxTable()}${para('g_fx2')}`),
     fold('💵', t('g_payday'), ['g_payday1', 'g_payday2'].map(para).join('')),
+    fold('🏛️', t('g_real'), ['g_real1', 'g_real2', 'g_real3', 'g_real4', 'g_real5'].map(para).join('')),
     fold('📝', t('g_orders'), ['g_orders1', 'g_orders2', 'g_orders3', 'g_orders4'].map(para).join('')),
     fold('💹', t('g_forex'), ['g_forex1', 'g_forex2', 'g_forex3'].map(para).join('')),
     fold('🕘', t('g_hours'), ['g_hours1', 'g_hours2'].map(para).join('')),
@@ -2758,7 +2778,7 @@ document.addEventListener('click', event => {
       renderFx();
       break;
     case 'fx-max': {
-      const have = Math.max(0, available(state.account, snap()).cash[state.fx.from] || 0);
+      const have = Math.max(0, withdrawable(state.account, snap())[state.fx.from] || 0);
       state.fx.amount = String(have);
       renderFx();
       break;

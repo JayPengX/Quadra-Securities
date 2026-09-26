@@ -21,6 +21,13 @@ import {
   currencyInfo,
   dealPrice,
   divPayDays,
+  settleDate,
+  marketFill,
+  isOddLot,
+  oddLotOpen,
+  CASH_RATE,
+  NHI_RATE,
+  NHI_THRESHOLD,
   onTick,
   priceLimits,
   tickSize,
@@ -76,6 +83,9 @@ const add = (map, key, amount) => (map[key] = (map[key] || 0) + amount);
 // ---- Replay ------------------------------------------------------------------
 
 function accrue(s, t) {
+  // NT$ cash earns the demand-deposit rate.
+  if (t > s.cashLast && (s.cash[BASE] || 0) > 0) s.cashInterest += ((s.cash[BASE] || 0) * CASH_RATE * (t - s.cashLast)) / YEAR_MS;
+  s.cashLast = Math.max(s.cashLast, t);
   for (const p of Object.values(s.positions)) {
     if (p.qty < 0 && t > p.feeLast) p.borrowFee += (-p.cost * SHORT_FEE * (t - p.feeLast)) / YEAR_MS;
     p.feeLast = Math.max(p.feeLast ?? t, t);
@@ -100,6 +110,10 @@ export function replay(account, now = Date.now()) {
     // In NT$ at each event's own rate.
     paid: { commission: 0, tax: 0, fee: 0, fx: 0, withheld: 0, nhi: 0, borrow: 0 },
     dividends: 0,
+    // Bank interest on NT$ cash: accrued so far, and paid out (net).
+    cashInterest: 0,
+    cashLast: account?.created ?? 0,
+    interestEarned: 0,
     realized: 0,
     closed: [],
     held: {},
@@ -128,6 +142,12 @@ export function replay(account, now = Date.now()) {
         if (p) p.qty *= e.ratio;
         break;
       }
+      case 'interest':
+        add(s.cash, e.currency, e.net);
+        s.interestEarned += e.net;
+        s.paid.withheld += e.withheld || 0;
+        s.paid.nhi += e.nhi || 0;
+        break;
       case 'div':
         add(s.cash, e.currency, e.net);
         s.dividends += e.net * e.twd;
@@ -234,6 +254,20 @@ export function available(account, s) {
   return { cash, qty };
 }
 
+// Cash that can leave its market (be exchanged): what's available less sale
+// proceeds that haven't settled yet (T+1, T+2).
+export function unsettled(account, now = Date.now()) {
+  const out = {};
+  for (const e of account.events) if (e.type === 'fill' && e.side === 'sell' && e.settle > now && e.t <= now) add(out, e.currency, e.total);
+  return out;
+}
+export function withdrawable(account, s, now = Date.now()) {
+  const cash = available(account, s).cash;
+  const pending = unsettled(account, now);
+  for (const c of Object.keys(pending)) cash[c] = Math.max(0, Math.min(cash[c] || 0, (cash[c] || 0) - pending[c]));
+  return cash;
+}
+
 // ---- Orders ------------------------------------------------------------------
 
 // What a trade of `qty` at `price` costs or brings in, all in.
@@ -250,6 +284,7 @@ export function estimate({ market, kind, currency, side, qty, price }) {
 // low having reached its price (the page can't watch every tick).
 export function triggerPrice(order, quote, now) {
   if (!quote || !isOpen(quote, now)) return null;
+  if (isOddLot(order.market, order.kind, order.qty) && !oddLotOpen(now)) return null;
   if (quote.kind !== 'crypto' && quote.session && quote.marketTime < quote.session.start) return null;
   const p = quote.price;
   const early = quote.session && order.t < quote.session.start;
@@ -338,7 +373,8 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     // The most it can cost: a limit order at its limit, a stop order at its
     // stop or the price, a market order at the price (plus a margin while it
     // waits for the market to open).
-    const ref = type === 'limit' ? order.limit : type === 'stop' ? Math.max(order.stop, quote.price) : quote.price;
+    const last = type === 'stop' ? Math.max(order.stop, quote.price) : quote.price;
+    const ref = type === 'limit' ? order.limit : marketFill(quote.market, quote.kind, 'buy', last);
     const est = estimate({ ...quote, side, qty, price: ref });
     const fillsNow = triggerPrice(order, quote, now) !== null;
     const reserve = roundCash(fillsNow || type === 'limit' ? est.total : est.total * (1 + RESERVE_BUFFER), quote.currency);
@@ -360,6 +396,11 @@ function updateOrder(account, order) {
 // Fills `order` at `price`. The fill is dated `at` (a past moment when it's
 // found in the price history); cash and shares are checked as of `now`.
 function fillOrder(account, order, price, rates, now, at = now) {
+  // A market (or triggered stop) order crosses the spread: it buys at the
+  // ask and sells at the bid. A limit order fills at its price or better.
+  const quote = price;
+  if (order.type !== 'limit') price = marketFill(order.market, order.kind, order.side, price);
+  else price = order.side === 'buy' ? Math.min(price, order.limit) : Math.max(price, order.limit);
   const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price });
   // A fill found in the past must have fitted the cash (or shares) at that
   // moment and still fit today's.
@@ -391,7 +432,8 @@ function fillOrder(account, order, price, rates, now, at = now) {
     side: order.side,
     qty: order.qty,
     price: est.price,
-    quote: price,
+    quote,
+    settle: settleDate(order.market, at),
     gross: est.gross,
     commission: est.commission,
     tax: est.tax,
@@ -434,8 +476,10 @@ export function processOrders(account, quotes, rates, now = Date.now()) {
 // [{ t, o, h, l, c }], oldest first). A gap through the price fills at the
 // bar's open, like a real order.
 export function backfillPrice(order, bars) {
+  const odd = isOddLot(order.market, order.kind, order.qty);
   for (const b of bars) {
     if (b.t < order.t || !Number.isFinite(b.o)) continue;
+    if (odd && !oddLotOpen(b.t)) continue;
     const buy = order.side === 'buy';
     if (order.type === 'market') return { t: b.t, price: b.o };
     if (order.type === 'limit') {
@@ -490,8 +534,11 @@ export function exchange(account, { from, to, amount }, { rates, fxOpen = true, 
   const q = quoteExchange(from, to, amount, rates, fxOpen);
   if (!q) return { error: 'fx' };
   if (!(q.received > 0)) return { error: 'tooSmall' };
-  const avail = available(account, replay(account, now));
-  if ((avail.cash[from] || 0) + EPS < amount) return { error: 'funds', need: amount, have: Math.max(0, avail.cash[from] || 0), currency: from };
+  const free = withdrawable(account, replay(account, now), now);
+  if ((free[from] || 0) + EPS < amount) {
+    const pending = unsettled(account, now)[from] || 0;
+    return { error: pending > EPS ? 'unsettled' : 'funds', need: amount, have: Math.max(0, free[from] || 0), currency: from };
+  }
   const event = {
     id: `fx:${id}`,
     type: 'fx',
@@ -1067,15 +1114,17 @@ export function runPlan(account, plan, run, { price, twd, at = run.t, quote }, n
     if (!fx?.received) return reject('tooSmall');
     budget = fx.received;
   }
-  let qty = roundQty(budget / price, meta.kind);
-  const first = qty > 0 ? estimate({ ...meta, side: 'buy', qty, price }).total : 0;
+  // Sized at the ask it will actually pay.
+  const ask = marketFill(meta.market, meta.kind, 'buy', price);
+  let qty = roundQty(budget / ask, meta.kind);
+  const first = qty > 0 ? estimate({ ...meta, side: 'buy', qty, price: ask }).total : 0;
   if (first > budget) qty = roundQty((qty * budget) / first, meta.kind);
-  while (qty > 0 && estimate({ ...meta, side: 'buy', qty, price }).total > budget + EPS) qty = roundQty(qty - (qtyStep(meta.kind) >= 1 ? 1 : qty * 0.001), meta.kind);
+  while (qty > 0 && estimate({ ...meta, side: 'buy', qty, price: ask }).total > budget + EPS) qty = roundQty(qty - (qtyStep(meta.kind) >= 1 ? 1 : qty * 0.001), meta.kind);
   if (!(qty > 0)) return reject('tooSmall');
   let next = account;
   if (fx) {
     // Only what the units need is exchanged: the rest stays in NT$.
-    const cost = estimate({ ...meta, side: 'buy', qty, price }).total;
+    const cost = estimate({ ...meta, side: 'buy', qty, price: ask }).total;
     const need = amountFor(BASE, meta.currency, cost, rates, true);
     const r = exchange(next, { from: BASE, to: meta.currency, amount: Math.min(plan.amount, need) }, { rates, fxOpen: true, now: at, id: `plan:${plan.id}:${run.month}` });
     if (r.error) return reject(r.error === 'funds' ? 'funds' : 'tooSmall');
@@ -1138,6 +1187,42 @@ export function markAlertHit(account, id, { t, price }, now = Date.now()) {
   const a = account.alerts?.[id];
   if (!a?.on) return account;
   return { ...account, alerts: { ...account.alerts, [id]: { ...a, on: false, t: now, hit: { t, price } } } };
+}
+
+// ---- Bank interest on NT$ cash ------------------------------------------------------
+
+// Pay days: June 21 and December 21, 00:00 Taiwan time.
+function interestDays(from, to) {
+  const out = [];
+  for (let y = new Date(from + 8 * 3_600_000).getUTCFullYear(); y <= new Date(to + 8 * 3_600_000).getUTCFullYear(); y++)
+    for (const m of [6, 12]) {
+      const t = Date.UTC(y, m - 1, 21) - 8 * 3_600_000;
+      if (t > from && t <= to) out.push(t);
+    }
+  return out;
+}
+
+// Interest earned on NT$ cash since the last payment, paid on each pay day
+// up to `now`. A payment of NT$20,000 or more has 10% tax withheld and the
+// 2.11% NHI premium taken, as a Taiwan bank would.
+export function applyCashInterest(account, now = Date.now()) {
+  const have = new Set(account.events.filter(e => e.type === 'interest').map(e => e.id));
+  let next = account;
+  const added = [];
+  for (const t of interestDays(account.created, now)) {
+    const id = `int:${taipeiDay(t).slice(0, 7)}`;
+    if (have.has(id)) continue;
+    const s = replay(next, t);
+    const paid = next.events.filter(e => e.type === 'interest' && e.t < t).reduce((sum, e) => sum + e.gross, 0);
+    const gross = Math.floor(s.cashInterest - paid);
+    if (gross < 1) continue;
+    const withheld = gross >= NHI_THRESHOLD ? Math.floor(gross * 0.1) : 0;
+    const nhi = gross >= NHI_THRESHOLD ? Math.floor(gross * NHI_RATE) : 0;
+    const event = { id, type: 'interest', t, currency: BASE, gross, withheld, nhi, net: gross - withheld - nhi, rate: CASH_RATE };
+    next = { ...next, events: [...next.events, event] };
+    added.push(event);
+  }
+  return { account: next, added };
 }
 
 // ---- Payday: new money every month ---------------------------------------------

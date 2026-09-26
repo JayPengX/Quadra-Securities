@@ -155,6 +155,10 @@ Two devices' copies merge by uniting their logs:
 - **Dividends are paid on the market's pay day:** holding on the ex-date earns it; the cash arrives about 4 weeks later in Taiwan, 1 week in the US, 2–3 months in Japan, within days in much of Europe (`DIV_PAY_DAYS`). Until then it's listed as on the way and counted in net worth as a receivable (the price already dropped by it), but can't be spent.
 - **Forced sales while away:** with a loan or a short, the price history since the last visit is walked (every price bar) and, where the account fell below the liquidation line, shorts are bought back and holdings sold at that moment's price, dated then, and the loans repaid; whatever the sale didn't cover is still owed.
 - **Fills found in the past** must have fitted the cash and shares at that moment, and still fit today's.
+- **The spread:** market and triggered stop orders buy at the ask and sell at the bid: half a tick at least, or a typical half-spread per market (US 0.01%, Europe and Asia 0.05%, crypto 0.02%). Limit orders fill only at their price or better. Monthly plans size their buy at the ask.
+- **Settlement:** every fill records when it settles (Taiwan T+2, US, Canada, India and China T+1, most others T+2, weekdays only). Sale money can buy again at once in its market, but can't be exchanged into another currency until it settles; wallets show what's still settling.
+- **Taiwan odd lots** (not whole lots of 1,000) match only from 09:10, in the intraday odd-lot session, live and in history.
+- **Interest on idle NT$:** the settlement account earns the bank's demand-deposit rate (0.8% a year, `CASH_RATE`), accrued daily and paid June 21 and December 21, with 10% tax and the 2.11% NHI premium on a payment of NT$20,000 or more.
 - **The ledger is read as of a moment:** `replay(account, t)` ignores anything dated after `t`.
 - **Data safety:** an account with no sync code, not installed to the home screen, gets a reminder that Safari can clear site data after 7 days unopened.
 

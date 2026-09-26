@@ -466,6 +466,7 @@ footer { padding: 10px 0 0; text-align: center; }
 body[data-updown='us'] .hero-card .up { color: #bbf7d0; }
 body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .hero-split { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.8rem; opacity: 0.9; }
+.hero-payday { margin: 0; font-size: 0.82rem; opacity: 0.92; }
 .hero-actions { margin-top: 2px; }
 .hero-button { border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.12); color: #fff; border-radius: 999px; padding: 7px 14px; font-weight: 600; font-size: 0.85rem; }
 @media (hover: hover) { .hero-button:hover { background: rgba(255, 255, 255, 0.22); } }

@@ -1,10 +1,11 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, deposit, valuate, borrow, repay,
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay,
   repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot,
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit,
+  applyIncome, startIncome, incomeAmount, nextPayday, startAmount, INCOME_RATE,
   START_PRESETS, MIN_START, MAX_START, PLAN_MIN, taipeiDay
 } from './lib/account.mjs';
 import {
@@ -392,6 +393,19 @@ async function checkAlertHistory() {
       alertFired(state.account.alerts[a.id], { late: true });
     } catch {}
   }
+}
+
+// ---- Payday: new money on the 1st of every month -------------------------------------
+
+function checkIncome() {
+  if (!state.account) return;
+  const r = applyIncome(startIncome(state.account));
+  if (r.account === state.account) return;
+  commit(r.account);
+  if (!r.added.length) return;
+  const total = r.added.reduce((sum, e) => sum + e.amount, 0);
+  toast(r.added.length > 1 ? t('toastPaydays', { n: r.added.length, amount: money(total, BASE) }) : t('toastPayday', { amount: money(total, BASE) }), 'good');
+  render();
 }
 
 // ---- Monthly plans (定期定額) ----------------------------------------------------
@@ -1277,10 +1291,10 @@ function renderPortfolio() {
         ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
         ${v.debtTWD > 0 ? `<span>${h(t('loans'))} <strong class="num">−${h(money(v.debtTWD, BASE))}</strong></span>` : ''}
       </div>
+      <p class="hero-payday">💵 ${h(t('nextPayday', { amount: money(incomeAmount(startAmount(state.account)), BASE), date: fmtDate(nextPayday(Date.now())) }))}</p>
       <div class="button-row hero-actions">
         <button class="hero-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button>
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
-        <button class="hero-button" type="button" data-action="deposit">${h(t('addMoney'))}</button>
       </div>
     </div>
     ${marginCardHtml(v)}
@@ -1675,7 +1689,7 @@ function activityRow(e) {
       break;
     case 'deposit':
       icon = '<span class="side-tag div">🏦</span>';
-      title = e.id === 'deposit:start' ? t('openedWith') : t('deposited');
+      title = e.id === 'deposit:start' ? t('openedWith') : e.income ? t('payday') : t('deposited');
       sub = '';
       amount = `<strong class="num">+${h(money(e.amount, e.currency))}</strong>`;
       break;
@@ -2122,6 +2136,7 @@ function renderGuide() {
     fold('🚀', t('g_start'), ['g_start1', 'g_start2', 'g_start3', 'g_start4'].map(para).join('')),
     fold('💸', t('g_fees'), `${para('g_fees1')}${feeTable()}${para('g_fees2')}`),
     fold('💱', t('g_fx'), `${para('g_fx1')}${fxTable()}${para('g_fx2')}`),
+    fold('💵', t('g_payday'), ['g_payday1', 'g_payday2'].map(para).join('')),
     fold('📝', t('g_orders'), ['g_orders1', 'g_orders2', 'g_orders3', 'g_orders4'].map(para).join('')),
     fold('💹', t('g_forex'), ['g_forex1', 'g_forex2', 'g_forex3'].map(para).join('')),
     fold('🕘', t('g_hours'), ['g_hours1', 'g_hours2'].map(para).join('')),
@@ -2176,7 +2191,8 @@ function setupCardHtml() {
   return `<div class="card setup-card">
     <h3 class="card-title">${h(t('setupTitle'))}</h3>
     <p class="lede">${h(t('setupIntro'))}</p>
-    <div class="presets">${START_PRESETS.map(x => `<button class="preset" type="button" data-action="start" data-amount="${x}"><strong class="num">${h(money(x, BASE))}</strong><small>${h(compact(x))}</small></button>`).join('')}</div>
+    <div class="presets">${START_PRESETS.map(x => `<button class="preset" type="button" data-action="start" data-amount="${x}"><strong class="num">${h(money(x, BASE))}</strong><small>${h(t('paydayPreset', { amount: money(incomeAmount(x), BASE) }))}</small></button>`).join('')}</div>
+    <p class="note">💵 ${h(t('paydaySetup', { rate: pct(INCOME_RATE, { sign: false, digits: 0 }) }))}</p>
     <form class="custom-start" data-form="start">
       <label class="field grow"><span>${h(t('customAmount'))}</span><input id="start-amount" inputmode="numeric" autocomplete="off" placeholder="${h(num(2_000_000))}" /></label>
       <button class="primary-button" type="submit">${h(t('openAccount'))}</button>
@@ -2206,16 +2222,6 @@ function openAccount(amount) {
 function showSetup() {
   $('setup-body').innerHTML = `<button class="icon-button sheet-close" type="button" data-action="close-setup" aria-label="${h(t('close'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>${setupCardHtml()}`;
   if (!$('setup').open) $('setup').showModal();
-}
-
-function askDeposit() {
-  const text = prompt(t('depositPrompt'), '100000');
-  if (text == null) return;
-  const r = deposit(state.account, Number(String(text).replace(/[,\s]/g, '')));
-  if (r.error) return toast(t('err_amount'), 'bad');
-  commit(r.account);
-  toast(t('depositDone', { amount: money(r.event.amount, BASE) }), 'good');
-  render();
 }
 
 function resetAccount() {
@@ -2581,9 +2587,6 @@ document.addEventListener('click', event => {
     case 'close-setup':
       $('setup').close();
       break;
-    case 'deposit':
-      askDeposit();
-      break;
     case 'reset':
       resetAccount();
       break;
@@ -2860,6 +2863,7 @@ loadAccount().then(account => {
   state.accountReady = true;
   // Saved prices: the page is usable at once (and offline).
   if (state.fromCache) $('loading').hidden = true;
+  checkIncome();
   if (!account && !state.sync.code) showSetup();
   render();
   backfillOrders()
@@ -2888,7 +2892,9 @@ setInterval(() => {
 }, QUOTE_REFRESH_MS);
 // Monthly plans due today wait for their market's first price.
 setInterval(() => {
-  if (document.visibilityState === 'visible') checkPlans();
+  if (document.visibilityState !== 'visible') return;
+  checkIncome();
+  checkPlans();
 }, 10 * 60_000);
 
 // ---- Offline and installable ----------------------------------------------------------
@@ -2924,6 +2930,7 @@ document.addEventListener('visibilitychange', () => {
     .catch(() => {})
     .finally(() => {
       state.backfilled = true;
+      checkIncome();
       refresh().then(() => {
         checkBonds();
         checkPlans();

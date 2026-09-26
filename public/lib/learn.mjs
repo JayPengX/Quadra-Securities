@@ -367,13 +367,13 @@ export const LESSONS = [
     body: {
       zh: [
         '這只是練習用的例子，不是投資建議：把模擬的錢分成幾份，例如 50% 買 0050（台灣）、20% 換美元買 VT（全世界）、20% 債券（公債或 00679B）、10% 留現金。',
-        '然後先放 3 個月，不要一直看、一直換。期間可以每月再「加碼入金」模擬定期定額。',
+        '然後先放 3 個月，不要一直看、一直換。每月 1 日會自動入金，設一個定期定額把它自動投進去。',
         '3 個月後打開「紀錄 → 統計分析」：看看成本付了多少、跟無腦買 0050 比起來怎麼樣，再決定要不要調整。',
         '想學短線或槓桿？可以另外開一個帳戶（說明 → 設定 → 清空帳戶）做實驗，比較兩個的結果。'
       ],
       en: [
         'A practice example only, not investment advice: split the play money, say 50% in 0050 (Taiwan), 20% into US$ for VT (the whole world), 20% in bonds (a government bond or 00679B) and 10% cash.',
-        'Then leave it three months: don’t keep checking and switching. Add money monthly to mimic a savings plan if you like.',
+        'Then leave it three months: don’t keep checking and switching. New money arrives on the 1st of every month; set up a monthly plan to invest it automatically.',
         'After three months, open History → Stats: see what it cost you and how it did against just buying 0050, then decide whether to change anything.',
         'Curious about short-term trading or leverage? Start a separate experiment later (Guide → Settings → Clear account) and compare.'
       ]

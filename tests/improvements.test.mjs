@@ -154,3 +154,28 @@ test('currency pairs trade in their second currency, long or short, for a spread
   assert.equal(short.order.short, true);
   assert.equal(replay(short.account, at + 1).positions['EURUSD=X'].qty, -10_000);
 });
+
+test('new money arrives on the 1st of every month, 3% of the start, once each', async () => {
+  const { incomeAmount, applyIncome, nextPayday, startIncome } = await import('../public/lib/account.mjs');
+  assert.equal(incomeAmount(1_000_000), 30_000);
+  assert.equal(incomeAmount(100_000), 3000);
+  assert.equal(incomeAmount(10_000), 300);
+  assert.equal(incomeAmount(1234), 37);
+  const created = Date.parse('2026-09-10T15:00:00+08:00');
+  assert.equal(nextPayday(created), Date.parse('2026-10-01T00:00:00+08:00'));
+  const a = newAccount(1_000_000, created, 'inc');
+  assert.equal(applyIncome(a, created + DAY).added.length, 0);
+  const r = applyIncome(a, Date.parse('2026-12-15T09:00:00+08:00'));
+  assert.deepEqual(r.added.map(e => [e.id, e.amount]), [['pay:2026-10', 30_000], ['pay:2026-11', 30_000], ['pay:2026-12', 30_000]]);
+  assert.equal(applyIncome(r.account, Date.parse('2026-12-15T09:00:00+08:00')).added.length, 0);
+  assert.equal(replay(r.account).deposits, 1_090_000);
+  // Two devices catching up separately don't pay twice.
+  const phone = applyIncome(a, Date.parse('2026-11-02T00:00:00+08:00')).account;
+  const laptop = applyIncome(a, Date.parse('2027-01-02T00:00:00+08:00')).account;
+  assert.equal(mergeAccounts(phone, laptop).events.filter(e => e.income).length, 4);
+  // An account from before paydays starts getting them from now on.
+  const old = { ...a, income: undefined };
+  assert.equal(applyIncome(old, Date.parse('2027-01-02T00:00:00+08:00')).added.length, 0);
+  const now = Date.parse('2026-12-20T00:00:00+08:00');
+  assert.deepEqual(applyIncome(startIncome(old, now), Date.parse('2027-01-02T00:00:00+08:00')).added.map(e => e.id), ['pay:2027-01']);
+});

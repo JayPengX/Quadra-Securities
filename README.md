@@ -65,7 +65,8 @@ Currency pairs trade like stocks (market, limit and stop orders, shorting, alert
 - Allocation by kind, currency or market.
 - Positions (value, P/L, today, weight), open orders, and a wallet for every currency (cash held for open orders shown). Loans show here too, and the maintenance ratio when there are any.
 - Monthly plans (next buy, last result, stop) and price alerts (distance from the price, remove).
-- Add money (tracked as money put in, not as return), sync and backups.
+- **Monthly payday** (no manual adding): on the 1st of every month (00:00 Taiwan time) 3% of the starting amount arrives on its own, like a salary: NT$1,000,000 → NT$30,000 a month, NT$100,000 → NT$3,000. It counts as money put in, not as return. Missed months are paid when the page opens again; each payday has a fixed id (`pay:YYYY-MM`), so synced devices never pay twice. Accounts opened before paydays existed get them from their next 1st. The next payday shows under net worth.
+- Sync and backups.
 
 ### 換匯・融資 FX & loans
 

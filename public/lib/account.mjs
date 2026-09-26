@@ -61,7 +61,8 @@ export function newAccount(start, now = Date.now(), id = randomId()) {
     events: [{ id: 'deposit:start', type: 'deposit', t: now, currency: BASE, amount }],
     orders: [],
     snapshots: {},
-    watch: {}
+    watch: {},
+    income: { since: now }
   };
 }
 
@@ -895,6 +896,8 @@ export function mergeAccounts(a, b) {
     watch: latest(a.watch, b.watch)
   };
   if (a.plans || b.plans) merged.plans = latest(a.plans, b.plans);
+  // Paydays began at the earlier of the two.
+  if (a.income || b.income) merged.income = { since: Math.min(a.income?.since ?? Infinity, b.income?.since ?? Infinity) };
   if (a.alerts || b.alerts) merged.alerts = latest(a.alerts, b.alerts);
   return merged;
 }
@@ -1070,3 +1073,48 @@ export function markAlertHit(account, id, { t, price }, now = Date.now()) {
   if (!a?.on) return account;
   return { ...account, alerts: { ...account.alerts, [id]: { ...a, on: false, t: now, hit: { t, price } } } };
 }
+
+// ---- Payday: new money every month ---------------------------------------------
+//
+// No adding money by hand: like a salary, new NT$ arrives on its own on the
+// 1st of every month (00:00 Taiwan time), and the amount follows the
+// starting amount (3% of it), so a big account and a small one save at the
+// same pace. Each payday is a deposit with a fixed id (pay:YYYY-MM), paid
+// once however many devices catch up on it. `income.since`: when paydays
+// began (the account's opening, or when an older account first got them).
+
+export const INCOME_RATE = 0.03;
+const TPE = 8 * 3_600_000;
+
+export const startAmount = account => account?.events.find(e => e.id === 'deposit:start')?.amount || 0;
+
+// NT$ a month: to the NT$10 (NT$1 below NT$100).
+export function incomeAmount(start) {
+  const x = start * INCOME_RATE;
+  return x >= 100 ? Math.round(x / 10) * 10 : Math.max(1, Math.round(x));
+}
+
+// The first payday after `t`: the next 1st, 00:00 Taiwan time.
+export function nextPayday(t) {
+  const d = new Date(t + TPE);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - TPE;
+}
+
+// Paydays due up to `now` and not yet paid, added as deposits.
+export function applyIncome(account, now = Date.now()) {
+  const since = account?.income?.since;
+  if (since == null) return { account, added: [] };
+  const have = new Set(account.events.filter(e => e.income).map(e => e.id));
+  const amount = incomeAmount(startAmount(account));
+  const added = [];
+  for (let t = nextPayday(Math.max(since, account.created)), n = 0; t <= now && n < 1200; t = nextPayday(t), n++) {
+    const id = `pay:${taipeiDay(t).slice(0, 7)}`;
+    if (have.has(id) || amount <= 0) continue;
+    added.push({ id, type: 'deposit', income: true, t, currency: BASE, amount });
+  }
+  if (!added.length) return { account, added };
+  return { account: { ...account, events: [...account.events, ...added] }, added };
+}
+
+// Paydays from now on for an account opened before they existed.
+export const startIncome = (account, now = Date.now()) => (account.income ? account : { ...account, income: { since: now } });

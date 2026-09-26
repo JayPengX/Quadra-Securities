@@ -4,13 +4,13 @@ import {
   newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay,
   repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot,
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
-  alertsFor, checkAlerts, alertHitInBars, markAlertHit,
+  alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, incomeAmount, nextPayday, startAmount, INCOME_RATE,
   START_PRESETS, MIN_START, MAX_START, PLAN_MIN, taipeiDay
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
-  SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf
+  SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits
 } from './lib/markets.mjs';
 import { BONDS, ISSUERS } from './lib/bonds.mjs';
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol } from './lib/quotes.mjs';
@@ -495,6 +495,42 @@ async function backfillOrders() {
   if (state.account?.orders.some(o => o.forced && o.status === 'filled')) commit(repayAll(state.account, state.rates, state.fxOpen, Date.now()));
 }
 
+// A loan or short that broke the liquidation line while the page was closed
+// is sold at that moment, from the price history since the last visit.
+async function checkMarginHistory() {
+  const account = state.account;
+  if (!account) return;
+  const s = replay(account);
+  const owes = Object.values(s.loans).some(l => l.balance > 1e-9) || Object.values(s.positions).some(p => p.qty < 0);
+  if (!owes) return;
+  const seen = Math.max(account.created, ...Object.values(account.snapshots || {}).map(x => x.t), ...account.events.map(e => (e.t <= Date.now() ? e.t : 0)));
+  if (Date.now() - seen < 30 * 60_000) return;
+  const symbols = Object.keys(s.positions).filter(sym => !BONDS[sym]);
+  const currencies = [...new Set([...Object.values(s.positions).map(p => p.currency), ...Object.keys(s.loans), ...Object.keys(s.cash)])].filter(c => c !== BASE);
+  try {
+    const [bars, fx] = await Promise.all([
+      Promise.all(symbols.map(sym => fetchBars(sym, seen).catch(() => []))),
+      Promise.all(currencies.map(c => fetchBars(fxSymbol(c), seen - 5 * 86_400_000).catch(() => [])))
+    ]);
+    const series = new Map(symbols.map((sym, i) => [sym, bars[i]]));
+    const rates = new Map(currencies.map((c, i) => [c, fx[i]]));
+    const last = (list, t) => {
+      let v = null;
+      for (const b of list || []) {
+        if (b.t > t) break;
+        v = b.c;
+      }
+      return v;
+    };
+    const times = [...new Set(bars.flat().map(b => b.t))].filter(t => t > seen && t < Date.now()).sort((a, b) => a - b);
+    const r = marginHistory(state.account, { times, priceAt: (sym, t) => last(series.get(sym), t), rateAt: (c, t) => last(rates.get(c), t) ?? state.rates[c] });
+    if (!r.forced.length) return;
+    commit(r.account);
+    for (const f of r.forced) toast(t('toastForcedAt', { name: nameOf(f.symbol), qty: fmtQty(f.qty), price: fmtPrice(f.price, f.currency), time: dateTime(f.t) }), 'bad');
+    render();
+  } catch {}
+}
+
 // Dividends and splits of everything held since the account opened, checked
 // twice a day per symbol.
 async function checkCorporateActions() {
@@ -524,7 +560,8 @@ async function checkCorporateActions() {
     localStorage.setItem(STORE.actions, JSON.stringify(checked));
   } catch {}
   for (const e of credited) {
-    if (e.type === 'div') toast(t('toastDividend', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), 'good');
+    if (e.type === 'div' && e.t > Date.now()) toast(t('toastDividendPending', { name: nameOf(e.symbol), amount: money(e.net, e.currency), date: fmtDate(e.t) }), 'good');
+    else if (e.type === 'div') toast(t('toastDividend', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), 'good');
     else toast(t('toastSplit', { name: nameOf(e.symbol), ratio: num(e.ratio, 4) }), 'good');
   }
   if (credited.length) render();
@@ -1343,6 +1380,14 @@ function renderTicket() {
   else if (shorting && qty > shares + shortRoom + 1e-9) problems.push(t('shortTooBig', { max: fmtQty(shares + shortRoom) }));
   if (short > 0) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));
   if (d.qty && Math.abs(roundQty(qty, q.kind) - qty) > qtyStep(q.kind) * 1e-3) problems.push(t('err_qtyStep'));
+  // The exchange's rules for the price typed.
+  const typed = d.type === 'limit' ? Number(d.limit) : d.type === 'stop' ? Number(d.stop) : null;
+  const band = priceLimits(q);
+  if (typed > 0) {
+    const tick = tickSize(q.market, q.kind, typed);
+    if (!onTick(typed, tick)) problems.push(t('err_tick', { tick: num(tick, 4, 0) }));
+    else if (band && d.type === 'limit' && (typed > band.up + 1e-9 || typed < band.down - 1e-9)) problems.push(t('err_priceLimit', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }));
+  }
   const canPlace = est && !problems.length;
   const rate = state.rates[q.currency];
   box.innerHTML = `<div class="card ticket">
@@ -1360,6 +1405,7 @@ function renderTicket() {
       ${d.type === 'stop' ? `<label class="field"><span>${h(t('stopPrice'))} (${h(q.currency)})</span><input id="t-stop" inputmode="decimal" autocomplete="off" value="${h(d.stop)}" /></label>` : ''}
     </div>
     <div class="qty-presets">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}">${h(label)}${label === t('max') || label === t('all') ? ` <small>${h(fmtQty(v))}</small>` : ''}</button>`).join('')}</div>
+    ${d.type !== 'market' && (band || tickSize(q.market, q.kind, q.price)) ? `<p class="muted">${h([band ? t('limitBand', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }) : '', tickSize(q.market, q.kind, q.price) ? t('tickIs', { tick: num(tickSize(q.market, q.kind, q.price), 4, 0) }) : ''].filter(Boolean).join(' · '))}</p>` : ''}
     <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' ? ` · ${h(t('lotNote'))}` : ''}</p>
     ${
       est
@@ -1414,6 +1460,10 @@ function errorText(r) {
       return t('err_capacity', { cap: money(r.capacity, BASE) });
     case 'shortMargin':
       return t('err_shortMargin', { max: fmtQty(r.max) });
+    case 'tick':
+      return t('err_tick', { tick: num(r.tick, 4, 0) });
+    case 'priceLimit':
+      return t('err_priceLimit', { down: fmtPrice(r.down, 'TWD'), up: fmtPrice(r.up, 'TWD') });
     default:
       return t(`err_${r.error}`);
   }
@@ -1444,6 +1494,7 @@ function renderPortfolio() {
       <div class="hero-split">
         <span>${h(t('cash'))} <strong class="num">${h(money(v.cashTWD, BASE))}</strong></span>
         <span>${h(t('holdings'))} <strong class="num">${h(money(v.longTWD, BASE))}</strong></span>
+        ${v.receivable > 0 ? `<span>${h(t('pendingDivTitle'))} <strong class="num">${h(money(v.receivable, BASE))}</strong></span>` : ''}
         ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
         ${v.debtTWD > 0 ? `<span>${h(t('loans'))} <strong class="num">−${h(money(v.debtTWD, BASE))}</strong></span>` : ''}
       </div>
@@ -1453,6 +1504,7 @@ function renderPortfolio() {
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
       </div>
     </div>
+    ${!state.sync.code && !standalone() && Date.now() - state.account.created > 2 * 86_400_000 ? `<div class="card safety-card"><p>🛟 ${h(t('safetyNote'))}</p><button class="ghost-button" type="button" data-action="sync-create">${h(t('syncCreate'))}</button></div>` : ''}
     ${marginCardHtml(v)}
     <div class="two-col">
       <div class="card">
@@ -1471,6 +1523,7 @@ function renderPortfolio() {
       ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><button class="ghost-button" type="button" data-action="goto" data-tab="guide">${h(t('newHere'))}</button></div></div>`}
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
+    ${pendingDivHtml()}
     ${plansListHtml()}
     ${alertsListHtml()}
     <div class="card">
@@ -1481,6 +1534,14 @@ function renderPortfolio() {
     ${syncCardHtml()}
   `;
   renderNetWorthChart(v, s);
+}
+
+function pendingDivHtml() {
+  const list = pendingDividends(state.account);
+  if (!list.length) return '';
+  return `<div class="card"><h3 class="card-title">💰 ${h(t('pendingDivTitle'))} <span class="count">${list.length}</span></h3>${list
+    .map(e => `<div class="order-row"><span class="side-tag div">💰</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(e.symbol)}">${h(nameOf(e.symbol))}</button></span><span class="row-sub">${h(t('pendingDivLine', { ex: fmtDate(e.ex), pay: fmtDate(e.t), qty: fmtQty(e.shares) }))}</span></span><strong class="num up-ink">+${h(money(e.net, e.currency))}</strong></div>`)
+    .join('')}<p class="note">${h(t('pendingDivNote'))}</p></div>`;
 }
 
 function plansListHtml() {
@@ -1834,7 +1895,7 @@ function activityRow(e) {
       break;
     case 'div':
       icon = '<span class="side-tag div">💰</span>';
-      title = `${nameOf(e.symbol, q)} ${e.coupon ? t('couponPaid') : t('dividend')}`;
+      title = `${nameOf(e.symbol, q)} ${e.coupon ? t('couponPaid') : t('dividend')}${e.t > Date.now() ? ` · ${t('pendingTag')}` : ''}`;
       sub = [`${fmtQty(e.shares)} × ${fmtPrice(e.perShare, e.currency)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, e.currency)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, e.currency)}` : ''].filter(Boolean).join(' · ');
       amount = `<strong class="num ${e.net < 0 ? '' : 'up-ink'}">${e.net < 0 ? '' : '+'}${h(money(e.net, e.currency))}</strong>`;
       break;
@@ -3028,6 +3089,7 @@ loadAccount().then(account => {
   render();
   backfillOrders()
     .catch(() => {})
+    .then(checkMarginHistory)
     .finally(() => {
       state.backfilled = true;
       refresh({ list: true }).then(() => {
@@ -3088,6 +3150,7 @@ document.addEventListener('visibilitychange', () => {
   state.backfilled = false;
   backfillOrders()
     .catch(() => {})
+    .then(checkMarginHistory)
     .finally(() => {
       state.backfilled = true;
       checkIncome();

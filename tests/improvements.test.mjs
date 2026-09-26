@@ -175,7 +175,7 @@ test('new money arrives on the 1st of every month, 3% of the start, once each', 
   const r = applyIncome(a, Date.parse('2026-12-15T09:00:00+08:00'));
   assert.deepEqual(r.added.map(e => [e.id, e.amount]), [['pay:2026-10', 30_000], ['pay:2026-11', 30_000], ['pay:2026-12', 30_000]]);
   assert.equal(applyIncome(r.account, Date.parse('2026-12-15T09:00:00+08:00')).added.length, 0);
-  assert.equal(replay(r.account).deposits, 1_090_000);
+  assert.equal(replay(r.account, Date.parse('2026-12-15T09:00:00+08:00')).deposits, 1_090_000);
   // Two devices catching up separately don't pay twice.
   const phone = applyIncome(a, Date.parse('2026-11-02T00:00:00+08:00')).account;
   const laptop = applyIncome(a, Date.parse('2027-01-02T00:00:00+08:00')).account;
@@ -185,4 +185,86 @@ test('new money arrives on the 1st of every month, 3% of the start, once each', 
   assert.equal(applyIncome(old, Date.parse('2027-01-02T00:00:00+08:00')).added.length, 0);
   const now = Date.parse('2026-12-20T00:00:00+08:00');
   assert.deepEqual(applyIncome(startIncome(old, now), Date.parse('2027-01-02T00:00:00+08:00')).added.map(e => e.id), ['pay:2027-01']);
+});
+
+test('Taiwan and US price rules: ticks, and the ±10% daily limit', async () => {
+  const { tickSize, onTick, priceLimits } = await import('../public/lib/markets.mjs');
+  const { placeOrder } = await import('../public/lib/account.mjs');
+  assert.equal(tickSize('TW', 'stock', 2475), 5);
+  assert.equal(tickSize('TW', 'stock', 250.5), 0.5);
+  assert.equal(tickSize('TW', 'stock', 45.3), 0.05);
+  assert.equal(tickSize('TW', 'etf', 112.4), 0.05);
+  assert.equal(tickSize('US', 'stock', 341.07), 0.01);
+  assert.ok(onTick(2480, 5) && !onTick(2482, 5) && onTick(45.35, 0.05));
+  assert.deepEqual(priceLimits({ market: 'TW', kind: 'stock', prev: 2500 }), { up: 2750, down: 2250 });
+  assert.deepEqual(priceLimits({ market: 'TW', kind: 'stock', prev: 263 }), { up: 289, down: 237 });
+  const at = Date.parse('2026-09-22T10:00:00+08:00');
+  const q = { symbol: '2330.TW', name: 'TSMC', kind: 'stock', market: 'TW', currency: 'TWD', price: 2475, prev: 2500, session: { start: at - 3_600_000, end: at + 3_600_000 }, marketTime: at };
+  const a = newAccount(10_000_000, at, 't');
+  const opts = { quote: q, rates: { TWD: 1 }, now: at };
+  assert.equal(placeOrder(a, { side: 'buy', type: 'limit', limit: 2472, qty: 1000 }, opts).error, 'tick');
+  assert.equal(placeOrder(a, { side: 'buy', type: 'limit', limit: 2200, qty: 1000 }, opts).error, 'priceLimit');
+  assert.equal(placeOrder(a, { side: 'buy', type: 'limit', limit: 2400, qty: 1000 }, opts).order.status, 'open');
+});
+
+test('dividends are owed on the ex-date and paid on the market’s pay day', async () => {
+  const { applyCorporateActions, pendingDividends, placeOrder } = await import('../public/lib/account.mjs');
+  const at = Date.parse('2026-06-01T10:00:00+08:00');
+  const q = { symbol: '2330.TW', name: 'TSMC', kind: 'stock', market: 'TW', currency: 'TWD', price: 2000, prev: 2000, session: { start: at - 3_600_000, end: at + 3_600_000 }, marketTime: at };
+  let a = placeOrder(newAccount(10_000_000, at, 'd'), { side: 'buy', qty: 1000 }, { quote: q, rates: { TWD: 1 }, now: at, id: 'b' }).account;
+  const ex = Date.parse('2026-06-12T00:00:00+08:00');
+  const now = ex + 5 * DAY;
+  a = applyCorporateActions(a, '2330.TW', { dividends: [{ date: ex, amount: 6 }] }, { rates: { TWD: 1 }, now }).account;
+  const [d] = pendingDividends(a, now);
+  assert.equal(d.ex, ex);
+  assert.equal(d.t, ex + 28 * DAY);
+  const cash = t => replay(a, t).cash.TWD;
+  assert.equal(cash(now), cash(at + 1));
+  assert.equal(cash(d.t) - cash(now), 6000);
+  assert.equal(replay(a, now).receivable, 6000);
+  assert.equal(replay(a, d.t).receivable, 0);
+  assert.equal(replay(a, ex - 1).receivable, 0);
+  assert.deepEqual(pendingDividends(a, d.t), []);
+});
+
+test('a margin loan that broke the line while away is sold then, at that moment’s price', async () => {
+  const { marginHistory, borrow, placeOrder, valuate } = await import('../public/lib/account.mjs');
+  const at = Date.parse('2026-09-01T10:00:00+08:00');
+  const q = { symbol: 'X.TW', name: 'X', kind: 'stock', market: 'TW', currency: 'TWD', price: 100, prev: 100, session: { start: at - 3_600_000, end: at + 3_600_000 }, marketTime: at };
+  const rates = { TWD: 1 };
+  let a = newAccount(100_000, at, 'm');
+  a = placeOrder(a, { side: 'buy', qty: 990 }, { quote: q, rates, now: at, id: 'b1' }).account;
+  const v = valuate(replay(a, at), new Map([['X.TW', q]]), rates);
+  a = borrow(a, { currency: 'TWD', amount: Math.floor(v.capacity) }, { valuation: v, rates, now: at + 1, id: 'l' }).account;
+  a = placeOrder(a, { side: 'buy', qty: Math.floor(v.capacity / 101) }, { quote: q, rates, now: at + 2, id: 'b2' }).account;
+  // Away: it falls 65% on day 3, then recovers to 100 by day 6.
+  const path = [[2, 90], [3, 35], [4, 70], [6, 100]].map(([d, p]) => [at + d * DAY, p]);
+  const priceAt = (sym, t) => path.filter(([tt]) => tt <= t).at(-1)?.[1] ?? 100;
+  const r = marginHistory(a, { times: path.map(p => p[0]), priceAt, rateAt: () => 1 });
+  assert.ok(r.forced.length >= 1);
+  assert.equal(r.forced[0].t, at + 3 * DAY);
+  assert.ok(Math.abs(r.forced[0].quote - 35) < 1e-9);
+  const s = replay(r.account, at + 7 * DAY);
+  assert.equal(s.positions['X.TW'], undefined);
+  // The sale at 35 didn't cover everything owed: the rest is still owed, as at a real broker.
+  assert.ok(s.loans.TWD.balance > 0 && s.loans.TWD.balance < 5000);
+  assert.deepEqual(marginHistory(r.account, { times: path.map(p => p[0]), priceAt, rateAt: () => 1 }).forced, []);
+});
+
+test('a fill found in the past must have fitted the cash at that moment', async () => {
+  const { fillFromHistory, placeOrder, exchange } = await import('../public/lib/account.mjs');
+  const at = Date.parse('2026-09-01T10:00:00+08:00');
+  const q = { symbol: '2330.TW', name: 'TSMC', kind: 'stock', market: 'TW', currency: 'TWD', price: 1000, prev: 1000, session: { start: at + 3_600_000, end: at + 5 * 3_600_000 }, marketTime: at };
+  let a = newAccount(200_000, at, 'h');
+  // A limit order waiting, then the cash sent to US$ on day 2 (live).
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 950, qty: 100 }, { quote: q, rates: { TWD: 1 }, now: at, id: 'o' }).account;
+  assert.equal(a.orders[0].status, 'open');
+  a = { ...a, orders: a.orders.map(o => ({ ...o, reserve: 0 })) };
+  a = exchange(a, { from: 'TWD', to: 'USD', amount: 150_000 }, { rates: { TWD: 1, USD: 32 }, now: at + 2 * DAY, id: 'x' }).account;
+  // The price reached 950 on day 1, when the cash was still there: filled,
+  // even though today's NT$ alone... is checked too, so it's refused.
+  const r = fillFromHistory(a, 'o', { t: at + DAY, price: 950 }, 1, at + 3 * DAY);
+  assert.equal(r.order.status, 'rejected');
+  const ok = fillFromHistory({ ...a, events: a.events.filter(e => e.type !== 'fx') }, 'o', { t: at + DAY, price: 950 }, 1, at + 3 * DAY);
+  assert.equal(ok.fill.t, at + DAY);
 });

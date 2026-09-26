@@ -122,6 +122,41 @@ export const MARKETS = {
 
 const SUFFIX_MARKET = Object.entries(MARKETS).flatMap(([id, m]) => m.suffixes.filter(Boolean).map(s => [s, id]));
 
+// Days from a dividend's ex-date to the day the cash arrives, as each
+// market usually pays: Taiwan about four weeks, the US about a week, Japan
+// two to three months (after the shareholders' meeting), most of Europe
+// within days.
+export const DIV_PAY_DAYS = {
+  TW: 28, US: 7, JP: 75, HK: 30, CN: 7, KR: 30, UK: 28, FR: 3, DE: 3, NL: 21, IT: 2, ES: 4, CH: 3, DK: 3, CA: 14, AU: 30, SG: 21, IN: 30
+};
+export const divPayDays = market => DIV_PAY_DAYS[market] ?? 21;
+
+// The price steps an exchange accepts. Taiwan (TWSE/TPEx) by price band,
+// ETFs finer; US stocks a cent (a hundredth of a cent under US$1). Other
+// markets aren't checked.
+export function tickSize(market, kind, price) {
+  if (market === 'TW') {
+    if (kind === 'etf' || kind === 'bond') return price < 50 ? 0.01 : 0.05;
+    return price < 10 ? 0.01 : price < 50 ? 0.05 : price < 100 ? 0.1 : price < 500 ? 0.5 : price < 1000 ? 1 : 5;
+  }
+  if (market === 'US') return price < 1 ? 0.0001 : 0.01;
+  return null;
+}
+export const onTick = (price, tick) => !tick || Math.abs(price / tick - Math.round(price / tick)) < 1e-6;
+export const toTick = (price, tick, dir = 0) => {
+  if (!tick) return price;
+  const f = dir > 0 ? Math.ceil : dir < 0 ? Math.floor : Math.round;
+  return +(f(price / tick - (dir > 0 ? 1e-9 : dir < 0 ? -1e-9 : 0)) * tick).toFixed(6);
+};
+// Taiwan's daily price limit: ±10% of the previous close, rounded inward to
+// the tick. Orders outside it are refused by the exchange.
+export function priceLimits(quote) {
+  if (quote?.market !== 'TW' || !(quote.prev > 0)) return null;
+  const up = quote.prev * 1.1;
+  const down = quote.prev * 0.9;
+  return { up: toTick(up, tickSize('TW', quote.kind, up), -1), down: toTick(down, tickSize('TW', quote.kind, down), 1) };
+}
+
 export const delayOf = market => (MARKETS[market] || MARKETS.INTL).delay ?? 15;
 
 export function marketOf(symbol, kind) {

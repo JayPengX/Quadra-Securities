@@ -20,6 +20,10 @@ import {
   SHORT_INITIAL,
   currencyInfo,
   dealPrice,
+  divPayDays,
+  onTick,
+  priceLimits,
+  tickSize,
   dividendTaxes,
   isOpen,
   isTradable,
@@ -102,6 +106,9 @@ export function replay(account, now = Date.now()) {
     log: []
   };
   for (const e of [...(account?.events || [])].sort(byTime)) {
+    // The account as it stood at `now`: later events (a dividend still to be
+    // paid, or a moment in the past being checked) don't count yet.
+    if (e.t > now) break;
     accrue(s, e.t);
     switch (e.type) {
       case 'deposit':
@@ -149,6 +156,9 @@ export function replay(account, now = Date.now()) {
   }
   accrue(s, now);
   for (const [cur, v] of Object.entries(s.cash)) if (Math.abs(v) < EPS) s.cash[cur] = 0;
+  // Dividends past their ex-date and not paid yet: owed to the account (the
+  // price already dropped by them), in NT$ at their own rate.
+  s.receivable = (account?.events || []).filter(e => e.type === 'div' && e.ex != null && e.ex <= now && e.t > now).reduce((sum, e) => sum + e.net * (e.twd || 1), 0);
   return s;
 }
 
@@ -280,6 +290,15 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (type === 'limit' && !(req.limit > 0)) return { error: 'limit' };
   if (type === 'stop' && !(req.stop > 0)) return { error: 'stop' };
   if (!rates?.[quote.currency]) return { error: 'noRate' };
+  // The exchange's own rules: prices on its tick, limit orders inside
+  // Taiwan's daily ±10%.
+  for (const x of [type === 'limit' ? Number(req.limit) : null, type === 'stop' ? Number(req.stop) : null]) {
+    if (x == null) continue;
+    const tick = tickSize(quote.market, quote.kind, x);
+    if (!onTick(x, tick)) return { error: 'tick', tick };
+  }
+  const band = priceLimits(quote);
+  if (band && type === 'limit' && (req.limit > band.up + EPS || req.limit < band.down - EPS)) return { error: 'priceLimit', ...band };
   const s = replay(account, now);
   const avail = available(account, s);
   const order = {
@@ -342,18 +361,18 @@ function updateOrder(account, order) {
 // found in the price history); cash and shares are checked as of `now`.
 function fillOrder(account, order, price, rates, now, at = now) {
   const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price });
-  if (order.side === 'buy') {
-    const s = replay(account, now);
-    const avail = available(account, s);
+  // A fill found in the past must have fitted the cash (or shares) at that
+  // moment and still fit today's.
+  const moments = at < now ? [at, now] : [now];
+  if (order.side === 'buy' && !order.forced) {
     // This order's own hold is released as it fills.
-    const have = (avail.cash[order.currency] || 0) + (order.reserve || 0);
+    const have = Math.min(...moments.map(tt => (available(account, replay(account, tt)).cash[order.currency] || 0))) + (order.reserve || 0);
     if (est.total > have + EPS) {
       const rejected = { ...order, status: 'rejected', reason: 'funds', rev: order.rev + 1, done: now };
       return { account: updateOrder(account, rejected), order: rejected, fill: null, error: 'funds', need: est.total, have };
     }
-  } else if (!order.short || !isShortable(order.kind)) {
-    const s = replay(account, now);
-    const held = s.positions[order.symbol]?.qty || 0;
+  } else if (order.side === 'sell' && (!order.short || !isShortable(order.kind))) {
+    const held = Math.min(...moments.map(tt => replay(account, tt).positions[order.symbol]?.qty || 0));
     if (held + EPS < order.qty) {
       const rejected = { ...order, status: 'rejected', reason: 'shares', rev: order.rev + 1, done: now };
       return { account: updateOrder(account, rejected), order: rejected, fill: null, error: 'shares' };
@@ -565,7 +584,8 @@ export function valuate(s, quotes, rates) {
   }
   const assets = cashTWD + longTWD;
   const owed = debtTWD + shortTWD;
-  const netWorth = assets - owed;
+  const receivable = s.receivable || 0;
+  const netWorth = assets + receivable - owed;
   for (const p of out.positions) p.weight = assets ? Math.abs(p.valueTWD) / assets : 0;
   out.positions.sort((a, b) => Math.abs(b.valueTWD) - Math.abs(a.valueTWD));
   out.cash.sort((a, b) => (a.currency === BASE ? -1 : b.currency === BASE ? 1 : b.twd - a.twd));
@@ -581,6 +601,7 @@ export function valuate(s, quotes, rates) {
     debtTWD,
     owed,
     netWorth,
+    receivable,
     deposits: s.deposits,
     totalReturn: netWorth - s.deposits,
     totalReturnPct: s.deposits ? netWorth / s.deposits - 1 : 0,
@@ -695,6 +716,50 @@ export function liquidationPlan(account, valuation) {
   return plan;
 }
 
+// While the page was closed, a loan or a short could have fallen below the
+// liquidation ratio and recovered since; a broker would have sold then. This
+// walks `times` (the moments prices are known for, oldest first), values
+// the account at each with priceAt(symbol, t) and rateAt(currency, t), and
+// where it's below the line, buys shorts back and sells holdings at that
+// moment's prices, dated then, and repays the loans. Returns the forced fills.
+export function marginHistory(account, { times, priceAt, rateAt }) {
+  let next = account;
+  const forced = [];
+  for (const t of times) {
+    const s = replay(next, t);
+    const owes = Object.values(s.loans).some(l => l.balance > EPS) || Object.values(s.positions).some(p => p.qty < -EPS);
+    if (!owes) continue;
+    const rates = { [BASE]: 1 };
+    const currencies = new Set([...Object.keys(s.cash), ...Object.keys(s.loans), ...Object.values(s.positions).map(p => p.currency)]);
+    let known = true;
+    for (const c of currencies) {
+      if (c === BASE) continue;
+      rates[c] = rateAt(c, t);
+      if (!(rates[c] > 0)) known = false;
+    }
+    if (!known) continue;
+    const quotes = new Map();
+    for (const p of Object.values(s.positions)) {
+      const price = priceAt(p.symbol, t) ?? p.last;
+      quotes.set(p.symbol, { symbol: p.symbol, price, prev: price, kind: p.kind, market: p.market, currency: p.currency });
+    }
+    const v = valuate(s, quotes, rates);
+    if (v.margin !== 'liquidate') continue;
+    for (const plan of liquidationPlan(next, v)) {
+      const p = s.positions[plan.symbol];
+      const order = {
+        id: `forced:${plan.symbol}:${t}`, symbol: plan.symbol, name: p.name, kind: p.kind, market: p.market, currency: p.currency,
+        side: plan.side, type: 'market', qty: plan.qty, t, status: 'open', rev: 1, forced: true, reserve: 0
+      };
+      const r = fillOrder({ ...next, orders: [...next.orders, order] }, order, quotes.get(plan.symbol).price, rates, t, t);
+      next = r.account;
+      if (r.fill) forced.push(r.fill);
+    }
+    next = repayAll(next, rates, true, t);
+  }
+  return { account: next, forced };
+}
+
 // ---- Dividends and splits ----------------------------------------------------
 
 function sharesAt(account, symbol, t) {
@@ -711,7 +776,7 @@ function sharesAt(account, symbol, t) {
 // Credits the dividends and applies the splits of `symbol` that happened
 // while it was held. Yahoo's dividend amounts are adjusted for later splits,
 // so each is scaled back to the shares of its own day. A dividend counts on
-// its ex-date.
+// its ex-date (shares held then) and is paid on its market's usual pay day.
 export function applyCorporateActions(account, symbol, { dividends = [], splits = [] }, { rates, now = Date.now() }) {
   const fills = account.events.filter(e => e.type === 'fill' && e.symbol === symbol);
   if (!fills.length) return { account, added: [] };
@@ -741,8 +806,9 @@ export function applyCorporateActions(account, symbol, { dividends = [], splits 
     if (!gross) continue;
     // A short position pays the dividend to the lender, untaxed.
     const taxes = gross > 0 ? dividendTaxes(info.market, gross) : { withheld: 0, nhi: 0, net: gross };
+    // Owed from the ex-date, paid some days later (until then it's pending).
     const event = {
-      id, type: 'div', t: d.date, symbol, name: info.name, market: info.market, kind: info.kind, currency: info.currency,
+      id, type: 'div', t: d.date + divPayDays(info.market) * 86_400_000, ex: d.date, symbol, name: info.name, market: info.market, kind: info.kind, currency: info.currency,
       shares, perShare, gross, withheld: taxes.withheld, nhi: taxes.nhi, net: roundCash(taxes.net, info.currency), twd: rate
     };
     next = { ...next, events: [...next.events, event] };
@@ -808,8 +874,8 @@ export function netWorthSeries(account, days, priceAt, rateAt) {
   const out = [];
   for (const t of days) {
     if (t < account.created) continue;
-    const s = replay({ ...account, events: account.events.filter(e => e.t <= t) }, t);
-    let nw = 0;
+    const s = replay(account, t);
+    let nw = s.receivable || 0;
     let ok = true;
     for (const [cur, amount] of Object.entries(s.cash)) {
       if (!amount) continue;
@@ -1085,6 +1151,9 @@ export function markAlertHit(account, id, { t, price }, now = Date.now()) {
 
 export const INCOME_RATE = 0.03;
 const TPE = 8 * 3_600_000;
+
+// Dividends owed (past their ex-date) but not paid yet.
+export const pendingDividends = (account, now = Date.now()) => account.events.filter(e => e.type === 'div' && !e.coupon && e.t > now).sort((a, b) => a.t - b.t);
 
 export const startAmount = account => account?.events.find(e => e.id === 'deposit:start')?.amount || 0;
 

@@ -149,6 +149,15 @@ Two devices' copies merge by uniting their logs:
 - `/v1/finance/search`: search, and news.
 - `/v10/finance/quoteSummary`: company and fund numbers (the Worker adds Yahoo's session cookie and crumb).
 
+**Rules that make it behave like a real broker:**
+
+- **Exchange price rules:** Taiwan and US limit and stop prices must sit on the exchange's tick (Taiwan: 0.01 below NT$10 up to 5 from NT$1,000; ETFs 0.01/0.05; US one cent), and Taiwan limit orders must be inside the day's ±10% price limit. The order form shows the allowed range and the tick.
+- **Dividends are paid on the market's pay day:** holding on the ex-date earns it; the cash arrives about 4 weeks later in Taiwan, 1 week in the US, 2–3 months in Japan, within days in much of Europe (`DIV_PAY_DAYS`). Until then it's listed as on the way and counted in net worth as a receivable (the price already dropped by it), but can't be spent.
+- **Forced sales while away:** with a loan or a short, the price history since the last visit is walked (every price bar) and, where the account fell below the liquidation line, shorts are bought back and holdings sold at that moment's price, dated then, and the loans repaid; whatever the sale didn't cover is still owed.
+- **Fills found in the past** must have fitted the cash and shares at that moment, and still fit today's.
+- **The ledger is read as of a moment:** `replay(account, t)` ignores anything dated after `t`.
+- **Data safety:** an account with no sync code, not installed to the home screen, gets a reminder that Safari can clear site data after 7 days unopened.
+
 **What's still limited:**
 
 - **Price delays** (Yahoo's `exchangeDataDelayedBy`): US stocks and funds, forex, crypto and the US yields are live; Taiwan, Tokyo, Seoul and Sydney 20 minutes; Hong Kong, Shanghai, London, Paris, Frankfurt, Milan, Madrid, Zurich, Toronto and India 15; Singapore and COMEX metals 10; Amsterdam and Copenhagen live. Orders fill at those prices. The Taiwan exchange's own real-time feed refuses requests from servers, so it can't go through the Worker.

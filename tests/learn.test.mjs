@@ -39,7 +39,7 @@ test('missions tick themselves off from the account', () => {
   a = exchange(a, { from: 'TWD', to: 'USD', amount: 100_000 }, { rates, now: T0, id: 'x' }).account;
   a = placeOrder(a, { side: 'buy', qty: 1 }, { quote: q('VOO', 500, { kind: 'etf', market: 'US', currency: 'USD' }), rates, now: T0, id: '3' }).account;
   assert.deepEqual(done(a), ['open', 'twStock', 'etf', 'fx', 'foreign', 'patient']);
-  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 1, qty: 1 }, { quote: q('2317.TW', 200), rates, now: T0, id: '4' }).account;
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 190, qty: 1 }, { quote: q('2317.TW', 200), rates, now: T0, id: '4' }).account;
   a = placeOrder(a, { side: 'buy', qty: 1 }, { quote: q('BTC-USD', 1000, { kind: 'crypto', market: 'CRYPTO', currency: 'USD' }), rates, now: T0, id: '5' }).account;
   assert.ok(done(a).includes('limit') && done(a).includes('spread'));
 });

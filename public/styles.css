@@ -703,3 +703,6 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .about-returns { margin: 12px 0 0; }
 .delay-tag { color: var(--warn); }
 .delay-tag.live { color: var(--accent); }
+
+.safety-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-left: 4px solid var(--warn); }
+.safety-card p { margin: 0; flex: 1 1 280px; font-size: 0.88rem; }

@@ -693,6 +693,17 @@ const STRINGS = {
     ret5y: '近 5 年平均每年',
     sectorMix: '產業分布',
     assetMix: '資產配置：股票 {stock}、債券 {bond}、現金 {cash}',
+    toastDividendPending: '{name} 除息：股利 {amount} 將於 {date} 入帳',
+    err_tick: '價格要是升降單位 {tick} 的倍數。',
+    err_priceLimit: '台股每天漲跌最多 10%，今天只能掛 {down}–{up}。',
+    limitBand: '今日可掛價 {down}–{up}（漲跌停）',
+    tickIs: '升降單位 {tick}',
+    toastForcedAt: '你不在的時候，{time} 維持率跌破斷頭線：{name} {qty} 被強制處理 @ {price}',
+    pendingDivTitle: '待入帳股利',
+    pendingDivLine: '除息日 {ex} 持有 {qty} 股 · 預計 {pay} 入帳',
+    pendingDivNote: '除息日當天持有就有權利領；現金通常在幾週後才入帳（台股約 4 週、美股約 1 週、日股 2–3 個月），入帳前不能用。',
+    pendingTag: '待入帳',
+    safetyNote: '帳戶只存在這個瀏覽器裡。iPhone／iPad 的 Safari 超過 7 天沒開可能會清掉網站資料；建立同步碼（或把網站加到主畫面）就不會遺失。',
     disclaimer: '這是教學用的模擬交易，所有的錢都是假的，不構成任何投資建議。真實投資有賠錢的風險，槓桿和加密貨幣尤其如此。'
   },
   en: {
@@ -1388,6 +1399,17 @@ const STRINGS = {
     ret5y: '5 years, a year',
     sectorMix: 'Sectors',
     assetMix: 'Assets: stocks {stock}, bonds {bond}, cash {cash}',
+    toastDividendPending: '{name} went ex-dividend: {amount} arrives on {date}',
+    err_tick: 'The price must be a multiple of the tick, {tick}.',
+    err_priceLimit: 'Taiwan limits each day’s move to 10%: today only {down}–{up}.',
+    limitBand: 'Today’s allowed range {down}–{up} (price limits)',
+    tickIs: 'Tick {tick}',
+    toastForcedAt: 'While you were away, at {time} the account fell below the liquidation line: {qty} {name} force-closed @ {price}',
+    pendingDivTitle: 'Dividends on the way',
+    pendingDivLine: 'Held {qty} on the ex-date {ex} · arrives {pay}',
+    pendingDivNote: 'Holding on the ex-date earns the dividend; the cash usually lands weeks later (Taiwan about 4, the US about 1, Japan 2–3 months) and can’t be used before.',
+    pendingTag: 'pending',
+    safetyNote: 'This account lives only in this browser. Safari on iPhone and iPad can clear a site’s data after 7 days unopened; a sync code (or adding the site to the home screen) keeps it safe.',
     disclaimer: 'Educational simulation with play money; not investment advice. Real investing can lose money, with leverage and crypto especially.'
   }
 };

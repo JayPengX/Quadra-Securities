@@ -31,7 +31,7 @@ test('every key the page asks for exists', () => {
     cost_: ['commission', 'tax', 'fee', 'fx', 'interest', 'withheld', 'nhi', 'borrow'],
     margin_: ['ok', 'call', 'liquidate'],
     tab_: ['markets', 'portfolio', 'fx', 'history', 'guide'],
-    err_: ['funds', 'shares', 'qty', 'qtyStep', 'limit', 'stop', 'noQuote', 'notTradable', 'noRate', 'side', 'fx', 'tooSmall', 'amount', 'capacity', 'margin', 'noLoan', 'shortMargin', 'noValuation', 'planAmount', 'planDay', 'alertPrice']
+    err_: ['funds', 'shares', 'qty', 'qtyStep', 'limit', 'stop', 'noQuote', 'notTradable', 'noRate', 'side', 'fx', 'tooSmall', 'amount', 'capacity', 'margin', 'noLoan', 'shortMargin', 'noValuation', 'planAmount', 'planDay', 'alertPrice', 'tick', 'priceLimit']
   };
   for (const [prefix, list] of Object.entries(families)) for (const k of list) used.add(prefix + k);
   for (const m of app.matchAll(/para\)|\['(g_[a-z]+\d)'/g)) if (m[1]) used.add(m[1]);

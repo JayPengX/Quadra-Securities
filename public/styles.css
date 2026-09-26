@@ -293,6 +293,7 @@ footer { padding: 10px 0 0; text-align: center; }
 .row-price { flex: none; display: grid; justify-items: end; min-width: 84px; }
 .row-price strong { font-size: 0.98rem; }
 .row-price small { font-size: 0.7rem; color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+.held-tag.short { color: var(--warn); border-color: var(--warn); }
 .held-tag { font-size: 0.66rem; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 2px; }
 .pill {
   flex: none; min-width: 74px; text-align: center; border-radius: 8px; padding: 5px 6px; font-weight: 800; font-size: 0.84rem;

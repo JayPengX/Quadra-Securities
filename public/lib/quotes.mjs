@@ -3,6 +3,7 @@
 // /v7/finance/spark (with the day's price line), charts, dividends and
 // splits from /v8/finance/chart, and symbol search from /v1/finance/search.
 import { BASE, METALS, GRAMS_PER_OUNCE, kindOf, marketOf, normalizeCurrency } from './markets.mjs';
+import { BONDS, ISSUERS, CURVE_SYMBOLS, bondQuote, bondLine, curveOf } from './bonds.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const YAHOO = 'https://query1.finance.yahoo.com';
@@ -97,6 +98,12 @@ export function parseChart(json) {
   const quote = quoteFromMeta(r.meta, r.timestamp || [], r.indicators?.quote?.[0]?.close || []);
   if (!quote) return null;
   const { factor } = normalizeCurrency(r.meta.currency);
+  const q = r.indicators?.quote?.[0] || {};
+  const bars = [];
+  for (let i = 0; i < (r.timestamp || []).length; i++) {
+    const [o, h, l, c] = [q.open?.[i], q.high?.[i], q.low?.[i], q.close?.[i]];
+    if ([o, h, l, c].every(Number.isFinite)) bars.push({ t: r.timestamp[i] * 1000, o: o / factor, h: h / factor, l: l / factor, c: c / factor });
+  }
   const dividends = Object.values(r.events?.dividends || {})
     .map(d => ({ date: d.date * 1000, amount: d.amount / factor }))
     .sort((a, b) => a.date - b.date);
@@ -104,7 +111,7 @@ export function parseChart(json) {
     .filter(s => s.numerator > 0 && s.denominator > 0)
     .map(s => ({ date: s.date * 1000, ratio: s.numerator / s.denominator }))
     .sort((a, b) => a.date - b.date);
-  return { quote, points: quote.line, dividends, splits };
+  return { quote, points: quote.line, bars, dividends, splits };
 }
 
 // A passbook metal: the future's US$ per troy ounce, in NT$ per gram.
@@ -143,6 +150,8 @@ function upstreamSymbols(symbols) {
     if (METALS[s]) {
       set.add(METALS[s].future);
       set.add(fxSymbol('USD'));
+    } else if (BONDS[s]) {
+      if (BONDS[s].live) for (const c of CURVE_SYMBOLS) set.add(c);
     } else if (s !== BASE) set.add(s);
   }
   return [...set];
@@ -169,8 +178,45 @@ export async function fetchQuotes(symbols, { range = '1d', interval = '5m' } = {
     const q = metalQuote(s, out.get(METALS[s].future), out.get(fxSymbol('USD')));
     if (q) out.set(s, q);
   }
+  for (const s of symbols) if (BONDS[s]) {
+    const q = liveBondQuote(s, out);
+    if (q) out.set(s, q);
+  }
   if (failed && failed === batches.length) throw new Error('quotes unavailable');
   return out;
+}
+
+// Today's quote for a bond: the live curve (and yesterday's, for the day's
+// change) or the reference one, with today's price line from the curve's.
+function liveBondQuote(symbol, quotes) {
+  const bond = BONDS[symbol];
+  const now = Date.now();
+  if (!bond.live) {
+    const q = bondQuote(bond, curveOf(bond.issuer), null, now);
+    return q && { ...q, line: bondLine(bond, [now - 86_400_000, now], () => curveOf(bond.issuer)) };
+  }
+  const curve = curveOf(bond.issuer, quotes);
+  if (!curve) return null;
+  const q = bondQuote(bond, curve, curveOf(bond.issuer, quotes, x => x.prev), now);
+  const lines = ISSUERS[bond.issuer].live.map(([years, sym]) => [years, quotes.get(sym)?.line || []]);
+  const times = lines.find(([y]) => y === 10)?.[1].map(p => p[0]) || [];
+  return { ...q, line: bondLine(bond, times, t => curveFromLines(lines, t)) };
+}
+
+// The curve at moment `t` from each point's history (its latest value at or
+// before `t`).
+function curveFromLines(lines, t) {
+  const pts = [];
+  for (const [years, line] of lines) {
+    let v = null;
+    for (const [tt, c] of line) {
+      if (tt > t) break;
+      v = c;
+    }
+    if (v === null && line.length) v = line[0][1];
+    if (Number.isFinite(v)) pts.push([years, v]);
+  }
+  return pts.length ? pts : null;
 }
 
 // Chart ranges: [range, interval].
@@ -187,6 +233,20 @@ export const RANGES = {
 
 export async function fetchChart(symbol, rangeKey = '1mo', { events = false } = {}) {
   const [range, interval] = RANGES[rangeKey] || RANGES['1mo'];
+  if (BONDS[symbol]) {
+    const bond = BONDS[symbol];
+    const quote = (await fetchQuotes([symbol]).catch(() => new Map())).get(symbol) || null;
+    let lines;
+    if (bond.live) {
+      const charts = await Promise.all(ISSUERS[bond.issuer].live.map(([, sym]) => fetchChart(sym, rangeKey).catch(() => null)));
+      lines = ISSUERS[bond.issuer].live.map(([years], i) => [years, charts[i]?.points || []]);
+    }
+    const ref = lines?.find(([y]) => y === 10)?.[1] || [];
+    const span = { '1d': 1, '5d': 5, '1mo': 30, '6mo': 182, ytd: 270, '1y': 365, '5y': 1826, max: 3650 }[rangeKey] || 30;
+    const times = ref.length ? ref.map(p => p[0]) : Array.from({ length: 60 }, (_, i) => Date.now() - ((59 - i) / 59) * span * 86_400_000);
+    const points = bondLine(bond, times, t => (bond.live ? curveFromLines(lines, t) : curveOf(bond.issuer)));
+    return { quote, points, bars: [], dividends: [], splits: [] };
+  }
   if (METALS[symbol]) {
     const [future, usd] = await Promise.all([fetchChart(METALS[symbol].future, rangeKey), fetchChart(fxSymbol('USD'), rangeKey)]);
     if (!future || !usd) return null;
@@ -201,6 +261,25 @@ export async function fetchChart(symbol, rangeKey = '1mo', { events = false } = 
   }
   const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}${events ? '&events=div%2Csplit' : ''}`;
   return parseChart(await getJson(url));
+}
+
+// Price bars since `since`, as fine as Yahoo keeps them: 5 minutes for the
+// last few days, 30 minutes for a month, an hour for two years, days after.
+export async function fetchBars(symbol, since) {
+  const age = Date.now() - since;
+  const day = 86_400_000;
+  const [range, interval] = age < 5 * day ? ['5d', '5m'] : age < 28 * day ? ['1mo', '30m'] : age < 700 * day ? ['2y', '1h'] : ['max', '1d'];
+  if (METALS[symbol]) {
+    const [future, usd] = await Promise.all([fetchBars(METALS[symbol].future, since), fetchBars(fxSymbol('USD'), since)]);
+    let j = 0;
+    return future.map(b => {
+      while (j + 1 < usd.length && usd[j + 1].t <= b.t) j++;
+      const k = (usd[j]?.c ?? 0) / GRAMS_PER_OUNCE;
+      return { t: b.t, o: b.o * k, h: b.h * k, l: b.l * k, c: b.c * k };
+    }).filter(b => b.c > 0);
+  }
+  const json = await getJson(`${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`);
+  return parseChart(json)?.bars || [];
 }
 
 // Dividends and splits since `since` (ms): the account credits them.

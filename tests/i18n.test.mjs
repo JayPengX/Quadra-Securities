@@ -19,17 +19,17 @@ test('every key the page asks for exists', () => {
   for (const m of app.matchAll(/\bt\(([^()]*\?[^()]*)\)/g)) for (const k of m[1].matchAll(/'([a-z][A-Za-z0-9_]*)'/g)) used.add(k[1]);
   for (const m of html.matchAll(/data-t="([A-Za-z0-9_]+)"/g)) used.add(m[1]);
   const families = {
-    kind_: ['stock', 'etf', 'bond', 'fund', 'crypto', 'metal', 'index', 'future', 'fx', 'cash'],
+    kind_: ['stock', 'etf', 'bond', 'fund', 'crypto', 'metal', 'index', 'future', 'fx', 'cash', 'govbond'],
     range_: ['1d', '5d', '1mo', '6mo', 'ytd', '1y', '5y', 'max'],
     otype_: ['market', 'limit', 'stop'],
     status_: ['open', 'filled', 'cancelled', 'rejected'],
     alloc_: ['kind', 'currency', 'market'],
     hview_: ['activity', 'orders', 'stats'],
     af_: ['all', 'trades', 'fx', 'income', 'loans', 'cash'],
-    cost_: ['commission', 'tax', 'fee', 'fx', 'interest', 'withheld', 'nhi'],
+    cost_: ['commission', 'tax', 'fee', 'fx', 'interest', 'withheld', 'nhi', 'borrow'],
     margin_: ['ok', 'call', 'liquidate'],
     tab_: ['markets', 'portfolio', 'fx', 'history', 'guide'],
-    err_: ['funds', 'shares', 'qty', 'qtyStep', 'limit', 'stop', 'noQuote', 'notTradable', 'noRate', 'side', 'fx', 'tooSmall', 'amount', 'capacity', 'margin', 'noLoan']
+    err_: ['funds', 'shares', 'qty', 'qtyStep', 'limit', 'stop', 'noQuote', 'notTradable', 'noRate', 'side', 'fx', 'tooSmall', 'amount', 'capacity', 'margin', 'noLoan', 'shortMargin', 'noValuation']
   };
   for (const [prefix, list] of Object.entries(families)) for (const k of list) used.add(prefix + k);
   for (const m of app.matchAll(/para\)|\['(g_[a-z]+\d)'/g)) if (m[1]) used.add(m[1]);

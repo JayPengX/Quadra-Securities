@@ -1,3 +1,5 @@
+import { BONDS, bondName } from './bonds.mjs';
+
 // What the markets tab lists: curated lists by market and kind, each item
 // [Yahoo symbol, Chinese name, English name, kind if not Yahoo's own]. Any
 // other symbol is a search away; these carry Chinese names (Yahoo has none)
@@ -60,7 +62,7 @@ const US_ETF = [
   ['IBIT', '比特幣現貨 ETF', 'iShares Bitcoin Trust'], ['TQQQ', '那斯達克100 三倍', 'ProShares UltraPro QQQ (3x)'], ['SQQQ', '那斯達克100 反三倍', 'ProShares UltraPro Short QQQ (-3x)']
 ];
 
-const BONDS = [
+const BOND_ETFS = [
   ['00679B.TWO', '元大美債20年', 'Yuanta US Treasury 20+ Year'], ['00687B.TWO', '國泰20年美債', 'Cathay US Treasury 20+ Year'],
   ['00937B.TWO', '群益ESG投等債20+', 'Capital ESG IG Corporate 20+'], ['00720B.TWO', '元大投資級公司債', 'Yuanta IG Corporate Bond'],
   ['TLT', '美國20年以上公債', 'iShares 20+ Year Treasury', 'bond'], ['IEF', '美國7–10年公債', 'iShares 7-10 Year Treasury', 'bond'],
@@ -132,6 +134,8 @@ const METALS = [
   ['ZC=F', '玉米期貨', 'Corn futures'], ['ZW=F', '小麥期貨', 'Wheat futures'], ['KC=F', '咖啡期貨', 'Coffee futures']
 ];
 
+const GOV_BONDS = Object.values(BONDS).map(b => [b.id, bondName(b, 'zh'), bondName(b, 'en'), 'govbond']);
+
 const INDEXES = [
   ['^TWII', '台灣加權指數', 'TAIEX'], ['^GSPC', '標普500', 'S&P 500'], ['^IXIC', '那斯達克', 'Nasdaq Composite'],
   ['^DJI', '道瓊工業', 'Dow Jones'], ['^SOX', '費城半導體', 'PHLX Semiconductor'], ['^RUT', '羅素2000', 'Russell 2000'], ['^VIX', 'VIX 恐慌指數', 'VIX'],
@@ -145,7 +149,8 @@ export const CATEGORIES = [
   { id: 'twetf', zh: '台灣 ETF', en: 'Taiwan ETFs', icon: '🧺', items: TW_ETF },
   { id: 'us', zh: '美股', en: 'US stocks', icon: '🇺🇸', items: US },
   { id: 'usetf', zh: '美國 ETF', en: 'US ETFs', icon: '📦', items: US_ETF },
-  { id: 'bond', zh: '債券', en: 'Bonds', icon: '🏛️', items: BONDS },
+  { id: 'govbond', zh: '公債', en: 'Government bonds', icon: '🏛️', items: GOV_BONDS },
+  { id: 'bond', zh: '債券 ETF', en: 'Bond ETFs', icon: '📜', items: BOND_ETFS },
   { id: 'crypto', zh: '加密貨幣', en: 'Crypto', icon: '🪙', items: CRYPTO },
   { id: 'metal', zh: '黃金・原物料', en: 'Gold & commodities', icon: '🥇', items: METALS },
   { id: 'jp', zh: '日股', en: 'Japan', icon: '🇯🇵', items: JP },
@@ -170,7 +175,7 @@ export const TRACKERS = {
   '^TWII': ['0050.TW', '006208.TW'], '^GSPC': ['VOO', 'SPY', '00646.TW'], '^IXIC': ['QQQ', '00662.TW'],
   '^DJI': ['DIA'], '^SOX': ['SOXX', '00830.TW'], '^RUT': ['IWM'], '^N225': ['1321.T', 'EWJ'], '^HSI': ['2800.HK'], '000001.SS': ['510300.SS'],
   '^KS11': ['005930.KS'], '^GDAXI': ['SAP.DE'], '^FTSE': ['SHEL.L'], '^STOXX50E': ['ASML.AS'], '^VIX': [], '^BSESN': ['RELIANCE.NS'], '^AXJO': ['BHP.AX'],
-  '^IRX': ['SGOV'], '^FVX': ['IEF'], '^TNX': ['IEF', 'TLT'], '^TYX': ['TLT', '00679B.TWO'],
+  '^IRX': ['UST-3M', 'SGOV'], '^FVX': ['UST-5Y', 'IEF'], '^TNX': ['UST-10Y', 'IEF', 'TLT'], '^TYX': ['UST-30Y', 'TLT', '00679B.TWO'],
   'GC=F': ['XAU', 'GLD', '00635U.TW'], 'SI=F': ['XAG', 'SLV'], 'CL=F': ['USO', '00642U.TW'], 'BZ=F': ['USO'], 'NG=F': [], 'HG=F': ['CPER'],
   'ZC=F': ['DBA'], 'ZW=F': ['DBA'], 'KC=F': ['DBA']
 };

@@ -106,6 +106,10 @@ export const MARKETS = {
   // Gold and silver passbooks (黃金存摺): grams priced in NT$, bought at the
   // bank's selling price and sold at its buying price, no commission.
   METAL: { zh: '黃金存摺', en: 'Metal passbook', flag: '🥇', currency: 'TWD', suffixes: [], commission: { rate: 0, min: 0 }, spread: 0.006, withholding: 0 },
+  // Government bonds, over the counter through a broker: a small commission
+  // and the dealer's bid-ask spread. Coupon tax depends on the issuer
+  // (bonds.mjs).
+  BOND: { zh: '公債', en: 'Government bonds', flag: '🏛️', currency: null, suffixes: [], commission: { rate: 0.001, min: 0 }, spread: 0.0005, withholding: 0 },
   // Anywhere else search turns up: a generic sub-brokerage rate.
   INTL: { zh: '其他市場', en: 'Other markets', flag: '🌐', currency: null, suffixes: [], commission: { rate: 0.003, min: 0 }, withholding: 0.2 }
 };
@@ -114,6 +118,7 @@ const SUFFIX_MARKET = Object.entries(MARKETS).flatMap(([id, m]) => m.suffixes.fi
 
 export function marketOf(symbol, kind) {
   if (kind === 'crypto') return 'CRYPTO';
+  if (kind === 'govbond') return 'BOND';
   if (kind === 'metal') return 'METAL';
   const dot = symbol.lastIndexOf('.');
   if (dot < 0) return 'US';
@@ -151,7 +156,15 @@ export function kindOf(type, symbol, hint) {
   }
 }
 
-export const TRADABLE_KINDS = new Set(['stock', 'etf', 'bond', 'fund', 'crypto', 'metal']);
+export const TRADABLE_KINDS = new Set(['stock', 'etf', 'bond', 'fund', 'crypto', 'metal', 'govbond']);
+// What can be sold short (borrowed and sold): listed shares and crypto.
+export const SHORTABLE_KINDS = new Set(['stock', 'etf', 'bond', 'crypto']);
+export const isShortable = kind => SHORTABLE_KINDS.has(kind);
+// Yearly fee for borrowing what's sold short, on the value it was sold at.
+export const SHORT_FEE = 0.03;
+// Opening a short needs assets of at least this much of all that's owed
+// (loans and shorts) afterwards; the maintenance levels below then apply.
+export const SHORT_INITIAL = 1.5;
 export const isTradable = kind => TRADABLE_KINDS.has(kind);
 
 // Smallest amount that can be bought: whole shares, whole grams, crypto to
@@ -211,7 +224,7 @@ export function dividendTaxes(market, gross) {
 
 // Margin: how much of each kind's value can be borrowed against, and the
 // maintenance ratio (assets ÷ debt) where the broker calls and where it sells.
-export const COLLATERAL = { stock: 0.6, etf: 0.6, bond: 0.6, fund: 0.5, metal: 0.5, crypto: 0.3 };
+export const COLLATERAL = { stock: 0.6, etf: 0.6, bond: 0.6, fund: 0.5, metal: 0.5, crypto: 0.3, govbond: 0.8 };
 export const MARGIN_CALL = 1.3;
 export const MARGIN_LIQUIDATE = 1.15;
 

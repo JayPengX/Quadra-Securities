@@ -53,7 +53,9 @@ test('not enough cash, not enough shares, bad quantities', () => {
   const a = newAccount(100_000, T0, 'acc');
   const q = quote('2330.TW', 2475);
   assert.equal(placeOrder(a, { side: 'buy', qty: 100 }, { quote: q, rates: RATES, now: T0 }).error, 'funds');
-  assert.equal(placeOrder(a, { side: 'sell', qty: 1 }, { quote: q, rates: RATES, now: T0 }).error, 'shares');
+  // Selling what isn't held is a short sale: it needs the account's valuation, and a shortable kind.
+  assert.equal(placeOrder(a, { side: 'sell', qty: 1 }, { quote: q, rates: RATES, now: T0 }).error, 'noValuation');
+  assert.equal(placeOrder(a, { side: 'sell', qty: 1 }, { quote: { ...q, kind: 'fund' }, rates: RATES, now: T0 }).error, 'shares');
   assert.equal(placeOrder(a, { side: 'buy', qty: 1.5 }, { quote: q, rates: RATES, now: T0 }).error, 'qtyStep');
   assert.equal(placeOrder(a, { side: 'buy', qty: 0 }, { quote: q, rates: RATES, now: T0 }).error, 'qty');
   assert.equal(placeOrder(a, { side: 'buy', qty: 1 }, { quote: { ...q, kind: 'index' }, rates: RATES, now: T0 }).error, 'notTradable');

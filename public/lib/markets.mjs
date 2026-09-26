@@ -15,7 +15,8 @@ export const CURRENCIES = {
   EUR: { symbol: '€', digits: 2, spread: 0.003, loanRate: 0.06, zh: '歐元', en: 'Euro', flag: '🇪🇺' },
   GBP: { symbol: '£', digits: 2, spread: 0.0035, loanRate: 0.07, zh: '英鎊', en: 'British pound', flag: '🇬🇧' },
   CHF: { symbol: 'CHF ', digits: 2, spread: 0.0035, loanRate: 0.04, zh: '瑞士法郎', en: 'Swiss franc', flag: '🇨🇭' },
-  DKK: { symbol: 'kr ', digits: 2, spread: 0.005, loanRate: 0.06, zh: '丹麥克朗', en: 'Danish krone', flag: '🇩🇰' },
+  // Yahoo has no DKK/TWD pair: priced through US$ (USDDKK=X).
+  DKK: { cross: true, symbol: 'kr ', digits: 2, spread: 0.005, loanRate: 0.06, zh: '丹麥克朗', en: 'Danish krone', flag: '🇩🇰' },
   CAD: { symbol: 'C$', digits: 2, spread: 0.0035, loanRate: 0.065, zh: '加幣', en: 'Canadian dollar', flag: '🇨🇦' },
   AUD: { symbol: 'A$', digits: 2, spread: 0.0035, loanRate: 0.07, zh: '澳幣', en: 'Australian dollar', flag: '🇦🇺' },
   SGD: { symbol: 'S$', digits: 2, spread: 0.0035, loanRate: 0.055, zh: '新加坡幣', en: 'Singapore dollar', flag: '🇸🇬' },

@@ -6,6 +6,7 @@
 // accrued interest included (the "dirty" price a buyer pays), so the order
 // engine treats it like any other security; coupons and the repayment at
 // maturity are credited by the account.
+import { isTradingDay, localDay } from './holidays.mjs';
 
 const DAY = 86_400_000;
 const YEAR = 365.25 * DAY;
@@ -149,7 +150,7 @@ export function curveOf(issuer, quotes, pick = q => q.price) {
   return pts.length ? pts : null;
 }
 
-// Weekday business hours in the issuer's time zone (bonds trade over the
+// Business days' hours in the issuer's time zone (bonds trade over the
 // counter): today's session, or the next one.
 export function bondSession(bond, now) {
   const parts = tz => {
@@ -163,10 +164,8 @@ export function bondSession(bond, now) {
   const [open, close] = bond.hours;
   let start = midnight + open * 3_600_000;
   let end = midnight + close * 3_600_000;
-  const weekend = d => {
-    const w = new Date(d + offset).getUTCDay();
-    return w === 0 || w === 6;
-  };
+  // Weekends and the issuer's market holidays (see holidays.mjs).
+  const weekend = d => !isTradingDay(bond.issuer, localDay(d, bond.tz));
   if (now >= end || weekend(start)) {
     do {
       start += DAY;

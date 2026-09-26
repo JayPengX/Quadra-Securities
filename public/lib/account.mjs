@@ -41,9 +41,12 @@ import {
   tradeCosts
 } from './markets.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
+import { ECONOMY } from './quadra.mjs';
 
 export const ACCOUNT_VERSION = 1;
-export const START_PRESETS = [100_000, 500_000, 1_000_000, 3_000_000, 10_000_000];
+// Every new account opens with the same NT$100,000 (Quadra's base amount);
+// the range below is only what an older, chosen start can be.
+export const START_AMOUNT = ECONOMY.stockStart;
 export const MIN_START = 10_000;
 export const MAX_START = 1_000_000_000;
 const YEAR_MS = 365 * 86_400_000;
@@ -62,7 +65,7 @@ export function taipeiDay(t) {
   return new Date(t + 8 * 3_600_000).toISOString().slice(0, 10);
 }
 
-export function newAccount(start, now = Date.now(), id = randomId()) {
+export function newAccount(start = START_AMOUNT, now = Date.now(), id = randomId()) {
   const amount = Math.round(Number(start));
   if (!(amount >= MIN_START && amount <= MAX_START)) throw new Error('start amount out of range');
   return {
@@ -1228,9 +1231,9 @@ export function applyCashInterest(account, now = Date.now()) {
 // ---- Payday: new money every month ---------------------------------------------
 //
 // No adding money by hand: like a salary, new NT$ arrives on its own on the
-// 1st of every month (00:00 Taiwan time), and the amount follows the
-// starting amount (3% of it), so a big account and a small one save at the
-// same pace. Each payday is a deposit with a fixed id (pay:YYYY-MM), paid
+// 1st of every month (00:00 Taiwan time), paid when the app is opened: the
+// same NT$3,000 for every account (Quadra's economy; it used to be 3% of a
+// chosen start). Each payday is a deposit with a fixed id (pay:YYYY-MM), paid
 // once however many devices catch up on it. `income.since`: when paydays
 // began (the account's opening, or when an older account first got them).
 
@@ -1242,10 +1245,9 @@ export const pendingDividends = (account, now = Date.now()) => account.events.fi
 
 export const startAmount = account => account?.events.find(e => e.id === 'deposit:start')?.amount || 0;
 
-// NT$ a month: to the NT$10 (NT$1 below NT$100).
-export function incomeAmount(start) {
-  const x = start * INCOME_RATE;
-  return x >= 100 ? Math.round(x / 10) * 10 : Math.max(1, Math.round(x));
+// NT$ a month.
+export function incomeAmount() {
+  return ECONOMY.stockMonthly;
 }
 
 // The first payday after `t`: the next 1st, 00:00 Taiwan time.
@@ -1272,3 +1274,76 @@ export function applyIncome(account, now = Date.now()) {
 
 // Paydays from now on for an account opened before they existed.
 export const startIncome = (account, now = Date.now()) => (account.income ? account : { ...account, income: { since: now } });
+
+// ---- The Quadra pool -----------------------------------------------------------
+//
+// With a Quadra Pass this account's NT$ cash is the shared money pool (see
+// quadra.mjs): money the other apps put in or took out (Sportsbook's bets
+// and winnings, Words' rewards, transfers) arrives here as NT$ deposits with
+// fixed ids ('x:<entry id>', `pool: true`), counted as money put in or taken
+// out rather than as return. What this account shares back is its own part:
+// its NT$ cash less those deposits.
+
+// The wallet's entries from the other apps that aren't in the log yet, added.
+export function applyPool(account, wallet) {
+  if (!account || !wallet) return { account, added: [] };
+  const have = new Set(account.events.map(e => e.id));
+  const added = [];
+  for (const e of wallet.entries || []) {
+    if (e.app === 'stock') continue;
+    const id = `x:${e.id}`;
+    if (have.has(id) || !(Math.abs(e.amount) > 0)) continue;
+    const event = { id, type: 'deposit', pool: true, app: e.app, kind: e.kind, t: e.t, currency: BASE, amount: e.amount };
+    if (e.note) event.note = e.note;
+    if (e.peer) event.peer = e.peer;
+    added.push(event);
+  }
+  if (!added.length) return { account, added };
+  return { account: { ...account, events: [...account.events, ...added] }, added };
+}
+
+// This account's own part of the pool: spendable NT$ (open orders' cash
+// held back) less what came from the other apps.
+export function ownCash(account, s, now = Date.now()) {
+  const cash = available(account, s).cash[BASE] || 0;
+  const pooled = account.events.filter(e => e.pool && e.t <= now).reduce((sum, e) => sum + e.amount, 0);
+  return Math.round((cash - pooled) * 100) / 100;
+}
+
+// Without the pool (a pass unlinked from this device).
+export const stripPool = account => (account ? { ...account, events: account.events.filter(e => !e.pool) } : account);
+
+// Money put in, by where it came from (NT$, events up to `now`).
+export function moneySources(account, now = Date.now()) {
+  const out = { start: 0, pay: 0, game: 0, odds: 0, vocab: 0, transfer: 0, merge: 0, other: 0 };
+  for (const e of account?.events || []) {
+    if (e.type !== 'deposit' || e.t > now) continue;
+    const v = e.amount * (e.twd || 1);
+    if (e.id === 'deposit:start' || e.start) out.start += v;
+    else if (e.income) out.pay += v;
+    else if (e.game) out.game += v;
+    else if (e.pool && e.app === 'odds') out.odds += v;
+    else if (e.pool && e.app === 'vocab') out.vocab += v;
+    else if (e.pool && (e.kind === 'xfer-in' || e.kind === 'xfer-out')) out.transfer += v;
+    else if (e.pool && e.kind === 'merge') out.merge += v;
+    else out.other += v;
+  }
+  return out;
+}
+
+// Another, separate account folded in (the Quadra merge tool): both logs,
+// with the second's fixed ids ('deposit:start', 'pay:…', 'int:…') renamed so
+// both count, and its old pool deposits left out (the merge carried that
+// money over already).
+export function mergeDistinct(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  if (a.id === b.id) return mergeAccounts(a, b);
+  const tag = `m${b.id}`;
+  const have = new Set(a.events.map(e => e.id));
+  const events = b.events
+    .filter(e => !e.pool)
+    .map(e => (have.has(e.id) || /^(deposit:start|pay:|int:)/.test(e.id) ? { ...e, id: `${tag}:${e.id}`, ...(e.id === 'deposit:start' ? { start: true } : {}) } : e));
+  const merged = mergeAccounts(a, { ...b, id: a.id, created: a.created, events, snapshots: {} });
+  return { ...merged, created: Math.min(a.created, b.created) };
+}

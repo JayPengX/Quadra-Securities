@@ -1,0 +1,15 @@
+{
+  "name": "股市研究室",
+  "short_name": "股市研究室",
+  "description": "用虛擬的新台幣，買全世界的股票、ETF、債券、加密貨幣和黃金。教學用途。",
+  "lang": "zh-Hant-TW",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a0f16",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "./icons/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "stock-study",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

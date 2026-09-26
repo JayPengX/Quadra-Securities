@@ -1,8 +1,39 @@
-# Stock Study 股市研究室
+# 四方證券 Quadra Securities (Stock Study)
 
 **Live site: https://jaypengx.github.io/Stock-Study/**
 
-A play-money brokerage for markets around the world. You choose how many NT$ to start with, exchange them into other currencies, and buy stocks, ETFs, government bonds, bond ETFs, mutual funds, crypto and gold at real prices, or sell short. Commissions, taxes, FX spreads, loan interest, borrow fees and dividend and coupon withholding all follow real rules.
+## Quadra 四方
+
+This app is part of **Quadra 四方**, four apps sharing one account:
+
+| App | Was | Part it plays |
+| --- | --- | --- |
+| **四方證券 Quadra Securities** | Stock Study 股市研究室 | The base: a play-money brokerage where the money lives and grows |
+| **四方運彩 Quadra Sportsbook** | Odds Study 賠率研究室 | A side play: sports lottery odds and betting |
+| **四方賽程 Quadra Fixtures** | Match Find | A schedule tool: what's worth watching |
+| **四方單字 Quadra Words** | Orbit Vocab 英單力 | A big mini game with real benefit: English words that pay |
+
+- **The Quadra Pass 四方通行碼**: one 10-character code for all four apps and
+  every device (Shared-Proxy's `/eco` route). New syncs are passes only; an
+  old app-only code still works until it's upgraded or merged.
+- **One money pool**: Securities' NT$ cash and Sportsbook's balance are the
+  same money. Sportsbook's bets and winnings, Words' study rewards and
+  transfers between passes all land in it, with records on every side.
+- **The economy**: every account opens with NT$100,000 in Securities, which
+  pays NT$3,000 on the 1st of each month; Sportsbook adds NT$10,000 once and
+  NT$1,000 each week; both only when that app is opened. Words pays NT$2 a
+  right answer and NT$20 a newly mastered word (NT$800 a day at most);
+  Securities' and Sportsbook's mini games pay for skill, up to NT$1,000 and
+  NT$1,500 a day. Sportsbook has a weekly betting limit you can set.
+- **Merge tool** (`/Stock-Study/merge.html`): every old code in, one new
+  pass out; the old codes and their data are removed.
+- **Installed only** on phones and tablets (added to the home screen), and
+  every app checks for a new deploy on opening, on coming back and every
+  five minutes, clearing old cached files before it reloads.
+- `quadra.mjs` and `quadra.css` are the same file in all four apps; the
+  icons and link cards come from Shared-Proxy's `brand/generate.mjs`.
+
+A play-money brokerage for markets around the world. Every account starts with NT$100,000; exchange it into other currencies, and buy stocks, ETFs, government bonds, bond ETFs, mutual funds, crypto and gold at real prices, or sell short. Commissions, taxes, FX spreads, loan interest, borrow fees and dividend and coupon withholding all follow real rules.
 
 > Educational simulation with play money. Not investment advice.
 
@@ -66,12 +97,12 @@ Currency pairs trade like stocks (market, limit and stop orders, shorting, alert
 - Allocation by kind, currency or market.
 - Positions (value, P/L, today, weight), open orders, and a wallet for every currency (cash held for open orders shown). Loans show here too, and the maintenance ratio when there are any.
 - Monthly plans (next buy, last result, stop) and price alerts (distance from the price, remove).
-- **Monthly payday** (no manual adding): on the 1st of every month (00:00 Taiwan time) 3% of the starting amount arrives on its own, like a salary: NT$1,000,000 → NT$30,000 a month, NT$100,000 → NT$3,000. It counts as money put in, not as return. Missed months are paid when the page opens again; each payday has a fixed id (`pay:YYYY-MM`), so synced devices never pay twice. Accounts opened before paydays existed get them from their next 1st. The next payday shows under net worth.
+- **Monthly payday** (no manual adding): on the 1st of every month (00:00 Taiwan time) NT$3,000 arrives on its own when the app is opened, like a salary, the same for every account. It counts as money put in, not as return. Missed months are paid when the page opens again; each payday has a fixed id (`pay:YYYY-MM`), so synced devices never pay twice. Accounts opened before paydays existed get them from their next 1st. The next payday shows under net worth.
 - Sync and backups.
 
 ### 換匯・融資 FX & loans
 
-- **Exchange** between any two currencies: the mid-market rate less a bank's spread (US$ 0.2%, JPY/EUR/HKD 0.3% … INR 1%, and the wider of the two between foreign currencies). The spread doubles while the FX market is shut (weekends), as a bank's does. The receiving side is rounded down to its smallest unit.
+- **Exchange** between any two currencies, typing either what you pay or what you want to receive: the mid-market rate less a bank's spread (US$ 0.2%, JPY/EUR/HKD 0.3% … INR 1%, and the wider of the two between foreign currencies). The spread doubles while the FX market is shut (weekends), as a bank's does. The receiving side is rounded down to its smallest unit.
 - **A rates board**: NT$ per unit (per 100 for yen and won), the bank's buy and sell rates, and today's line.
 - **Margin loans** in any currency:
   - Borrowing power is the value of your holdings times a haircut (stocks, ETFs and bonds 60%, funds and gold 50%, crypto 30%).
@@ -109,7 +140,7 @@ How it works, the fee and tax table for every market, FX spreads and loan rates,
 
 | What | How |
 | --- | --- |
-| Starting money | Your choice, NT$10,000 to NT$1,000,000,000 |
+| Starting money | NT$100,000 for every account |
 | Taiwan | 0.1425% commission, min NT$20; sell tax 0.3% stocks, 0.1% ETFs, 0% bond ETFs; fractions of a dollar dropped |
 | US | 0.1% sub-brokerage commission, min US$3; SEC fee 0.00278% on sells; 30% dividend withholding |
 | Hong Kong | 0.25%, min HK$100; 0.1% stamp duty on stocks both ways; 0.0085% exchange fees |
@@ -165,7 +196,7 @@ Two devices' copies merge by uniting their logs:
 **What's still limited:**
 
 - **Price delays** (Yahoo's `exchangeDataDelayedBy`): US stocks and funds, forex, crypto and the US yields are live; Taiwan, Tokyo, Seoul and Sydney 20 minutes; Hong Kong, Shanghai, London, Paris, Frankfurt, Milan, Madrid, Zurich, Toronto and India 15; Singapore and COMEX metals 10; Amsterdam and Copenhagen live. Orders fill at those prices. The Taiwan exchange's own real-time feed refuses requests from servers, so it can't go through the Worker.
-- **Holidays:** a closed market's next opening time is estimated as the next weekday (no free holiday calendar), except when Yahoo already knows the next session.
+- **Holidays** (`public/lib/holidays.mjs`): rule-based calendars for the US, UK, Europe, Switzerland, Denmark, Canada, Australia and Japan (any year), and the published 2026-27 calendars for Taiwan, Hong Kong, China, Korea and Singapore; a closed market's next opening skips them and the detail sheet lists the next ones. Other markets, and those five past 2027, fall back to weekdays.
 - **Non-US government bonds** use reference yields, not live ones.
 
 **Refreshes:**
@@ -188,6 +219,10 @@ Two devices' copies merge by uniting their logs:
 | `public/lib/chart.mjs` | SVG sparklines, line and candlestick charts with a crosshair, 100% bars |
 | `public/lib/format.mjs` | Money, prices, percentages, 萬/億, dates |
 | `public/lib/i18n.mjs` | Traditional Chinese and English (follows the browser) |
+| `public/lib/holidays.mjs` | Exchange holiday calendars |
+| `public/lib/games.mjs` | The mini games (ticker match, the fee check) |
+| `public/lib/quadra.mjs` | Quadra: the pass, the pool, the shell (shared by the four apps) |
+| `public/merge.html` | The one-time merge tool |
 | `public/lib/timemachine.mjs` | The time machine and moving averages |
 | `public/sw.js` | Offline files and alert notifications |
 | `public/lib/sync.mjs`, `codec.mjs` | Sync and compressed saves |

@@ -1,7 +1,7 @@
 // Traditional Chinese and English. The browser's language decides.
 const STRINGS = {
   zh: {
-    appName: '股市研究室',
+    appName: '四方證券',
     footer: '模擬交易，全是虛擬的錢。報價來自 Yahoo Finance，可能延遲。不構成投資建議。',
     tab_markets: '市場',
     tab_portfolio: '資產',
@@ -14,7 +14,7 @@ const STRINGS = {
     statusUpdated: '{time} 更新',
     statusStale: '最新一次更新失敗',
     noticeNoData: '暫時拿不到報價，稍後會自動重試。帳戶資料都還在。',
-    loadingTitle: '股市研究室',
+    loadingTitle: '四方證券',
     loadingText: '正在取得全球報價…',
     overviewTitle: '全球行情',
     searchPlaceholder: '搜尋：台積電、AAPL、BTC…',
@@ -793,7 +793,7 @@ const STRINGS = {
     disclaimer: '這是教學用的模擬交易，所有的錢都是假的，不構成任何投資建議。真實投資有賠錢的風險，槓桿和加密貨幣尤其如此。'
   },
   en: {
-    appName: 'Stock Study',
+    appName: 'Quadra Securities',
     footer: 'Simulated trading with play money. Prices from Yahoo Finance, possibly delayed. Not investment advice.',
     tab_markets: 'Markets',
     tab_portfolio: 'Portfolio',
@@ -806,7 +806,7 @@ const STRINGS = {
     statusUpdated: 'Updated {time}',
     statusStale: 'last update failed',
     noticeNoData: "Prices aren't available right now; retrying shortly. Your account is safe.",
-    loadingTitle: 'Stock Study',
+    loadingTitle: 'Quadra Securities',
     loadingText: 'Getting prices from around the world…',
     overviewTitle: 'World markets',
     searchPlaceholder: 'Search: TSMC, AAPL, BTC…',

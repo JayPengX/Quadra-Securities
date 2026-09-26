@@ -4,7 +4,7 @@ import {
   newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, deposit, valuate, borrow, repay,
   repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot,
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
-  alertsFor, checkAlerts, alertHitInBars, markAlertHit, setLeagues, leagueCodes,
+  alertsFor, checkAlerts, alertHitInBars, markAlertHit,
   START_PRESETS, MIN_START, MAX_START, PLAN_MIN, taipeiDay
 } from './lib/account.mjs';
 import {
@@ -17,7 +17,6 @@ import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './li
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, stackBar, SERIES } from './lib/chart.mjs';
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
-import { createLeague, readLeague, postRow, leaveLeague, leagueRow, ranked, LEAGUE_CODE_PATTERN } from './lib/league.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { LESSONS, MISSIONS, GLOSSARY } from './lib/learn.mjs';
 import { pack, unpack } from './lib/codec.mjs';
@@ -78,7 +77,6 @@ const state = {
   plan: { amount: '5000', day: '5' },
   alertPrice: '',
   tm: { symbol: '0050.TW', amount: '100000', start: String(new Date().getFullYear() - 10), mode: 'lump', result: null, loading: false, error: false },
-  league: { data: new Map(), loading: false, error: null, posted: 0 },
   online: navigator.onLine !== false,
   installPrompt: null
 };
@@ -169,6 +167,8 @@ const dirClass = x => (x > 1e-12 ? 'up' : x < -1e-12 ? 'down' : 'flat');
 function unitOf(symbol) {
   if (METALS[symbol]) return L({ zh: METALS[symbol].unitZh, en: METALS[symbol].unitEn });
   if (BONDS[symbol]) return t('bondsUnit');
+  // A currency pair is counted in its first currency (EUR/USD: euros).
+  if (/^[A-Z]{6}=X$/.test(symbol)) return symbol.slice(0, 3);
   const kind = state.quotes.get(symbol)?.kind || catalogInfo(symbol)?.kind;
   if (kind === 'crypto' || /-USD$/.test(symbol)) return symbol.replace(/-USD$/, '');
   return kind === 'fund' ? t('units') : t('shares');
@@ -329,7 +329,6 @@ function afterPrices() {
   account = alerts.account;
   for (const a of alerts.hits) alertFired(a);
   if (account !== state.account) commit(account);
-  postLeagues();
 }
 
 // ---- Offline: the last prices are kept, so the page opens with them ------------
@@ -496,7 +495,7 @@ async function checkCorporateActions() {
   for (const [symbol, held] of Object.entries(s.held)) {
     if (METALS[symbol] || BONDS[symbol] || now - (checked[`${state.account.id}:${symbol}`] || 0) < ACTIONS_EVERY_MS) continue;
     const kind = state.account.events.find(e => e.symbol === symbol)?.kind;
-    if (kind === 'crypto') continue;
+    if (kind === 'crypto' || kind === 'fx') continue;
     try {
       const actions = await fetchCorporateActions(symbol, held.first);
       const r = applyCorporateActions(state.account, symbol, actions, { rates: state.rates, now: Date.now() });
@@ -570,7 +569,7 @@ function marketStatus(q) {
   return `<span class="mkt-status">${statusDot(q)}${h(next)} <small>(${h(t('localTime'))} ${h(clock(now, q.tz))})</small></span>`;
 }
 function symbolBadge(symbol, q) {
-  const text = BONDS[symbol] ? symbol.split('-')[1] : bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
+  const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
   return `<span class="sym-badge k-${h(q?.kind || catalogInfo(symbol)?.kind || 'stock')}">${h(text)}</span>`;
 }
 
@@ -630,7 +629,7 @@ function renderMarkets() {
   const cat = CATEGORIES.find(c => c.id === state.category);
   const symbols = state.category === 'watch' ? watch : cat.items.map(i => i[0]);
   $('list-title').textContent = state.category === 'watch' ? t('watchlist') : L(cat);
-  $('list-note').textContent = cat?.id === 'index' || cat?.id === 'metal' ? t('watchOnlyNote') : cat?.id === 'crypto' ? t('cryptoNote') : '';
+  $('list-note').textContent = cat?.id === 'index' || cat?.id === 'metal' ? t('watchOnlyNote') : cat?.id === 'crypto' ? t('cryptoNote') : cat?.id === 'fx' ? t('fxTradeNote') : '';
   $('quote-list').innerHTML = symbols.map(s => quoteRow(s)).join('') || `<p class="empty">${h(t('nothingHere'))}</p>`;
 }
 
@@ -920,7 +919,6 @@ function kpi(label, value, sub = '', dir = '') {
 
 function trackersHtml(symbol) {
   const list = TRACKERS[symbol] || [];
-  if (symbol.endsWith('=X')) return `<div class="card note-card"><p>${h(t('fxWatchOnly'))}</p><div class="button-row"><button class="primary-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button></div></div>`;
   return `<div class="card note-card"><p>${h(t('watchOnly'))}</p>${
     list.length ? `<p class="muted">${h(t('trackWith'))}</p><div class="button-row">${list.map(s => `<button class="ghost-button" type="button" data-action="open" data-symbol="${h(s)}">${h(nameOf(s))} <small>${h(bareSymbol(s))}</small></button>`).join('')}</div>` : ''
   }</div>`;
@@ -1152,6 +1150,8 @@ function renderTicket() {
       ? [[t('pct25'), roundQty(shares * 0.25, q.kind)], [t('pct50'), roundQty(shares * 0.5, q.kind)], [t('all'), roundQty(shares, q.kind)], [t('maxShort'), roundQty(shares + shortRoom, q.kind)]]
       : q.kind === 'govbond'
         ? [[t('max'), max], ['1', 1], ['10', 10], ['100', 100]]
+        : q.kind === 'fx'
+        ? [[t('max'), max], ['1,000', 1000], ['10,000', 10_000], ['100,000', 100_000]]
         : q.kind === 'crypto'
         ? [[t('max'), max], ['0.001', 0.001], ['0.01', 0.01], ['0.1', 0.1], ['1', 1]]
         : q.market === 'TW'
@@ -1308,7 +1308,6 @@ function renderPortfolio() {
       <div class="wallets">${v.cash.map(c => walletRow(c, c.amount - (avail.cash[c.currency] ?? c.amount))).join('')}${v.loans.map(loanWalletRow).join('')}</div>
       <p class="note">${h(t('walletsNote'))}</p>
     </div>
-    ${leagueTeaserHtml()}
     ${syncCardHtml()}
   `;
   renderNetWorthChart(v, s);
@@ -1342,17 +1341,6 @@ function alertsListHtml() {
       ${a.on ? `<button class="ghost-button small" type="button" data-action="alert-off" data-id="${h(a.id)}">${h(t('remove'))}</button>` : ''}</div>`;
     })
     .join('')}</div>`;
-}
-
-function leagueTeaserHtml() {
-  const codes = leagueCodes(state.account);
-  const mine = codes.map(c => state.league.data.get(c)).filter(Boolean);
-  const ranks = mine.map(l => {
-    const list = ranked(l.members);
-    const i = list.findIndex(m => m.id === state.account.leagues?.id);
-    return i >= 0 ? `${l.name} #${i + 1}/${list.length}` : null;
-  }).filter(Boolean);
-  return `<div class="card league-teaser"><div><h3 class="card-title">🏆 ${h(t('leagueTitle'))}</h3><p class="muted">${h(ranks.length ? ranks.join(' · ') : t('leagueTeaser'))}</p></div><button class="ghost-button" type="button" data-action="league-go">${h(codes.length ? t('leagueOpen') : t('leagueStart'))}</button></div>`;
 }
 
 function heroStat(label, value, sub, dir = '') {
@@ -1560,6 +1548,7 @@ function renderFx() {
       <div class="card">
         <h3 class="card-title">${h(t('ratesTitle'))}</h3>
         <p class="lede">${h(t('ratesIntro'))}</p>
+        <div class="button-row"><button class="ghost-button" type="button" data-action="fx-trade">💱 ${h(t('fxTradeButton'))}</button></div>
         <div class="rates">${Object.keys(CURRENCIES).filter(c => c !== BASE).map(rateRow).join('')}</div>
       </div>
     </div>
@@ -1726,7 +1715,7 @@ function renderHistory() {
     box.innerHTML = setupCardHtml();
     return;
   }
-  const views = ['activity', 'orders', 'stats', 'league'];
+  const views = ['activity', 'orders', 'stats'];
   const tabs = `<div class="segmented history-tabs" role="group">${views.map(x => `<button type="button" data-action="hview" data-view="${x}" aria-pressed="${state.historyView === x}">${h(t(`hview_${x}`))}</button>`).join('')}</div>`;
   if (state.historyView === 'orders') {
     const open = state.account.orders.filter(o => o.status === 'open').reverse();
@@ -1739,10 +1728,6 @@ function renderHistory() {
   if (state.historyView === 'stats') {
     box.innerHTML = `${tabs}${statsHtml()}`;
     renderBench();
-    return;
-  }
-  if (state.historyView === 'league') {
-    box.innerHTML = `${tabs}${leagueHtml()}`;
     return;
   }
   const events = [...state.account.events].filter(ACTIVITY_FILTERS[state.activityFilter]).sort((a, b) => b.t - a.t);
@@ -1892,167 +1877,6 @@ async function renderBench() {
     state.bench = { key, at: Date.now(), rows: [] };
   }
   if ($('bench')) draw();
-}
-
-// ---- Friend leagues -----------------------------------------------------------------
-
-const formatCode = code => `${code.slice(0, 4)} ${code.slice(4)}`;
-const shareUrl = code => `${location.origin}${location.pathname}#league=${code}`;
-
-function leagueHtml() {
-  const me = state.account.leagues;
-  const codes = leagueCodes(state.account);
-  const nick = me?.nick || '';
-  const lg = state.league;
-  const intro = `<div class="card">
-    <h3 class="card-title">🏆 ${h(t('leagueTitle'))}</h3>
-    <p class="lede">${h(t('leagueIntro'))}</p>
-    <form class="custom-start" data-form="nick"><label class="field grow"><span>${h(t('leagueNick'))}</span><input id="league-nick" maxlength="20" autocomplete="nickname" value="${h(nick)}" placeholder="${h(t('leagueNickPh'))}" /></label><button class="ghost-button" type="submit">${h(t('save'))}</button></form>
-    <div class="two-col tight">
-      <form class="custom-start" data-form="league-new"><label class="field grow"><span>${h(t('leagueNewName'))}</span><input id="league-name" maxlength="40" autocomplete="off" placeholder="${h(t('leagueNamePh'))}" /></label><button class="primary-button" type="submit" ${lg.loading ? "disabled" : ""}>${h(t('leagueCreate'))}</button></form>
-      <form class="custom-start" data-form="league-join"><label class="field grow"><span>${h(t('leagueCode'))}</span><input id="league-code" autocomplete="off" autocapitalize="characters" placeholder="ABCD 2345" value="${h(state.league.pending || '')}" /></label><button class="ghost-button" type="submit" ${lg.loading ? "disabled" : ""}>${h(t('leagueJoin'))}</button></form>
-    </div>
-    ${lg.error ? `<p class="warn">${h(lg.error)}</p>` : ''}
-    <p class="note">${h(t('leagueNote'))}</p>
-  </div>`;
-  const boards = codes.map(code => leagueBoardHtml(code)).join('');
-  return codes.length ? `${boards}${intro}` : intro;
-}
-
-function leagueBoardHtml(code) {
-  const l = state.league.data.get(code);
-  const myId = state.account.leagues?.id;
-  if (!l) return `<div class="card"><h3 class="card-title">${h(formatCode(code))}</h3><p class="muted">${h(state.league.loading ? t('leagueLoading') : t('leagueUnavailable'))}</p></div>`;
-  const list = ranked(l.members);
-  const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}`;
-  const rows = list
-    .map((m, i) => {
-      const days = Math.max(1, Math.round((Date.now() - m.since) / 86_400_000));
-      const top = (m.top || []).slice(0, 3).map(x => `<button class="chip small" type="button" data-action="open" data-symbol="${h(x.s)}">${h(catalogInfo(x.s) ? nameOf(x.s) : x.n)} <small>${h(pct(x.w, { sign: false, digits: 0 }))}</small></button>`).join('');
-      return `<li class="${m.id === myId ? 'me' : ''}"><span class="rank">${medal(i)}</span><span class="row-main"><span class="row-title">${h(m.nick)}${m.id === myId ? ` <small>${h(t('leagueYou'))}</small>` : ''}</span><span class="row-sub">${h(t('leagueSince', { days }))} · ${h(t('leagueTrades', { n: m.trades ?? 0 }))} · ${h(t('leagueUpdated', { time: dateTime(m.t) }))}</span>${top ? `<span class="league-top">${top}</span>` : ''}</span><strong class="num ${dirClass(m.pct)}">${h(pct(m.pct))}</strong></li>`;
-    })
-    .join('');
-  return `<div class="card league-card">
-    <div class="card-head"><h3 class="card-title">${h(l.name)}</h3><span class="sync-code num small">${h(formatCode(code))}</span></div>
-    ${rows ? `<ol class="leaderboard">${rows}</ol>` : `<p class="muted">${h(t('leagueEmpty'))}</p>`}
-    <div class="button-row"><button class="primary-button" type="button" data-action="league-share" data-code="${h(code)}">${h(t('leagueShare'))}</button><button class="ghost-button" type="button" data-action="league-refresh">${h(t('leagueRefresh'))}</button><button class="ghost-button danger" type="button" data-action="league-leave" data-code="${h(code)}">${h(t('leagueLeave'))}</button></div>
-    <p class="note">${h(t('leagueRankNote'))}</p>
-  </div>`;
-}
-
-// Everyone's rows, fresh.
-async function loadLeagues() {
-  const codes = leagueCodes(state.account);
-  if (!codes.length) return;
-  state.league.loading = true;
-  await Promise.all(
-    codes.map(async code => {
-      try {
-        state.league.data.set(code, await readLeague(code));
-      } catch (error) {
-        if (error.code === 'LEAGUE_NOT_FOUND') state.league.data.delete(code);
-      }
-    })
-  );
-  state.league.loading = false;
-  if (state.tab === 'history' || state.tab === 'portfolio') render();
-}
-
-// This account's row in each league, at most every 10 minutes (or now).
-async function postLeagues({ force = false } = {}) {
-  const me = state.account?.leagues;
-  const codes = leagueCodes(state.account);
-  if (!codes.length || !me?.nick || !pricesLive() || (!force && Date.now() - state.league.posted < 10 * 60_000)) return;
-  const v = valuation();
-  if (!v || v.missingRates.length) return;
-  state.league.posted = Date.now();
-  const row = leagueRow(me.nick, v, state.account);
-  await Promise.all(
-    codes.map(async code => {
-      try {
-        state.league.data.set(code, await postRow(code, me, row));
-      } catch {}
-    })
-  );
-  if (state.tab === 'history' && state.historyView === 'league') renderHistory();
-}
-
-function saveNick(value) {
-  const nick = value.trim().slice(0, 20);
-  if (!nick) return toast(t('leagueNeedNick'), 'bad');
-  commit(setLeagues(state.account, { nick }));
-  toast(t('saved'), 'good');
-  postLeagues({ force: true });
-  renderHistory();
-}
-
-async function newLeague(name) {
-  if (!state.account.leagues?.nick) return toast(t('leagueNeedNick'), 'bad');
-  name = name.trim();
-  if (!name) return toast(t('leagueNeedName'), 'bad');
-  state.league.loading = true;
-  state.league.error = null;
-  renderHistory();
-  try {
-    const l = await createLeague(name);
-    state.league.data.set(l.code, l);
-    commit(setLeagues(state.account, { join: l.code }));
-    await postLeagues({ force: true });
-    toast(t('leagueCreated'), 'good');
-  } catch (error) {
-    state.league.error = t('syncFailed', { why: error.message });
-  }
-  state.league.loading = false;
-  renderHistory();
-}
-
-async function joinLeague(text) {
-  if (!state.account.leagues?.nick) {
-    state.league.pending = text;
-    return toast(t('leagueNeedNick'), 'bad');
-  }
-  const code = cleanPasscode(text);
-  if (!LEAGUE_CODE_PATTERN.test(code)) return toast(t('badCode'), 'bad');
-  state.league.loading = true;
-  state.league.error = null;
-  renderHistory();
-  try {
-    state.league.data.set(code, await readLeague(code));
-    commit(setLeagues(state.account, { join: code }));
-    state.league.pending = '';
-    await postLeagues({ force: true });
-    toast(t('leagueJoined'), 'good');
-  } catch (error) {
-    state.league.error = error.code === 'LEAGUE_NOT_FOUND' ? t('leagueNotFound') : t('syncFailed', { why: error.message });
-  }
-  state.league.loading = false;
-  renderHistory();
-}
-
-async function quitLeague(code) {
-  if (!confirm(t('leagueLeaveConfirm'))) return;
-  try {
-    await leaveLeague(code, state.account.leagues);
-  } catch {}
-  commit(setLeagues(state.account, { leave: code }));
-  state.league.data.delete(code);
-  renderHistory();
-}
-
-async function shareLeague(code) {
-  const l = state.league.data.get(code);
-  const text = t('leagueShareText', { name: l?.name || '', code: formatCode(code) });
-  try {
-    if (navigator.share) return await navigator.share({ title: t('appName'), text, url: shareUrl(code) });
-  } catch {
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(`${text} ${shareUrl(code)}`);
-    toast(t('copied'), 'good');
-  } catch {
-    prompt(t('leagueCopy'), shareUrl(code));
-  }
 }
 
 // ---- Guide tab ----------------------------------------------------------------------------
@@ -2299,6 +2123,7 @@ function renderGuide() {
     fold('💸', t('g_fees'), `${para('g_fees1')}${feeTable()}${para('g_fees2')}`),
     fold('💱', t('g_fx'), `${para('g_fx1')}${fxTable()}${para('g_fx2')}`),
     fold('📝', t('g_orders'), ['g_orders1', 'g_orders2', 'g_orders3', 'g_orders4'].map(para).join('')),
+    fold('💹', t('g_forex'), ['g_forex1', 'g_forex2', 'g_forex3'].map(para).join('')),
     fold('🕘', t('g_hours'), ['g_hours1', 'g_hours2'].map(para).join('')),
     fold('🏛️', t('g_bonds'), ['g_bonds1', 'g_bonds2', 'g_bonds3'].map(para).join('')),
     fold('📉', t('g_short'), ['g_short1', 'g_short2'].map(para).join('')),
@@ -2715,6 +2540,13 @@ document.addEventListener('click', event => {
       renderFx();
       break;
     }
+    case 'fx-trade':
+      state.category = 'fx';
+      state.query = '';
+      $('search').value = '';
+      showTab('markets');
+      refresh({ list: true });
+      break;
     case 'fx-go':
       doExchange();
       break;
@@ -2730,7 +2562,6 @@ document.addEventListener('click', event => {
     case 'hview':
       state.historyView = el.dataset.view;
       renderHistory();
-      if (state.historyView === 'league') loadLeagues();
       break;
     case 'afilter':
       state.activityFilter = el.dataset.f;
@@ -2822,20 +2653,6 @@ document.addEventListener('click', event => {
     case 'tm-go':
       runTimeMachine();
       break;
-    case 'league-go':
-      state.historyView = 'league';
-      showTab('history');
-      loadLeagues();
-      break;
-    case 'league-share':
-      shareLeague(el.dataset.code);
-      break;
-    case 'league-refresh':
-      postLeagues({ force: true }).then(loadLeagues);
-      break;
-    case 'league-leave':
-      quitLeague(el.dataset.code);
-      break;
     case 'install':
       installApp();
       break;
@@ -2883,9 +2700,6 @@ document.addEventListener('submit', event => {
   event.preventDefault();
   if (form.dataset.form === 'start') openAccount(form.querySelector('#start-amount').value);
   if (form.dataset.form === 'link') linkDevice(form.querySelector('#link-code').value);
-  if (form.dataset.form === 'nick') saveNick(form.querySelector('#league-nick').value);
-  if (form.dataset.form === 'league-new') newLeague(form.querySelector('#league-name').value);
-  if (form.dataset.form === 'league-join') joinLeague(form.querySelector('#league-code').value);
 });
 
 // Typing: keep the caret where it was when the ticket redraws.
@@ -3039,15 +2853,6 @@ window.__stockStarted = true;
 applySettings();
 state.sync.code = loadSyncCode();
 loadQuotes();
-{
-  // A shared league link: #league=ABCD2345 opens the league page to join.
-  const m = /^#league=([2-9A-HJ-NP-Z]{8})$/i.exec(location.hash);
-  if (m) {
-    state.tab = 'history';
-    state.historyView = 'league';
-    state.league.pending = m[1].toUpperCase();
-  }
-}
 renderStatic();
 render();
 loadAccount().then(account => {
@@ -3067,7 +2872,6 @@ loadAccount().then(account => {
         checkCorporateActions();
         checkPlans();
         checkAlertHistory();
-        loadLeagues();
       });
     });
   if (state.sync.code)

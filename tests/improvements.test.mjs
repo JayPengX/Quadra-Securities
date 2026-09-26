@@ -3,12 +3,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   newAccount, replay, setPlan, planRuns, nextPlanRun, runPlan, activePlans, setAlert, checkAlerts, alertHitInBars, markAlertHit, activeAlerts,
-  mergeAccounts, setLeagues, leagueCodes, planDue
+  mergeAccounts, planDue
 } from '../public/lib/account.mjs';
 import { timeMachine, movingAverage, valueAt } from '../public/lib/timemachine.mjs';
 import { parseFundamentals, parseChart } from '../public/lib/quotes.mjs';
 import { candleChart } from '../public/lib/chart.mjs';
-import { leagueRow, ranked } from '../public/lib/league.mjs';
 
 const DAY = 86_400_000;
 const T0 = Date.parse('2026-01-10T10:00:00+08:00');
@@ -81,18 +80,13 @@ test('price alerts go off once, on a quote or in the bars since they were set', 
   assert.equal(setAlert(a, { symbol: 'X', op: 'above', price: 0 }).error, 'alertPrice');
 });
 
-test('plans, alerts and leagues merge across devices, the latest change winning', () => {
+test('plans and alerts merge across devices, the latest change winning', () => {
   const base = newAccount(100_000, T0, 'acc');
   const phone = setAlert(setPlan(base, { id: 'p', symbol: 'VOO', amount: 3000, day: 5 }, T0 + 1).account, { id: 'a', symbol: 'VOO', op: 'above', price: 700 }, T0 + 2).account;
-  const laptop = setLeagues(setPlan(base, { id: 'p', symbol: 'VOO', amount: 6000, day: 5 }, T0 + 5).account, { nick: 'Jay', join: 'ABCDEFGH' }, T0 + 6);
+  const laptop = setPlan(base, { id: 'p', symbol: 'VOO', amount: 6000, day: 5 }, T0 + 5).account;
   const m = mergeAccounts(phone, laptop);
   assert.equal(m.plans.p.amount, 6000);
   assert.equal(m.alerts.a.price, 700);
-  assert.deepEqual(leagueCodes(m), ['ABCDEFGH']);
-  assert.match(m.leagues.id, /^[a-z0-9]{12}$/);
-  assert.match(m.leagues.secret, /^[A-Za-z0-9]{16,64}$/);
-  const left = setLeagues(m, { leave: 'ABCDEFGH' }, T0 + 9);
-  assert.deepEqual(leagueCodes(mergeAccounts(left, laptop)), []);
 });
 
 test('time machine: a lump sum, monthly buying, drawdown and the bank', () => {
@@ -139,10 +133,24 @@ test('candles draw from chart bars, with volume', () => {
   assert.equal(frame.count, 60);
 });
 
-test('league rows compare returns, best first', () => {
-  const v = { totalReturnPct: 0.1, netWorth: 110_000, deposits: 100_000, positions: [{ symbol: 'VOO', name: 'VOO', valueTWD: 50_000, weight: 0.4545, short: false }] };
-  const row = leagueRow('Jay', v, { created: T0, events: [{ type: 'fill' }, { type: 'fx' }] });
-  assert.deepEqual(row.top, [{ s: 'VOO', n: 'VOO', w: 0.455 }]);
-  assert.equal(row.trades, 1);
-  assert.deepEqual(ranked([{ nick: 'a', pct: 0.1, since: 2 }, { nick: 'b', pct: 0.3, since: 1 }, { nick: 'c', pct: null }]).map(m => m.nick), ['b', 'a']);
+test('currency pairs trade in their second currency, long or short, for a spread only', async () => {
+  const { placeOrder, valuate, exchange } = await import('../public/lib/account.mjs');
+  const { marketOf, isTradable, isShortable } = await import('../public/lib/markets.mjs');
+  assert.equal(marketOf('EURUSD=X', 'fx'), 'FX');
+  assert.ok(isTradable('fx') && isShortable('fx'));
+  const rates = { TWD: 1, USD: 32 };
+  const at = Date.parse('2026-09-22T10:00:00+08:00');
+  const q = { symbol: 'EURUSD=X', name: 'EUR/USD', kind: 'fx', market: 'FX', currency: 'USD', price: 1.14, prev: 1.14, session: { start: at - 3_600_000, end: at + 3_600_000 }, marketTime: at };
+  let a = exchange(newAccount(1_000_000, at, 'fx'), { from: 'TWD', to: 'USD', amount: 500_000 }, { rates, now: at, id: 'x' }).account;
+  const r = placeOrder(a, { side: 'buy', qty: 10_000 }, { quote: q, rates, now: at, id: 'b' });
+  assert.equal(r.fill.commission, 0);
+  assert.ok(Math.abs(r.fill.price - 1.14 * 1.0002) < 1e-12);
+  assert.ok(Math.abs(r.fill.total - 11_402.28) < 0.01);
+  a = r.account;
+  const up = { ...q, price: 1.16 };
+  const v = valuate(replay(a, at), new Map([['EURUSD=X', up]]), rates);
+  assert.ok(Math.abs(v.positions[0].value - 11_600) < 1e-6);
+  const short = placeOrder(a, { side: 'sell', qty: 20_000 }, { quote: up, rates, valuation: v, now: at + 1, id: 's' });
+  assert.equal(short.order.short, true);
+  assert.equal(replay(short.account, at + 1).positions['EURUSD=X'].qty, -10_000);
 });

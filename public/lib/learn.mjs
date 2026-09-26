@@ -399,14 +399,13 @@ export const MISSIONS = [
   { id: 'etf', zh: '買一檔 ETF', en: 'Buy an ETF', done: a => fills(a).some(e => e.side === 'buy' && (e.kind === 'etf' || e.kind === 'bond')) },
   { id: 'limit', zh: '掛一張限價單', en: 'Place a limit order', done: a => (a?.orders || []).some(o => o.type === 'limit') },
   { id: 'fx', zh: '換一次外幣', en: 'Exchange some currency', done: a => (a?.events || []).some(e => e.type === 'fx') },
-  { id: 'foreign', zh: '買一檔外國的股票或 ETF', en: 'Buy something abroad', done: a => fills(a).some(e => e.side === 'buy' && e.currency !== 'TWD' && e.market !== 'CRYPTO') },
+  { id: 'foreign', zh: '買一檔外國的股票或 ETF', en: 'Buy something abroad', done: a => fills(a).some(e => e.side === 'buy' && e.currency !== 'TWD' && e.market !== 'CRYPTO' && e.market !== 'FX') },
   { id: 'bond', zh: '買一張公債', en: 'Buy a government bond', done: a => fills(a).some(e => e.side === 'buy' && e.kind === 'govbond') },
   { id: 'income', zh: '領到股利或利息', en: 'Receive a dividend or coupon', done: a => (a?.events || []).some(e => e.type === 'div' && e.net > 0) },
   { id: 'spread', zh: '同時持有 3 個不同市場', en: 'Hold 3 different markets at once', done: a => maxMarketsHeld(a) >= 3 },
   { id: 'patient', zh: '一檔持有超過 30 天', en: 'Hold something for 30+ days', done: (a, now = Date.now()) => heldLong(a, now) },
   { id: 'plan', zh: '設定一個定期定額', en: 'Start a monthly plan', done: a => Object.keys(a?.plans || {}).length > 0 },
-  { id: 'alert', zh: '設一個到價通知', en: 'Set a price alert', done: a => Object.keys(a?.alerts || {}).length > 0 },
-  { id: 'league', zh: '和朋友開一場比賽', en: 'Join a league with friends', done: a => Object.keys(a?.leagues?.codes || {}).length > 0 }
+  { id: 'alert', zh: '設一個到價通知', en: 'Set a price alert', done: a => Object.keys(a?.alerts || {}).length > 0 }
 ];
 
 const fills = a => (a?.events || []).filter(e => e.type === 'fill' && !e.forced && !e.maturity);
@@ -464,5 +463,6 @@ export const GLOSSARY = [
   ['K 線 Candlestick', '一根代表一段時間：實體是開盤到收盤，細線是最高到最低；紅漲綠跌（台灣習慣）。', 'One bar per period: the body spans open to close, the wick high to low.'],
   ['均線 Moving average (MA)', '最近 N 根 K 線收盤價的平均，看趨勢用；MA20 大約是一個月。', 'The average close of the last N bars, to see the trend; MA20 on daily bars is about a month.'],
   ['最大回撤 Max drawdown', '從最高點跌到最低點的幅度，代表你中途要忍受多大的帳面虧損。', 'The largest fall from a high to a low: how much paper loss you’d have had to sit through.'],
+  ['貨幣對 Currency pair', '外匯的報價方式：EUR/USD = 1.14 代表 1 歐元換 1.14 美元。買進代表賭前面的貨幣會升值。', 'How forex is quoted: EUR/USD = 1.14 means one euro buys 1.14 dollars. Buying it bets the first currency rises.'],
   ['牛市 / 熊市 Bull / bear market', '大漲一段時間 / 大跌一段時間（通常跌 20% 以上）。', 'A long rise / a long fall (usually 20%+).']
 ];

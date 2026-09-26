@@ -25,7 +25,7 @@ test('every key the page asks for exists', () => {
     otype_: ['market', 'limit', 'stop'],
     status_: ['open', 'filled', 'cancelled', 'rejected'],
     alloc_: ['kind', 'currency', 'market'],
-    hview_: ['activity', 'orders', 'stats', 'league'],
+    hview_: ['activity', 'orders', 'stats'],
     af_: ['all', 'trades', 'fx', 'income', 'loans', 'cash'],
     cost_: ['commission', 'tax', 'fee', 'fx', 'interest', 'withheld', 'nhi', 'borrow'],
     margin_: ['ok', 'call', 'liquidate'],

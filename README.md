@@ -16,7 +16,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 
 - **Search:** by Chinese name, English name or ticker. Chinese finds the curated lists; Latin letters also search Yahoo Finance, which reaches almost any listed stock, ETF or fund worldwide (`7203.T`, `0700.HK`, `SAP.DE`, `PETR4.SA` …).
 - **World markets strip:** TAIEX, S&P 500, Nasdaq, SOX, Nikkei, Hang Seng, Bitcoin, USD/TWD, the gold passbook, the US 10-year yield.
-- **Lists** (`public/lib/catalog.mjs`, about 300 items with Chinese names): Taiwan stocks (TWSE and TPEx), Taiwan ETFs (0050, 0056, 00878, leveraged and inverse ones …), US stocks, US ETFs, government bonds (see below), bond ETFs (Taiwan's bond ETFs, US Treasury and corporate bond ETFs, and Treasury yields to watch), crypto, gold and commodities, Japan, Hong Kong and China A-shares, Korea, Europe, US mutual funds, more markets (Canada, Australia, Singapore, India), and indexes. There's a watchlist (☆ on any item) too.
+- **Lists** (`public/lib/catalog.mjs`, about 300 items with Chinese names): Taiwan stocks (TWSE and TPEx), Taiwan ETFs (0050, 0056, 00878, leveraged and inverse ones …), US stocks, US ETFs, government bonds (see below), bond ETFs (Taiwan's bond ETFs, US Treasury and corporate bond ETFs, and Treasury yields to watch), crypto, forex (18 currency pairs), gold and commodities, Japan, Hong Kong and China A-shares, Korea, Europe, US mutual funds, more markets (Canada, Australia, Singapore, India), and indexes. There's a watchlist (☆ on any item) too.
 - **Each row:** today's price line against yesterday's close, the price and its currency, whether its market is open, and the day's change.
 - **Up and down colours:** red for up and green for down (Taiwan's way) in Chinese, green for up in English. The guide's settings switch either way.
 
@@ -35,7 +35,11 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - **Monthly plan** (📅 定期定額): buy NT$X on day N of every month. Each month buys at the first price after 00:00 Taiwan time on its day, as many units as the money covers after costs (a foreign one exchanges only the NT$ it needs, at that moment's rate). Missed months are bought from the price history when the page opens again; a month without enough NT$ is skipped and recorded.
 - **Time machine** link: what buying this years ago would be worth now.
 - **About the company / fund:** market value, P/E, EPS, dividend yield, margins, ROE, revenue growth, beta, P/B, sector, with a one-line explanation of each; for funds the expense ratio, size, yield, issuer and top 10 holdings; what it does; recent news (English).
-- Indexes and futures are watch-only and point to what tracks them (TAIEX → 0050, S&P 500 → VOO/SPY/00646, gold → the gold passbook/GLD/00635U …). Exchange rates point to the FX tab.
+- Indexes and futures are watch-only and point to what tracks them (TAIEX → 0050, S&P 500 → VOO/SPY/00646, gold → the gold passbook/GLD/00635U …).
+
+### 外匯 Forex
+
+Currency pairs trade like stocks (market, limit and stop orders, shorting, alerts, candles). EUR/USD = 1.14 means one euro is worth US$1.14: buying 10,000 EUR/USD costs US$11,400 and is counted in euros. A pair settles in its second currency (`EURUSD=X` in US$, `USDJPY=X` in yen, `USDTWD=X` in NT$). No commission, a 0.02% spread each way; Yahoo's weekday sessions. Borrowing against a pair: 50% of its value. This is apart from the FX tab, which only changes money from one currency to another.
 
 ### 公債 Government bonds
 
@@ -82,7 +86,6 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
   - closed trades (win rate, average return and hold, best and worst);
   - P/L by market;
   - **you vs. just buying an index**: the same deposits on the same days into 0050, VOO (in NT$), Bitcoin (in NT$) or the gold passbook.
-- **Friends:** leagues ranked by return (so any starting amount is fair). Pick a nickname, create a league or join one by its 8-character code or a shared `#league=CODE` link. Each member's row (nickname, return, net worth, money put in, days, trades, top holdings) is posted at most every 10 minutes; only the browser holding the row's secret can change it.
 
 ### 學習 Learn
 
@@ -93,8 +96,8 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - **Try it:** buttons open the relevant stock or tab.
 - **Time machine:** NT$X once, or every month, into 0050, TSMC, VOO, QQQ, Bitcoin, gold… since any year from 2000. Monthly closes with dividends reinvested, foreign ones at each month's NT$ rate. Shows what it's worth now, the yearly return, the biggest drop along the way (and when), the best and worst years, and the same money in a bank deposit.
 - **A one-question quiz** ends each lesson; the right answer marks the lesson done, with a progress bar.
-- **Beginner missions** tick themselves off from the account's history: first Taiwan stock, first ETF, a limit order, an exchange, something abroad, a government bond, a dividend or coupon, three markets at once, a 30-day hold, a monthly plan, a price alert, a league.
-- **A glossary** of 25 terms.
+- **Beginner missions** tick themselves off from the account's history: first Taiwan stock, first ETF, a limit order, an exchange, something abroad, a government bond, a dividend or coupon, three markets at once, a 30-day hold, a monthly plan, a price alert.
+- **A glossary** of 26 terms.
 
 Below it, the reference:
 
@@ -156,7 +159,7 @@ Two devices' copies merge by uniting their logs:
 - Waiting orders are checked and today's net worth recorded after each refresh.
 - Dividends and splits are checked twice a day for everything ever held.
 
-**Offline and installable:** `public/sw.js` keeps the page's own files (each stamped version once), and the last prices are saved, so the app opens without a connection and shows when its prices are from; trading and exchanging wait for live prices. It can be installed to a phone's home screen.
+**Offline and installable:** opened from the home screen, the top bar starts below the status bar (`env(safe-area-inset-top)`) and is solid rather than see-through, which iPadOS smeared. `public/sw.js` keeps the page's own files (each stamped version once), and the last prices are saved, so the app opens without a connection and shows when its prices are from; trading and exchanging wait for live prices. It can be installed to a phone's home screen.
 
 **Saves** are gzip-compressed (`codec.mjs`) in `localStorage`. The optional sync goes through Shared-Proxy's `/stock-sync` route (Firestore, 8-character passcode, `sync.mjs`). A backup file can be downloaded and restored (merged, nothing counted twice).
 
@@ -171,7 +174,6 @@ Two devices' copies merge by uniting their logs:
 | `public/lib/format.mjs` | Money, prices, percentages, 萬/億, dates |
 | `public/lib/i18n.mjs` | Traditional Chinese and English (follows the browser) |
 | `public/lib/timemachine.mjs` | The time machine and moving averages |
-| `public/lib/league.mjs` | Friend leagues through `/stock-league` |
 | `public/sw.js` | Offline files and alert notifications |
 | `public/lib/sync.mjs`, `codec.mjs` | Sync and compressed saves |
 | `public/app.js` | Rendering and wiring |

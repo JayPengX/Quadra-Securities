@@ -134,7 +134,14 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
   background: var(--bar-bg); backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px);
   border-bottom: 1px solid var(--border);
 }
-.appbar-inner { max-width: 1120px; margin: 0 auto; padding: 8px 16px; display: flex; align-items: center; gap: 12px; }
+.appbar-inner { max-width: 1120px; margin: 0 auto; padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); display: flex; align-items: center; gap: 12px; }
+/* Opened from the home screen (iPad, iPhone, Android): the page runs under
+   the status bar, so the bar starts below it; and a solid bar, since a
+   see-through blurred one under the status bar looks smeared on iPadOS. */
+.appbar { padding-top: env(safe-area-inset-top); }
+@media (display-mode: standalone) {
+  .appbar { background: var(--page); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
 .brand-logo { width: 36px; height: 36px; border-radius: 10px; flex: none; box-shadow: var(--shadow-sm); }
 .brand-text { min-width: 0; }
@@ -182,7 +189,7 @@ h1 { font-size: 1.1rem; letter-spacing: -0.01em; line-height: 1.2; }
 /* Phones: no app bar, only its tabs (fixed at the bottom). A backdrop filter
    would make the bar the fixed tabs' containing block, so it goes too. */
 @media (max-width: 720px) {
-  .appbar { position: static; height: 0; border: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .appbar { position: static; height: 0; padding-top: 0; border: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .appbar-inner { padding: 0; }
   .brand { display: none; }
 }
@@ -660,16 +667,3 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .tm-card > .primary-button { justify-self: start; }
 .tm-result { display: grid; gap: 10px; border-top: 1px solid var(--grid); padding-top: 12px; }
 .tm-line { font-weight: 700; margin: 0; }
-
-/* ---- Friends league ----------------------------------------------------------------------- */
-.league-teaser { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.league-teaser .card-title { margin-bottom: 2px; }
-.league-teaser p { margin: 0; }
-.two-col.tight { gap: 10px; margin: 10px 0; }
-.sync-code.small { font-size: 0.95rem; letter-spacing: 0.08em; color: var(--text-secondary); }
-.leaderboard { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
-.leaderboard li { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-raised); }
-.leaderboard li.me { background: var(--accent-wash); outline: 1px solid var(--accent); }
-.leaderboard .rank { font-size: 1.15rem; text-align: center; font-weight: 800; color: var(--text-secondary); }
-.leaderboard strong { font-size: 1.05rem; }
-.league-top { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

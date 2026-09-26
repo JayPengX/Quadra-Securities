@@ -896,10 +896,6 @@ export function mergeAccounts(a, b) {
   };
   if (a.plans || b.plans) merged.plans = latest(a.plans, b.plans);
   if (a.alerts || b.alerts) merged.alerts = latest(a.alerts, b.alerts);
-  if (a.leagues || b.leagues) {
-    const [x, y] = (a.leagues?.t || 0) >= (b.leagues?.t || 0) ? [a.leagues, b.leagues] : [b.leagues, a.leagues];
-    merged.leagues = { ...(y || {}), ...x, codes: latest(y?.codes, x?.codes) };
-  }
   return merged;
 }
 
@@ -1074,19 +1070,3 @@ export function markAlertHit(account, id, { t, price }, now = Date.now()) {
   if (!a?.on) return account;
   return { ...account, alerts: { ...account.alerts, [id]: { ...a, on: false, t: now, hit: { t, price } } } };
 }
-
-// ---- Friend leagues -------------------------------------------------------------
-//
-// Who this account is in its friend leagues: a nickname, a member id and a
-// secret (only this person's devices can change their row), and the league
-// codes joined. Kept in the account so it follows the account's sync.
-
-export function setLeagues(account, change, now = Date.now()) {
-  const old = account.leagues || { id: randomId().slice(0, 12).toLowerCase().replace(/[^a-z0-9]/g, '0'), secret: randomId() + randomId(), nick: '', codes: {} };
-  const codes = { ...old.codes };
-  if (change.join) codes[change.join] = { on: true, t: now };
-  if (change.leave) codes[change.leave] = { on: false, t: now };
-  const next = { ...old, nick: change.nick ?? old.nick, codes, t: now };
-  return { ...account, leagues: next };
-}
-export const leagueCodes = account => Object.entries(account?.leagues?.codes || {}).filter(([, c]) => c.on).sort((a, b) => a[1].t - b[1].t).map(([code]) => code);

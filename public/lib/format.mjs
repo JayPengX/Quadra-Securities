@@ -30,7 +30,8 @@ export function money(amount, currency, { sign = false, digits } = {}) {
 export function price(p, currency) {
   if (!Number.isFinite(p)) return '—';
   const a = Math.abs(p);
-  const max = a >= 1000 ? 2 : a >= 1 ? (currencyInfo(currency).digits === 0 && a >= 100 ? 2 : 3) : a >= 0.01 ? 4 : 8;
+  // Under 10, four decimals where they exist (exchange rates: 1.1402).
+  const max = a >= 1000 ? 2 : a >= 10 ? (currencyInfo(currency).digits === 0 && a >= 100 ? 2 : 3) : a >= 0.01 ? 4 : 8;
   const min = a >= 1 && currencyInfo(currency).digits > 0 ? 2 : 0;
   return nf(Math.min(min, max), max).format(p);
 }

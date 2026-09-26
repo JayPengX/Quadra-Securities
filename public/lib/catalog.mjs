@@ -134,6 +134,17 @@ const METALS = [
   ['ZC=F', '玉米期貨', 'Corn futures'], ['ZW=F', '小麥期貨', 'Wheat futures'], ['KC=F', '咖啡期貨', 'Coffee futures']
 ];
 
+// Currency pairs: the first currency priced in the second (EUR/USD: US$ per
+// euro), traded in the second.
+const FX = [
+  ['USDTWD=X', '美元/新台幣', 'USD/TWD', 'fx'], ['JPYTWD=X', '日圓/新台幣', 'JPY/TWD', 'fx'], ['EURTWD=X', '歐元/新台幣', 'EUR/TWD', 'fx'],
+  ['EURUSD=X', '歐元/美元', 'EUR/USD', 'fx'], ['USDJPY=X', '美元/日圓', 'USD/JPY', 'fx'], ['GBPUSD=X', '英鎊/美元', 'GBP/USD', 'fx'],
+  ['AUDUSD=X', '澳幣/美元', 'AUD/USD', 'fx'], ['USDCAD=X', '美元/加幣', 'USD/CAD', 'fx'], ['USDCHF=X', '美元/瑞郎', 'USD/CHF', 'fx'],
+  ['NZDUSD=X', '紐幣/美元', 'NZD/USD', 'fx'], ['USDCNY=X', '美元/人民幣', 'USD/CNY', 'fx'], ['USDHKD=X', '美元/港幣', 'USD/HKD', 'fx'],
+  ['EURJPY=X', '歐元/日圓', 'EUR/JPY', 'fx'], ['GBPJPY=X', '英鎊/日圓', 'GBP/JPY', 'fx'], ['AUDJPY=X', '澳幣/日圓', 'AUD/JPY', 'fx'],
+  ['EURGBP=X', '歐元/英鎊', 'EUR/GBP', 'fx'], ['USDKRW=X', '美元/韓元', 'USD/KRW', 'fx'], ['USDSGD=X', '美元/新加坡幣', 'USD/SGD', 'fx']
+];
+
 const GOV_BONDS = Object.values(BONDS).map(b => [b.id, bondName(b, 'zh'), bondName(b, 'en'), 'govbond']);
 
 const INDEXES = [
@@ -152,6 +163,7 @@ export const CATEGORIES = [
   { id: 'govbond', zh: '公債', en: 'Government bonds', icon: '🏛️', items: GOV_BONDS },
   { id: 'bond', zh: '債券 ETF', en: 'Bond ETFs', icon: '📜', items: BOND_ETFS },
   { id: 'crypto', zh: '加密貨幣', en: 'Crypto', icon: '🪙', items: CRYPTO },
+  { id: 'fx', zh: '外匯', en: 'Forex', icon: '💱', items: FX },
   { id: 'metal', zh: '黃金・原物料', en: 'Gold & commodities', icon: '🥇', items: METALS },
   { id: 'jp', zh: '日股', en: 'Japan', icon: '🇯🇵', items: JP },
   { id: 'hk', zh: '港股・陸股', en: 'HK & China', icon: '🇭🇰', items: HK_CN },

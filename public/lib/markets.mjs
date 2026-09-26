@@ -110,6 +110,9 @@ export const MARKETS = {
   // and the dealer's bid-ask spread. Coupon tax depends on the issuer
   // (bonds.mjs).
   BOND: { zh: '公債', en: 'Government bonds', flag: '🏛️', currency: null, suffixes: [], commission: { rate: 0.001, min: 0 }, spread: 0.0005, withholding: 0 },
+  // Currency pairs (外匯): EUR/USD is bought and sold in US$, a unit per
+  // euro. No commission; the dealer's spread each way, like a forex broker.
+  FX: { zh: '外匯', en: 'Forex', flag: '💱', currency: null, suffixes: [], commission: { rate: 0, min: 0 }, spread: 0.0002, withholding: 0 },
   // Anywhere else search turns up: a generic sub-brokerage rate.
   INTL: { zh: '其他市場', en: 'Other markets', flag: '🌐', currency: null, suffixes: [], commission: { rate: 0.003, min: 0 }, withholding: 0.2 }
 };
@@ -120,6 +123,7 @@ export function marketOf(symbol, kind) {
   if (kind === 'crypto') return 'CRYPTO';
   if (kind === 'govbond') return 'BOND';
   if (kind === 'metal') return 'METAL';
+  if (kind === 'fx' || /^[A-Z]{6}=X$/.test(symbol)) return 'FX';
   const dot = symbol.lastIndexOf('.');
   if (dot < 0) return 'US';
   const suffix = symbol.slice(dot);
@@ -156,9 +160,10 @@ export function kindOf(type, symbol, hint) {
   }
 }
 
-export const TRADABLE_KINDS = new Set(['stock', 'etf', 'bond', 'fund', 'crypto', 'metal', 'govbond']);
-// What can be sold short (borrowed and sold): listed shares and crypto.
-export const SHORTABLE_KINDS = new Set(['stock', 'etf', 'bond', 'crypto']);
+export const TRADABLE_KINDS = new Set(['stock', 'etf', 'bond', 'fund', 'crypto', 'metal', 'govbond', 'fx']);
+// What can be sold short (borrowed and sold): listed shares, crypto and
+// currency pairs (selling EUR/USD bets on the euro falling).
+export const SHORTABLE_KINDS = new Set(['stock', 'etf', 'bond', 'crypto', 'fx']);
 export const isShortable = kind => SHORTABLE_KINDS.has(kind);
 // Yearly fee for borrowing what's sold short, on the value it was sold at.
 export const SHORT_FEE = 0.03;
@@ -224,7 +229,7 @@ export function dividendTaxes(market, gross) {
 
 // Margin: how much of each kind's value can be borrowed against, and the
 // maintenance ratio (assets ÷ debt) where the broker calls and where it sells.
-export const COLLATERAL = { stock: 0.6, etf: 0.6, bond: 0.6, fund: 0.5, metal: 0.5, crypto: 0.3, govbond: 0.8 };
+export const COLLATERAL = { stock: 0.6, etf: 0.6, bond: 0.6, fund: 0.5, metal: 0.5, crypto: 0.3, govbond: 0.8, fx: 0.5 };
 export const MARGIN_CALL = 1.3;
 export const MARGIN_LIQUIDATE = 1.15;
 

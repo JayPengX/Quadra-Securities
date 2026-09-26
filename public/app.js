@@ -3,18 +3,21 @@
 import {
   newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, deposit, valuate, borrow, repay,
   repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot,
-  benchmarkValue, isAccount, toggleWatch, watched, estimate,
-  START_PRESETS, MIN_START, MAX_START, taipeiDay
+  benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
+  alertsFor, checkAlerts, alertHitInBars, markAlertHit, setLeagues, leagueCodes,
+  START_PRESETS, MIN_START, MAX_START, PLAN_MIN, taipeiDay
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
   SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice
 } from './lib/markets.mjs';
 import { BONDS, ISSUERS } from './lib/bonds.mjs';
-import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, searchSymbols, fxSymbol } from './lib/quotes.mjs';
+import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
-import { sparkline, lineChart, attachHover, stackBar, SERIES } from './lib/chart.mjs';
+import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, stackBar, SERIES } from './lib/chart.mjs';
+import { timeMachine, movingAverage } from './lib/timemachine.mjs';
+import { createLeague, readLeague, postRow, leaveLeague, leagueRow, ranked, LEAGUE_CODE_PATTERN } from './lib/league.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { LESSONS, MISSIONS, GLOSSARY } from './lib/learn.mjs';
 import { pack, unpack } from './lib/codec.mjs';
@@ -25,7 +28,14 @@ const TABS = ['markets', 'portfolio', 'fx', 'history', 'guide'];
 const QUOTE_REFRESH_MS = 45_000;
 const LIST_REFRESH_MS = 90_000;
 const ACTIONS_EVERY_MS = 12 * 3_600_000;
-const STORE = { account: 'stockStudy.account', sync: 'stockStudy.syncCode', settings: 'stockStudy.settings', actions: 'stockStudy.actionsChecked', learn: 'stockStudy.learn' };
+const STORE = {
+  account: 'stockStudy.account',
+  sync: 'stockStudy.syncCode',
+  settings: 'stockStudy.settings',
+  actions: 'stockStudy.actionsChecked',
+  learn: 'stockStudy.learn',
+  quotes: 'stockStudy.quotes'
+};
 // The live examples in the lessons.
 const LEARN_SYMBOLS = ['2330.TW', '0050.TW', '^TNX', 'BTC-USD'];
 
@@ -62,7 +72,15 @@ const state = {
   learn: loadLearn(),
   // Which folding cards in the Learn tab are open (they survive redraws).
   openFolds: new Set(['lessons']),
-  sync: { code: null, busy: false, error: null, at: 0 }
+  sync: { code: null, busy: false, error: null, at: 0 },
+  // Company numbers and news per symbol, fetched when its sheet opens.
+  about: new Map(),
+  plan: { amount: '5000', day: '5' },
+  alertPrice: '',
+  tm: { symbol: '0050.TW', amount: '100000', start: String(new Date().getFullYear() - 10), mode: 'lump', result: null, loading: false, error: false },
+  league: { data: new Map(), loading: false, error: null, posted: 0 },
+  online: navigator.onLine !== false,
+  installPrompt: null
 };
 
 // ---- Settings and storage ------------------------------------------------------
@@ -70,9 +88,9 @@ const state = {
 function loadSettings() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE.settings) || '{}');
-    return { updown: s.updown || (locale === 'zh' ? 'tw' : 'us') };
+    return { updown: s.updown || (locale === 'zh' ? 'tw' : 'us'), chart: s.chart === 'candle' ? 'candle' : 'line', ma: s.ma !== false };
   } catch {
-    return { updown: locale === 'zh' ? 'tw' : 'us' };
+    return { updown: locale === 'zh' ? 'tw' : 'us', chart: 'line', ma: true };
   }
 }
 function loadLearn() {
@@ -184,6 +202,8 @@ function coreSymbols() {
     for (const sym of Object.keys(s.positions)) set.add(sym);
     for (const o of state.account.orders) if (o.status === 'open') set.add(o.symbol);
     for (const sym of watched(state.account)) set.add(sym);
+    for (const p of activePlans(state.account)) set.add(p.symbol);
+    for (const a of activeAlerts(state.account)) set.add(a.symbol);
   }
   if (state.detail) set.add(state.detail.symbol);
   return set;
@@ -264,7 +284,10 @@ async function refresh({ list = false } = {}) {
       state.error = null;
       state.updated = Date.now();
       state.loaded = true;
+      state.fromCache = 0;
+      state.online = true;
       afterPrices();
+      saveQuotes();
     } catch (error) {
       state.error = error;
     } finally {
@@ -302,7 +325,116 @@ function afterPrices() {
     v = valuate(replay(account, now), state.quotes, state.rates);
   }
   if (!v.missingRates.length && !v.stale.length) account = recordSnapshot(account, now, v.netWorth, v.deposits);
+  const alerts = checkAlerts(account, state.quotes, now);
+  account = alerts.account;
+  for (const a of alerts.hits) alertFired(a);
   if (account !== state.account) commit(account);
+  postLeagues();
+}
+
+// ---- Offline: the last prices are kept, so the page opens with them ------------
+
+function saveQuotes() {
+  try {
+    const keep = coreSymbols();
+    for (const sym of LEARN_SYMBOLS) keep.add(sym);
+    const quotes = [...state.quotes].filter(([sym]) => keep.has(sym) || sym.endsWith('=X'));
+    localStorage.setItem(STORE.quotes, JSON.stringify({ at: state.updated, rates: state.rates, crossFx: [...state.crossFx], quotes }));
+  } catch {}
+}
+function loadQuotes() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE.quotes) || 'null');
+    if (!saved?.quotes?.length) return;
+    for (const [sym, q] of saved.quotes) if (!state.quotes.has(sym)) state.quotes.set(sym, q);
+    Object.assign(state.rates, saved.rates || {});
+    for (const c of saved.crossFx || []) state.crossFx.add(c);
+    state.fromCache = saved.at;
+    state.updated = saved.at;
+    state.loaded = true;
+  } catch {}
+}
+// Trading and exchanging wait for live prices (not the saved ones).
+const pricesLive = () => state.loaded && !state.fromCache;
+
+// ---- Price alerts: notifications -----------------------------------------------
+
+function alertText(a) {
+  return t(a.op === 'above' ? 'alertHitAbove' : 'alertHitBelow', { name: nameOf(a.symbol), price: fmtPrice(a.hit?.price ?? a.price, state.quotes.get(a.symbol)?.currency) });
+}
+function alertFired(a, { late = false } = {}) {
+  const text = alertText(a) + (late ? ` · ${dateTime(a.hit.t)}` : '');
+  toast(`🔔 ${text}`, 'good');
+  notify(t('alertTitle'), text, a.symbol);
+}
+async function notify(title, body, tag) {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    if (reg?.showNotification) await reg.showNotification(title, { body, tag, icon: './icons/apple-touch-icon.png', badge: './favicon.svg' });
+    else new Notification(title, { body, tag });
+  } catch {}
+}
+async function askNotifications() {
+  try {
+    if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
+  } catch {}
+}
+
+// Alerts set before the page was closed: checked against the price bars
+// since, so one that went off meanwhile is reported (with when).
+async function checkAlertHistory() {
+  const list = activeAlerts(state.account).filter(a => !BONDS[a.symbol]);
+  for (const a of list) {
+    try {
+      const hit = alertHitInBars(a, await fetchBars(a.symbol, Math.max(a.since, Date.now() - 700 * 86_400_000)));
+      if (!hit || !state.account.alerts?.[a.id]?.on) continue;
+      commit(markAlertHit(state.account, a.id, hit, Date.now()));
+      alertFired(state.account.alerts[a.id], { late: true });
+    } catch {}
+  }
+}
+
+// ---- Monthly plans (定期定額) ----------------------------------------------------
+
+// Every month's buy that is due and not done: bought at the first price on
+// or after its day (from the price history), at that moment's rate.
+let plansRunning = false;
+async function checkPlans() {
+  if (!state.account || plansRunning || !state.backfilled) return;
+  plansRunning = true;
+  try {
+    for (const plan of activePlans(state.account)) {
+      const due = planRuns(plan).filter(r => !state.account.orders.some(o => o.id === planOrderId(plan, r.month)));
+      if (!due.length) continue;
+      let bars = [];
+      try {
+        bars = await fetchBars(plan.symbol, due[0].t - 86_400_000);
+      } catch {
+        continue;
+      }
+      const quote = state.quotes.get(plan.symbol);
+      for (const run of due) {
+        const bar = bars.find(b => b.t >= run.t);
+        if (!bar) break;
+        const currency = quote?.currency || plan.currency;
+        let twd = currency === BASE ? 1 : null;
+        if (!twd) {
+          const fx = await fetchBars(fxSymbol(currency), bar.t - 5 * 86_400_000).catch(() => []);
+          for (const b of fx) if (b.t <= bar.t) twd = b.c;
+          twd ||= state.rates[currency];
+        }
+        const r = runPlan(state.account, plan, run, { price: bar.o, twd, at: bar.t, quote }, Date.now());
+        if (r.account === state.account) continue;
+        commit(r.account);
+        if (r.fill) toast(t('toastPlan', { name: nameOf(plan.symbol), qty: fmtQty(r.fill.qty), price: fmtPrice(r.fill.price, r.fill.currency), time: fmtDate(r.fill.t) }), 'good');
+        else if (r.order?.status === 'rejected') toast(t('toastPlanSkipped', { name: nameOf(plan.symbol), why: t(`err_${r.order.reason}`) }), 'bad');
+      }
+    }
+  } finally {
+    plansRunning = false;
+  }
+  render();
 }
 
 // Coupons and repayments of the government bonds held.
@@ -573,6 +705,24 @@ async function openDetail(symbol) {
   if (state.detail?.symbol !== symbol) return;
   renderDetail();
   loadChart();
+  loadAbout(symbol);
+}
+
+// Kinds with a company or fund behind them (P/E, holdings, news).
+const ABOUT_KINDS = new Set(['stock', 'etf', 'bond', 'fund']);
+async function loadAbout(symbol) {
+  const q = state.quotes.get(symbol);
+  if (!q || !ABOUT_KINDS.has(q.kind) || BONDS[symbol]) return;
+  const have = state.about.get(symbol);
+  if (have && (have.loading || Date.now() - have.at < 30 * 60_000)) return;
+  state.about.set(symbol, { loading: true, at: Date.now() });
+  const info = catalogInfo(symbol);
+  const [facts, news] = await Promise.all([
+    fetchFundamentals(symbol).catch(() => null),
+    fetchNews(/\.(TW|TWO)$/.test(symbol) ? info?.en || q.name : bareSymbol(symbol)).catch(() => [])
+  ]);
+  state.about.set(symbol, { loading: false, at: Date.now(), facts, news });
+  if (state.detail?.symbol === symbol) refreshDetailLive();
 }
 
 async function loadChart() {
@@ -623,14 +773,22 @@ function renderDetail() {
         : `<p class="empty">${h(t('loadingQuote'))}</p>`
     }
     <div class="card chart-card">
-      <div class="segmented ranges" role="group">${['1d', '5d', '1mo', '6mo', 'ytd', '1y', '5y', 'max']
-        .map(r => `<button type="button" data-action="range" data-range="${r}" aria-pressed="${d.range === r}">${h(t(`range_${r}`))}</button>`)
-        .join('')}</div>
+      <div class="chart-controls">
+        <div class="segmented ranges" role="group">${['1d', '5d', '1mo', '6mo', 'ytd', '1y', '5y', 'max']
+          .map(r => `<button type="button" data-action="range" data-range="${r}" aria-pressed="${d.range === r}">${h(t(`range_${r}`))}</button>`)
+          .join('')}</div>
+        <div class="chart-style">
+          <div class="segmented small" role="group"><button type="button" data-action="chart-style" data-v="line" aria-pressed="${state.settings.chart === 'line'}">${h(t('chartLine'))}</button><button type="button" data-action="chart-style" data-v="candle" aria-pressed="${state.settings.chart === 'candle'}">${h(t('chartCandle'))}</button></div>
+          <button class="chip small" type="button" data-action="chart-ma" aria-pressed="${state.settings.ma}">${h(t('chartMa'))}</button>
+        </div>
+      </div>
       <div id="detail-chart" class="chart-box"></div>
     </div>
     ${q ? factsHtml(q) : ''}
     ${positionHtml(d.symbol)}
     ${q ? (isTradable(q.kind) ? '<div id="ticket"></div>' : trackersHtml(d.symbol)) : ''}
+    ${q ? toolsHtml(d.symbol, q) : ''}
+    ${q ? aboutHtml(d.symbol, q) : ''}
     ${ownTradesHtml(d.symbol)}
   `;
   renderChart();
@@ -658,18 +816,34 @@ function renderChart() {
   const dir = dirClass(points.at(-1)[1] - base);
   const width = Math.max(320, Math.round(box.clientWidth || 640));
   const tz = q?.tz;
-  const { svg, frame } = lineChart([{ points }], {
-    width,
-    height: width < 480 ? 200 : 240,
-    base: d.range === '1d' ? base : null,
-    dir,
-    yFormat: v => fmtPrice(v, cur),
-    xFormat: tt => (d.range === '1d' ? clock(tt, tz) : intraday ? shortDate(tt, tz) : d.range === '5y' || d.range === 'max' ? monthYear(tt, tz) : shortDate(tt, tz))
-  });
+  const xFormat = tt => (d.range === '1d' ? clock(tt, tz) : intraday ? shortDate(tt, tz) : d.range === '5y' || d.range === 'max' ? monthYear(tt, tz) : shortDate(tt, tz));
+  const when = tt => (intraday ? dateTime(tt, tz) : fmtDate(tt, tz));
   const change = points.at(-1)[1] / base - 1;
-  box.innerHTML = `<p class="chart-change">${h(t('rangeChange', { range: t(`range_${d.range}`) }))} <span class="chg ${dir}">${pct(change)}</span></p>${svg}`;
-  attachHover(box, [{ points }], frame, (i, tt, [v]) => `<strong class="num">${fmtPrice(v, cur)}</strong><span>${h(intraday ? dateTime(tt, tz) : fmtDate(tt, tz))}</span><span class="chg ${dirClass(v - base)}">${pct(v / base - 1)}</span>`);
+  const bars = d.chart?.bars?.length > 1 ? d.chart.bars : null;
+  // Moving averages over the bars (or points) shown: 5, 20 and 60 of them.
+  const closes = bars ? bars.map(b => [b.t, b.c]) : points;
+  const mas = state.settings.ma ? MA_PERIODS.filter(n => closes.length > n + 2).map((n, i) => ({ n, points: movingAverage(closes, n), cls: `ma${i + 1}` })) : [];
+  const legend = mas.length ? `<ul class="legend-inline">${mas.map(m => `<li><i class="sw ${m.cls}"></i>MA${m.n}</li>`).join('')}</ul>` : '';
+  const head = `<p class="chart-change">${h(t('rangeChange', { range: t(`range_${d.range}`) }))} <span class="chg ${dir}">${pct(change)}</span></p>`;
+  const height = width < 480 ? 220 : 260;
+  if (state.settings.chart === 'candle' && bars) {
+    const { svg, frame } = candleChart(bars, { width, height, lines: mas, yFormat: v => fmtPrice(v, cur), xFormat });
+    box.innerHTML = `${head}${svg}${legend}`;
+    attachCandleHover(box, bars, frame, b => {
+      const ma = mas.map(m => {
+        const p = m.points.find(x => x[0] === b.t);
+        return p ? `<span>MA${m.n} ${fmtPrice(p[1], cur)}</span>` : '';
+      });
+      return `<span>${h(when(b.t))}</span><span class="ohlc num">${h(t('ohlcOpen'))} ${fmtPrice(b.o, cur)} · ${h(t('ohlcHigh'))} ${fmtPrice(b.h, cur)}</span><span class="ohlc num">${h(t('ohlcLow'))} ${fmtPrice(b.l, cur)} · ${h(t('ohlcClose'))} <strong>${fmtPrice(b.c, cur)}</strong></span><span class="chg ${dirClass(b.c - b.o)}">${pct(b.c / b.o - 1)}</span>${b.v ? `<span>${h(t('volume'))} ${compact(b.v)}</span>` : ''}${ma.join('')}`;
+    });
+    return;
+  }
+  const series = [{ points }, ...mas.map(m => ({ points: m.points, cls: m.cls }))];
+  const { svg, frame } = lineChart(series, { width, height, base: d.range === '1d' ? base : null, dir, yFormat: v => fmtPrice(v, cur), xFormat });
+  box.innerHTML = `${head}${svg}${legend}${state.settings.chart === 'candle' && !bars ? `<p class="note">${h(t('noCandles'))}</p>` : ''}`;
+  attachHover(box, series, frame, (i, tt, [v, ...ma]) => `<strong class="num">${fmtPrice(v, cur)}</strong><span>${h(when(tt))}</span><span class="chg ${dirClass(v - base)}">${pct(v / base - 1)}</span>${ma.map((x, k) => (x != null ? `<span>MA${mas[k].n} ${fmtPrice(x, cur)}</span>` : '')).join('')}`);
 }
+const MA_PERIODS = [5, 20, 60];
 
 function feeSummary(q) {
   const m = MARKETS[q.market] || MARKETS.INTL;
@@ -751,6 +925,172 @@ function trackersHtml(symbol) {
     list.length ? `<p class="muted">${h(t('trackWith'))}</p><div class="button-row">${list.map(s => `<button class="ghost-button" type="button" data-action="open" data-symbol="${h(s)}">${h(nameOf(s))} <small>${h(bareSymbol(s))}</small></button>`).join('')}</div>` : ''
   }</div>`;
 }
+
+// ---- Detail sheet: alerts, monthly plan, time machine ---------------------------
+
+const canPlan = q => isTradable(q.kind) && !BONDS[q.symbol];
+
+function toolsHtml(symbol, q) {
+  return [alertCardHtml(symbol, q), canPlan(q) ? planCardHtml(symbol, q) : '', `<div class="button-row tools-row"><button class="ghost-button" type="button" data-action="tm-open" data-symbol="${h(symbol)}">⏳ ${h(t('tmFromDetail'))}</button></div>`].join('');
+}
+
+function alertCardHtml(symbol, q) {
+  const list = alertsFor(state.account, symbol);
+  const price = Number(state.alertPrice);
+  const op = price > q.price ? 'above' : 'below';
+  const presets = [-0.1, -0.05, 0.05, 0.1].map(k => [pct(k, { digits: 0 }), +(q.price * (1 + k)).toPrecision(5)]);
+  const rows = list
+    .map(a =>
+      a.on
+        ? `<li><span>🔔 ${h(t(a.op === 'above' ? 'alertWhenAbove' : 'alertWhenBelow', { price: fmtPrice(a.price, q.currency) }))}</span><button class="ghost-button small" type="button" data-action="alert-off" data-id="${h(a.id)}">${h(t('remove'))}</button></li>`
+        : `<li class="muted"><span>✓ ${h(t('alertWentOff', { price: fmtPrice(a.hit.price, q.currency), time: dateTime(a.hit.t) }))}</span></li>`
+    )
+    .join('');
+  return fold(
+    '🔔',
+    t('alertTitle'),
+    `<p>${h(t('alertIntro'))}</p>
+    ${rows ? `<ul class="tool-list">${rows}</ul>` : ''}
+    <div class="fx-amount"><label class="field grow"><span>${h(t('alertPriceLabel'))} (${h(q.currency)})</span><input id="alert-price" inputmode="decimal" autocomplete="off" value="${h(state.alertPrice)}" placeholder="${h(fmtPrice(q.price, q.currency))}" /></label></div>
+    <div class="qty-presets">${presets.map(([label, v]) => `<button class="chip small" type="button" data-action="alert-preset" data-v="${v}">${h(label)}</button>`).join('')}</div>
+    <button class="primary-button" type="button" data-action="alert-add" ${price > 0 && Math.abs(price / q.price - 1) > 1e-6 ? '' : 'disabled'}>${h(price > 0 ? t(op === 'above' ? 'alertAddAbove' : 'alertAddBelow', { price: fmtPrice(price, q.currency) }) : t('alertAdd'))}</button>
+    ${'Notification' in window && Notification.permission !== 'granted' ? `<p class="note">${h(Notification.permission === 'denied' ? t('alertNoNotify') : t('alertNotifyNote'))}</p>` : ''}`,
+    list.some(a => a.on),
+    'tool:alert'
+  );
+}
+
+function planCardHtml(symbol, q) {
+  const plan = activePlans(state.account).find(p => p.symbol === symbol);
+  if (plan) {
+    const next = nextPlanRun(plan);
+    return fold(
+      '📅',
+      t('planTitle'),
+      `<p>${h(t('planActive', { amount: money(plan.amount, BASE), day: plan.day }))}</p>
+      <p class="muted">${h(t('planNext', { date: next ? fmtDate(next) : '—' }))}</p>
+      ${planHistoryHtml(plan)}
+      <div class="button-row"><button class="ghost-button danger" type="button" data-action="plan-off" data-id="${h(plan.id)}">${h(t('planStop'))}</button></div>`,
+      true,
+      'tool:plan'
+    );
+  }
+  const amount = Number(state.plan.amount);
+  const perUnit = q.price * (state.rates[q.currency] || 0);
+  const units = perUnit > 0 ? amount / perUnit : 0;
+  return fold(
+    '📅',
+    t('planTitle'),
+    `<p>${h(t('planIntro'))}</p>
+    <div class="loan-form">
+      <label class="field grow"><span>${h(t('planAmount'))} (NT$)</span><input id="plan-amount" inputmode="numeric" autocomplete="off" value="${h(state.plan.amount)}" /></label>
+      <label class="field"><span>${h(t('planDay'))}</span><select id="plan-day">${Array.from({ length: 28 }, (_, i) => `<option value="${i + 1}" ${String(i + 1) === state.plan.day ? 'selected' : ''}>${h(t('dayOfMonth', { n: i + 1 }))}</option>`).join('')}</select></label>
+    </div>
+    ${perUnit > 0 && amount > 0 ? `<p class="muted">${h(t('planBuys', { units: num(units, units < 10 ? 2 : 0), unit: unitOf(symbol) }))}${q.currency !== BASE ? ` · ${h(t('planFx', { cur: q.currency }))}` : ''}</p>` : ''}
+    ${state.account ? '' : `<p class="note">${h(t('needAccount'))}</p>`}
+    <button class="primary-button" type="button" data-action="plan-add" ${amount >= PLAN_MIN && state.account ? '' : 'disabled'}>${h(t('planStart'))}</button>
+    <p class="note">${h(t('planNote', { min: money(PLAN_MIN, BASE) }))}</p>`,
+    false,
+    'tool:plan'
+  );
+}
+
+function planHistoryHtml(plan) {
+  const runs = state.account.orders.filter(o => o.plan === plan.id).slice(-4).reverse();
+  if (!runs.length) return '';
+  return `<ul class="tool-list">${runs
+    .map(o => `<li><span>${h(fmtDate(o.done || o.t))}</span><span class="num">${o.status === 'filled' ? h(`${fmtQty(o.qty)} ${unitOf(o.symbol)} @ ${fmtPrice(o.price, o.currency)}`) : h(t(`err_${o.reason}`))}</span></li>`)
+    .join('')}</ul>`;
+}
+
+function addAlert() {
+  const d = state.detail;
+  const q = state.quotes.get(d.symbol);
+  if (!state.account) return showSetup();
+  const price = Number(state.alertPrice);
+  const r = setAlert(state.account, { symbol: d.symbol, op: price > q.price ? 'above' : 'below', price });
+  if (r.error) return toast(t(`err_${r.error}`), 'bad');
+  commit(r.account);
+  state.alertPrice = '';
+  toast(t('alertSet'), 'good');
+  askNotifications().then(() => refreshDetailLive());
+  refreshDetailLive();
+}
+
+function addPlan() {
+  const d = state.detail;
+  const q = state.quotes.get(d.symbol);
+  if (!state.account) return showSetup();
+  const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
+  if (r.error) return toast(t(`err_${r.error}`), 'bad');
+  commit(r.account);
+  toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
+  refreshDetailLive();
+}
+
+// ---- Detail sheet: what the company does, its numbers, news ------------------------
+
+// Yahoo's sectors, in Chinese.
+const SECTORS_ZH = {
+  Technology: '科技', 'Financial Services': '金融', Healthcare: '醫療保健', 'Consumer Cyclical': '非必需消費', 'Consumer Defensive': '必需消費',
+  'Communication Services': '通訊服務', Industrials: '工業', Energy: '能源', Utilities: '公用事業', 'Real Estate': '不動產', 'Basic Materials': '原物料'
+};
+
+function aboutHtml(symbol, q) {
+  if (!ABOUT_KINDS.has(q.kind) || BONDS[symbol]) return '';
+  const a = state.about.get(symbol);
+  const fund = q.kind !== 'stock';
+  const title = fund ? t('aboutFund') : t('aboutCompany');
+  if (!a || a.loading) return fold(fund ? '📦' : '🏢', title, `<p class="muted">${h(t('aboutLoading'))}</p>`, true, 'about');
+  const f = a.facts;
+  const cur = f?.currency || q.currency;
+  const inTwd = x => (x != null && cur !== BASE && state.rates[cur] ? ` (≈ ${compactMoney(x * state.rates[cur], BASE)})` : '');
+  const rows = [];
+  const add = (key, value, explain) => value != null && value !== '' && rows.push([t(key), value, explain ? t(explain) : '']);
+  if (f) {
+    if (fund) {
+      add('expenseRatio', f.expenseRatio != null ? pct(f.expenseRatio, { sign: false, digits: 2 }) : null, 'expenseRatioHelp');
+      add('fundSize', f.totalAssets != null ? compactMoney(f.totalAssets, cur) + inTwd(f.totalAssets) : null, 'fundSizeHelp');
+      add('divYield', f.dividendYield != null ? pct(f.dividendYield, { sign: false }) : null, 'divYieldHelp');
+      add('peRatio', f.pe != null ? num(f.pe, 1) : null, 'peFundHelp');
+      add('issuer', f.family, '');
+      add('fundCategory', f.category, '');
+      add('inception', f.inception ? fmtDate(f.inception) : null, '');
+    } else {
+      add('marketCap', f.marketCap != null ? compactMoney(f.marketCap, cur) + inTwd(f.marketCap) : null, 'marketCapHelp');
+      add('peRatio', f.pe != null ? num(f.pe, 1) : null, 'peHelp');
+      add('eps', f.eps != null ? `${fmtPrice(f.eps, cur)} ${cur}` : null, 'epsHelp');
+      add('divYield', f.dividendYield != null ? pct(f.dividendYield, { sign: false }) : null, 'divYieldHelp');
+      add('profitMargin', f.margin != null ? pct(f.margin, { sign: false, digits: 1 }) : null, 'profitMarginHelp');
+      add('roe', f.roe != null ? pct(f.roe, { sign: false, digits: 1 }) : null, 'roeHelp');
+      add('revenueGrowth', f.growth != null ? pct(f.growth, { digits: 1 }) : null, 'revenueGrowthHelp');
+      add('beta', f.beta != null ? num(f.beta, 2) : null, 'betaHelp');
+      add('pbRatio', f.pb != null ? num(f.pb, 2) : null, 'pbHelp');
+      add('sector', f.sector ? `${locale === 'zh' ? SECTORS_ZH[f.sector] || f.sector : f.sector}${f.industry ? ` · ${f.industry}` : ''}` : null, '');
+      add('employees', f.employees ? num(f.employees) : null, '');
+    }
+  }
+  const grid = rows.length
+    ? `<dl class="about-grid">${rows.map(([k, v, e]) => `<div><dt>${h(k)}</dt><dd class="num">${h(v)}</dd>${e ? `<p>${h(e)}</p>` : ''}</div>`).join('')}</dl>`
+    : `<p class="muted">${h(t('aboutNone'))}</p>`;
+  const top = f?.holdings?.length
+    ? `<h3 class="card-title">${h(t('topHoldings'))}</h3><ul class="bars-list holdings">${f.holdings
+        .map(x => `<li><button class="link bar-label" type="button" data-action="open" data-symbol="${h(x.symbol)}">${h(catalogInfo(x.symbol) ? nameOf(x.symbol) : x.name)}</button><span class="bar-track"><span class="bar flat" style="width:${Math.min(100, (x.weight / f.holdings[0].weight) * 100)}%"></span></span><strong class="num">${h(pct(x.weight, { sign: false, digits: 1 }))}</strong></li>`)
+        .join('')}</ul><p class="note">${h(t('topHoldingsNote', { pct: pct(f.holdings.reduce((sum, x) => sum + x.weight, 0), { sign: false, digits: 0 }) }))}</p>`
+    : '';
+  const summary = f?.summary
+    ? `<details class="summary-text"><summary>${h(t('whatItDoes'))}</summary><p lang="en">${h(f.summary)}</p>${f.website ? `<p><a href="${h(f.website)}" target="_blank" rel="noopener">${h(f.website.replace(/^https?:\/\//, ''))}</a></p>` : ''}</details>`
+    : '';
+  const news = a.news?.length
+    ? `<h3 class="card-title">${h(t('newsTitle'))}</h3><ul class="news">${a.news
+        .slice(0, 5)
+        .map(n => `<li><a href="${h(n.link)}" target="_blank" rel="noopener">${h(n.title)}</a><small>${h(n.publisher)} · ${h(dateTime(n.t))}</small></li>`)
+        .join('')}</ul>`
+    : '';
+  return fold(fund ? '📦' : '🏢', title, `${grid}${top}${summary}${news}<p class="note">${h(t('aboutSource'))}</p>`, true, 'about');
+}
+// Big amounts, short: NT$6,418兆 / US$4.98T.
+const compactMoney = (x, cur) => `${currencyInfo(cur).symbol || `${cur} `}${compact(x)}`;
 
 function ownTradesHtml(symbol) {
   if (!state.account) return '';
@@ -861,7 +1201,8 @@ function renderTicket() {
     ${problems.map(p => `<p class="warn">${h(p)}</p>`).join('')}
     ${topUp ? `<button class="ghost-button topup" type="button" data-action="topup" data-need="${topUp.need}" data-cur="${h(q.currency)}">${h(t('topUp', { get: money(topUp.get, q.currency), pay: money(topUp.need, BASE) }))}</button>` : ''}
     ${!open ? `<p class="note">${h(q.kind === 'metal' ? t('closedMetal') : t('closedQueue'))}</p>` : ''}
-    <button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>
+    ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
+    <button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
   </div>`;
 }
@@ -869,7 +1210,7 @@ function renderTicket() {
 function placeFromTicket() {
   const d = state.detail;
   const q = state.quotes.get(d.symbol);
-  if (!q || !state.account) return;
+  if (!q || !state.account || !pricesLive()) return;
   const req = { symbol: d.symbol, side: d.side, type: d.type, qty: Number(d.qty) };
   if (d.type === 'limit') req.limit = Number(d.limit);
   if (d.type === 'stop') req.stop = Number(d.stop);
@@ -960,14 +1301,58 @@ function renderPortfolio() {
       ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><button class="ghost-button" type="button" data-action="goto" data-tab="guide">${h(t('newHere'))}</button></div></div>`}
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
+    ${plansListHtml()}
+    ${alertsListHtml()}
     <div class="card">
       <h3 class="card-title">${h(t('wallets'))}</h3>
       <div class="wallets">${v.cash.map(c => walletRow(c, c.amount - (avail.cash[c.currency] ?? c.amount))).join('')}${v.loans.map(loanWalletRow).join('')}</div>
       <p class="note">${h(t('walletsNote'))}</p>
     </div>
+    ${leagueTeaserHtml()}
     ${syncCardHtml()}
   `;
   renderNetWorthChart(v, s);
+}
+
+function plansListHtml() {
+  const plans = activePlans(state.account);
+  if (!plans.length) return '';
+  return `<div class="card"><h3 class="card-title">📅 ${h(t('plansTitle'))} <span class="count">${plans.length}</span></h3>${plans
+    .map(p => {
+      const next = nextPlanRun(p);
+      const last = state.account.orders.filter(o => o.plan === p.id).at(-1);
+      return `<div class="order-row"><span class="side-tag buy">${h(t('planTag'))}</span>
+      <span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span>
+      <span class="row-sub">${h(t('planActive', { amount: money(p.amount, BASE), day: p.day }))} · ${h(t('planNext', { date: next ? fmtDate(next) : '—' }))}${last ? ` · ${h(last.status === 'filled' ? t('planLast', { qty: fmtQty(last.qty), unit: unitOf(p.symbol) }) : t(`err_${last.reason}`))}` : ''}</span></span>
+      <button class="ghost-button small" type="button" data-action="plan-off" data-id="${h(p.id)}">${h(t('planStop'))}</button></div>`;
+    })
+    .join('')}<p class="note">${h(t('plansNote'))}</p></div>`;
+}
+
+function alertsListHtml() {
+  const list = Object.values(state.account.alerts || {}).filter(a => a.on || (a.hit && Date.now() - a.hit.t < 7 * 86_400_000)).sort((a, b) => b.t - a.t);
+  if (!list.length) return '';
+  return `<div class="card"><h3 class="card-title">🔔 ${h(t('alertsTitle'))} <span class="count">${list.filter(a => a.on).length}</span></h3>${list
+    .map(a => {
+      const q = state.quotes.get(a.symbol);
+      const gap = q && a.on ? pct(a.price / q.price - 1) : '';
+      return `<div class="order-row"><span class="side-tag ${a.on ? 'fx' : 'div'}">${a.on ? '🔔' : '✓'}</span>
+      <span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(a.symbol)}">${h(nameOf(a.symbol))}</button></span>
+      <span class="row-sub">${h(a.on ? t(a.op === 'above' ? 'alertWhenAbove' : 'alertWhenBelow', { price: fmtPrice(a.price, q?.currency) }) : t('alertWentOff', { price: fmtPrice(a.hit.price, q?.currency), time: dateTime(a.hit.t) }))}${gap ? ` · ${h(t('alertGap', { pct: gap }))}` : ''}</span></span>
+      ${a.on ? `<button class="ghost-button small" type="button" data-action="alert-off" data-id="${h(a.id)}">${h(t('remove'))}</button>` : ''}</div>`;
+    })
+    .join('')}</div>`;
+}
+
+function leagueTeaserHtml() {
+  const codes = leagueCodes(state.account);
+  const mine = codes.map(c => state.league.data.get(c)).filter(Boolean);
+  const ranks = mine.map(l => {
+    const list = ranked(l.members);
+    const i = list.findIndex(m => m.id === state.account.leagues?.id);
+    return i >= 0 ? `${l.name} #${i + 1}/${list.length}` : null;
+  }).filter(Boolean);
+  return `<div class="card league-teaser"><div><h3 class="card-title">🏆 ${h(t('leagueTitle'))}</h3><p class="muted">${h(ranks.length ? ranks.join(' · ') : t('leagueTeaser'))}</p></div><button class="ghost-button" type="button" data-action="league-go">${h(codes.length ? t('leagueOpen') : t('leagueStart'))}</button></div>`;
 }
 
 function heroStat(label, value, sub, dir = '') {
@@ -1169,7 +1554,8 @@ function renderFx() {
         </dl>
         ${tooMuch ? `<p class="warn">${h(t('notEnoughCur', { cur: f.from, have: money(have, f.from) }))}</p>` : ''}
         <p class="note">${h(state.fxOpen ? t('fxOpenNote') : t('fxClosedNote'))}${usd?.marketTime ? ` ${h(t('asOf', { time: dateTime(usd.marketTime) }))}` : ''}</p>
-        <button class="primary-button" type="button" data-action="fx-go" ${q && q.received > 0 && !tooMuch && f.from !== f.to ? '' : 'disabled'}>${h(t('doExchange'))}</button>`}
+        ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
+        <button class="primary-button" type="button" data-action="fx-go" ${q && q.received > 0 && !tooMuch && f.from !== f.to && pricesLive() ? '' : 'disabled'}>${h(t('doExchange'))}</button>`}
       </div>
       <div class="card">
         <h3 class="card-title">${h(t('ratesTitle'))}</h3>
@@ -1232,6 +1618,7 @@ function loansHtml() {
 }
 
 function doExchange() {
+  if (!pricesLive()) return;
   const f = state.fx;
   const r = exchange(state.account, { from: f.from, to: f.to, amount: Number(f.amount) }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
   if (r.error) return toast(errorText(r), 'bad');
@@ -1339,7 +1726,7 @@ function renderHistory() {
     box.innerHTML = setupCardHtml();
     return;
   }
-  const views = ['activity', 'orders', 'stats'];
+  const views = ['activity', 'orders', 'stats', 'league'];
   const tabs = `<div class="segmented history-tabs" role="group">${views.map(x => `<button type="button" data-action="hview" data-view="${x}" aria-pressed="${state.historyView === x}">${h(t(`hview_${x}`))}</button>`).join('')}</div>`;
   if (state.historyView === 'orders') {
     const open = state.account.orders.filter(o => o.status === 'open').reverse();
@@ -1352,6 +1739,10 @@ function renderHistory() {
   if (state.historyView === 'stats') {
     box.innerHTML = `${tabs}${statsHtml()}`;
     renderBench();
+    return;
+  }
+  if (state.historyView === 'league') {
+    box.innerHTML = `${tabs}${leagueHtml()}`;
     return;
   }
   const events = [...state.account.events].filter(ACTIVITY_FILTERS[state.activityFilter]).sort((a, b) => b.t - a.t);
@@ -1503,6 +1894,167 @@ async function renderBench() {
   if ($('bench')) draw();
 }
 
+// ---- Friend leagues -----------------------------------------------------------------
+
+const formatCode = code => `${code.slice(0, 4)} ${code.slice(4)}`;
+const shareUrl = code => `${location.origin}${location.pathname}#league=${code}`;
+
+function leagueHtml() {
+  const me = state.account.leagues;
+  const codes = leagueCodes(state.account);
+  const nick = me?.nick || '';
+  const lg = state.league;
+  const intro = `<div class="card">
+    <h3 class="card-title">🏆 ${h(t('leagueTitle'))}</h3>
+    <p class="lede">${h(t('leagueIntro'))}</p>
+    <form class="custom-start" data-form="nick"><label class="field grow"><span>${h(t('leagueNick'))}</span><input id="league-nick" maxlength="20" autocomplete="nickname" value="${h(nick)}" placeholder="${h(t('leagueNickPh'))}" /></label><button class="ghost-button" type="submit">${h(t('save'))}</button></form>
+    <div class="two-col tight">
+      <form class="custom-start" data-form="league-new"><label class="field grow"><span>${h(t('leagueNewName'))}</span><input id="league-name" maxlength="40" autocomplete="off" placeholder="${h(t('leagueNamePh'))}" /></label><button class="primary-button" type="submit" ${lg.loading ? "disabled" : ""}>${h(t('leagueCreate'))}</button></form>
+      <form class="custom-start" data-form="league-join"><label class="field grow"><span>${h(t('leagueCode'))}</span><input id="league-code" autocomplete="off" autocapitalize="characters" placeholder="ABCD 2345" value="${h(state.league.pending || '')}" /></label><button class="ghost-button" type="submit" ${lg.loading ? "disabled" : ""}>${h(t('leagueJoin'))}</button></form>
+    </div>
+    ${lg.error ? `<p class="warn">${h(lg.error)}</p>` : ''}
+    <p class="note">${h(t('leagueNote'))}</p>
+  </div>`;
+  const boards = codes.map(code => leagueBoardHtml(code)).join('');
+  return codes.length ? `${boards}${intro}` : intro;
+}
+
+function leagueBoardHtml(code) {
+  const l = state.league.data.get(code);
+  const myId = state.account.leagues?.id;
+  if (!l) return `<div class="card"><h3 class="card-title">${h(formatCode(code))}</h3><p class="muted">${h(state.league.loading ? t('leagueLoading') : t('leagueUnavailable'))}</p></div>`;
+  const list = ranked(l.members);
+  const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}`;
+  const rows = list
+    .map((m, i) => {
+      const days = Math.max(1, Math.round((Date.now() - m.since) / 86_400_000));
+      const top = (m.top || []).slice(0, 3).map(x => `<button class="chip small" type="button" data-action="open" data-symbol="${h(x.s)}">${h(catalogInfo(x.s) ? nameOf(x.s) : x.n)} <small>${h(pct(x.w, { sign: false, digits: 0 }))}</small></button>`).join('');
+      return `<li class="${m.id === myId ? 'me' : ''}"><span class="rank">${medal(i)}</span><span class="row-main"><span class="row-title">${h(m.nick)}${m.id === myId ? ` <small>${h(t('leagueYou'))}</small>` : ''}</span><span class="row-sub">${h(t('leagueSince', { days }))} · ${h(t('leagueTrades', { n: m.trades ?? 0 }))} · ${h(t('leagueUpdated', { time: dateTime(m.t) }))}</span>${top ? `<span class="league-top">${top}</span>` : ''}</span><strong class="num ${dirClass(m.pct)}">${h(pct(m.pct))}</strong></li>`;
+    })
+    .join('');
+  return `<div class="card league-card">
+    <div class="card-head"><h3 class="card-title">${h(l.name)}</h3><span class="sync-code num small">${h(formatCode(code))}</span></div>
+    ${rows ? `<ol class="leaderboard">${rows}</ol>` : `<p class="muted">${h(t('leagueEmpty'))}</p>`}
+    <div class="button-row"><button class="primary-button" type="button" data-action="league-share" data-code="${h(code)}">${h(t('leagueShare'))}</button><button class="ghost-button" type="button" data-action="league-refresh">${h(t('leagueRefresh'))}</button><button class="ghost-button danger" type="button" data-action="league-leave" data-code="${h(code)}">${h(t('leagueLeave'))}</button></div>
+    <p class="note">${h(t('leagueRankNote'))}</p>
+  </div>`;
+}
+
+// Everyone's rows, fresh.
+async function loadLeagues() {
+  const codes = leagueCodes(state.account);
+  if (!codes.length) return;
+  state.league.loading = true;
+  await Promise.all(
+    codes.map(async code => {
+      try {
+        state.league.data.set(code, await readLeague(code));
+      } catch (error) {
+        if (error.code === 'LEAGUE_NOT_FOUND') state.league.data.delete(code);
+      }
+    })
+  );
+  state.league.loading = false;
+  if (state.tab === 'history' || state.tab === 'portfolio') render();
+}
+
+// This account's row in each league, at most every 10 minutes (or now).
+async function postLeagues({ force = false } = {}) {
+  const me = state.account?.leagues;
+  const codes = leagueCodes(state.account);
+  if (!codes.length || !me?.nick || !pricesLive() || (!force && Date.now() - state.league.posted < 10 * 60_000)) return;
+  const v = valuation();
+  if (!v || v.missingRates.length) return;
+  state.league.posted = Date.now();
+  const row = leagueRow(me.nick, v, state.account);
+  await Promise.all(
+    codes.map(async code => {
+      try {
+        state.league.data.set(code, await postRow(code, me, row));
+      } catch {}
+    })
+  );
+  if (state.tab === 'history' && state.historyView === 'league') renderHistory();
+}
+
+function saveNick(value) {
+  const nick = value.trim().slice(0, 20);
+  if (!nick) return toast(t('leagueNeedNick'), 'bad');
+  commit(setLeagues(state.account, { nick }));
+  toast(t('saved'), 'good');
+  postLeagues({ force: true });
+  renderHistory();
+}
+
+async function newLeague(name) {
+  if (!state.account.leagues?.nick) return toast(t('leagueNeedNick'), 'bad');
+  name = name.trim();
+  if (!name) return toast(t('leagueNeedName'), 'bad');
+  state.league.loading = true;
+  state.league.error = null;
+  renderHistory();
+  try {
+    const l = await createLeague(name);
+    state.league.data.set(l.code, l);
+    commit(setLeagues(state.account, { join: l.code }));
+    await postLeagues({ force: true });
+    toast(t('leagueCreated'), 'good');
+  } catch (error) {
+    state.league.error = t('syncFailed', { why: error.message });
+  }
+  state.league.loading = false;
+  renderHistory();
+}
+
+async function joinLeague(text) {
+  if (!state.account.leagues?.nick) {
+    state.league.pending = text;
+    return toast(t('leagueNeedNick'), 'bad');
+  }
+  const code = cleanPasscode(text);
+  if (!LEAGUE_CODE_PATTERN.test(code)) return toast(t('badCode'), 'bad');
+  state.league.loading = true;
+  state.league.error = null;
+  renderHistory();
+  try {
+    state.league.data.set(code, await readLeague(code));
+    commit(setLeagues(state.account, { join: code }));
+    state.league.pending = '';
+    await postLeagues({ force: true });
+    toast(t('leagueJoined'), 'good');
+  } catch (error) {
+    state.league.error = error.code === 'LEAGUE_NOT_FOUND' ? t('leagueNotFound') : t('syncFailed', { why: error.message });
+  }
+  state.league.loading = false;
+  renderHistory();
+}
+
+async function quitLeague(code) {
+  if (!confirm(t('leagueLeaveConfirm'))) return;
+  try {
+    await leaveLeague(code, state.account.leagues);
+  } catch {}
+  commit(setLeagues(state.account, { leave: code }));
+  state.league.data.delete(code);
+  renderHistory();
+}
+
+async function shareLeague(code) {
+  const l = state.league.data.get(code);
+  const text = t('leagueShareText', { name: l?.name || '', code: formatCode(code) });
+  try {
+    if (navigator.share) return await navigator.share({ title: t('appName'), text, url: shareUrl(code) });
+  } catch {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(`${text} ${shareUrl(code)}`);
+    toast(t('copied'), 'good');
+  } catch {
+    prompt(t('leagueCopy'), shareUrl(code));
+  }
+}
+
 // ---- Guide tab ----------------------------------------------------------------------------
 
 function fold(icon, title, body, open = false, id = title) {
@@ -1608,6 +2160,7 @@ function learnHtml() {
       </div>
       ${next ? `<button class="hero-button" type="button" data-action="lesson" data-lesson="${h(next.id)}">${h(doneCount ? t('continueLesson', { title: L(next.title) }) : t('startLesson'))}</button>` : `<p>${h(t('allLessonsDone'))}</p>`}
     </div>
+    ${tmHtml()}
     <h2 class="section-heading">${h(t('lessonsTitle'))}</h2>
     ${LESSONS.map(l => lessonHtml(l, ctx)).join('')}
     <h2 class="section-heading">${h(t('missionsTitle'))}</h2>
@@ -1616,6 +2169,114 @@ function learnHtml() {
       .join('')}</ul></div>
     ${fold('📖', t('glossaryTitle'), `<dl class="glossary">${GLOSSARY.map(([term, zh, en]) => `<div><dt>${h(term)}</dt><dd>${h(locale === 'zh' ? zh : en)}</dd></div>`).join('')}</dl>`, false, 'glossary')}
     <h2 class="section-heading">${h(t('referenceTitle'))}</h2>`;
+}
+
+// ---- Time machine -------------------------------------------------------------------
+
+const TM_CHOICES = ['0050.TW', '0056.TW', '2330.TW', '2317.TW', 'VT', 'VOO', 'QQQ', 'AAPL', 'NVDA', 'BTC-USD', 'XAU'];
+const TM_FIRST_YEAR = 2000;
+
+function tmHtml() {
+  const tm = state.tm;
+  const choices = [...new Set([...TM_CHOICES, tm.symbol])];
+  const year = new Date().getFullYear();
+  const years = [];
+  for (let y = year - 1; y >= TM_FIRST_YEAR; y--) years.push(y);
+  return `<div class="card tm-card" id="time-machine">
+    <h2>⏳ ${h(t('tmTitle'))}</h2>
+    <p class="lede">${h(t('tmIntro'))}</p>
+    <div class="tm-form">
+      <label class="field"><span>${h(t('tmWhat'))}</span><select id="tm-symbol">${choices.map(sym => `<option value="${h(sym)}" ${sym === tm.symbol ? 'selected' : ''}>${h(nameOf(sym))} · ${h(bareSymbol(sym))}</option>`).join('')}</select></label>
+      <label class="field"><span>${h(t('tmFrom'))}</span><select id="tm-start">${years.map(y => `<option value="${y}" ${String(y) === tm.start ? 'selected' : ''}>${y}</option>`).join('')}</select></label>
+      <label class="field"><span>${h(tm.mode === 'monthly' ? t('tmMonthly') : t('tmAmount'))} (NT$)</span><input id="tm-amount" inputmode="numeric" autocomplete="off" value="${h(tm.amount)}" /></label>
+      <div class="segmented" role="group"><button type="button" data-action="tm-mode" data-v="lump" aria-pressed="${tm.mode === 'lump'}">${h(t('tmLump'))}</button><button type="button" data-action="tm-mode" data-v="monthly" aria-pressed="${tm.mode === 'monthly'}">${h(t('tmDca'))}</button></div>
+    </div>
+    <button class="primary-button" type="button" data-action="tm-go" ${tm.loading ? 'disabled' : ''}>${h(tm.loading ? t('tmLoading') : t('tmGo'))}</button>
+    <div id="tm-result">${tmResultHtml()}</div>
+  </div>`;
+}
+
+function tmResultHtml() {
+  const tm = state.tm;
+  if (tm.error) return `<p class="warn">${h(t('tmError'))}</p>`;
+  const r = tm.result;
+  if (!r) return '';
+  const dir = dirClass(r.gain);
+  const late = r.start > Date.parse(`${r.asked}-02-01T00:00:00+08:00`);
+  const facts = [
+    r.annual != null ? t(r.mode === 'monthly' ? 'tmAnnualDca' : 'tmAnnual', { pct: pct(r.annual, { digits: 1 }) }) : '',
+    t('tmDrawdown', { pct: pct(r.maxDrawdown, { digits: 0 }), from: monthYear(r.drawdownFrom ?? r.start), to: monthYear(r.drawdownTo ?? r.start) }),
+    r.best && r.worst && r.yearly.length > 1 ? t('tmYears', { best: r.best[0], bestPct: pct(r.best[1], { digits: 0 }), worst: r.worst[0], worstPct: pct(r.worst[1], { digits: 0 }) }) : '',
+    t('tmBank', { amount: money(r.bank, BASE), rate: pct(r.bankRate, { sign: false, digits: 1 }) })
+  ].filter(Boolean);
+  return `<div class="tm-result">
+    <p class="tm-line">${h(t(r.mode === 'monthly' ? 'tmResultDca' : 'tmResult', { name: nameOf(r.symbol), date: monthYear(r.start), amount: money(r.mode === 'monthly' ? r.amount : r.putIn, BASE) }))}</p>
+    <div class="kpis">
+      ${kpi(t('tmPutIn'), money(r.putIn, BASE))}
+      ${kpi(t('tmNow'), money(r.value, BASE), '', dir)}
+      ${kpi(t('tmGain'), money(r.gain, BASE, { sign: true }), pct(r.ratio - 1), dir)}
+    </div>
+    <div id="tm-chart" class="chart-box"></div>
+    <ul class="facts">${facts.map(f => `<li>${h(f)}</li>`).join('')}</ul>
+    <p class="note">${h(r.maxDrawdown < -0.2 ? t('tmLessonDrop', { pct: pct(-r.maxDrawdown, { sign: false, digits: 0 }) }) : t('tmLessonCalm'))}</p>
+    <p class="note">${h(t('tmNote'))}${late ? ` ${h(t('tmLate', { date: monthYear(r.start) }))}` : ''}</p>
+  </div>`;
+}
+
+function renderTmChart() {
+  const box = $('tm-chart');
+  const r = state.tm.result;
+  if (!box || !r) return;
+  const width = Math.max(300, Math.round(box.clientWidth || 480));
+  const value = r.series.map(([tt, v]) => [tt, v]);
+  const put = r.series.map(([tt, , p]) => [tt, p]);
+  const dir = dirClass(r.gain);
+  const { svg, frame } = lineChart([{ points: value }, { points: put, cls: 'ref' }], { width, height: 200, dir, yFormat: x => compact(x), xFormat: tt => monthYear(tt) });
+  box.innerHTML = `<ul class="legend-inline"><li><i class="sw ${dir}"></i>${h(t('tmNow'))}</li><li><i class="sw ref"></i>${h(t('tmPutIn'))}</li></ul>${svg}`;
+  attachHover(box, [{ points: value }, { points: put }], frame, (i, tt, [v, p]) => `<strong class="num">${money(v, BASE)}</strong><span>${h(monthYear(tt))}</span><span class="chg ${dirClass(v - p)}">${money(v - p, BASE, { sign: true })}</span>`);
+}
+
+async function runTimeMachine() {
+  const tm = state.tm;
+  const amount = Math.round(Number(tm.amount));
+  if (!(amount >= 100)) return toast(t('err_amount'), 'bad');
+  tm.loading = true;
+  tm.error = false;
+  renderGuide();
+  try {
+    const symbol = tm.symbol;
+    const chart = await fetchChart(symbol, 'max');
+    const q = chart?.quote || state.quotes.get(symbol);
+    const currency = METALS[symbol] ? BASE : q?.currency;
+    const points = chart?.adjusted?.length > 1 ? chart.adjusted : chart?.points;
+    if (!points?.length || !currency) throw new Error('no history');
+    let fx = null;
+    if (currency !== BASE) {
+      await ensureRates([currency]);
+      fx = (await fetchChart(fxSymbol(currency), 'max'))?.points || null;
+      if (!fx?.length) throw new Error('no fx history');
+    }
+    const live = state.quotes.get(symbol);
+    const result = timeMachine({
+      points,
+      fx,
+      amount,
+      start: Date.parse(`${tm.start}-01-01T00:00:00+08:00`),
+      mode: tm.mode,
+      price: live?.price ?? null,
+      rate: currency === BASE ? 1 : state.rates[currency]
+    });
+    if (!result) throw new Error('no result');
+    tm.result = { ...result, symbol, mode: tm.mode, amount, asked: tm.start };
+  } catch {
+    tm.error = true;
+    tm.result = null;
+  }
+  tm.loading = false;
+  if (state.tab === 'guide') {
+    renderGuide();
+    $('tm-result')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 function answerQuiz(id, i) {
@@ -1648,9 +2309,40 @@ function renderGuide() {
     fold('📊', t('g_numbers'), ['g_numbers1', 'g_numbers2', 'g_numbers3'].map(para).join('')),
     fold('🛰️', t('g_data'), ['g_data1', 'g_data2', 'g_data3'].map(para).join('')),
     fold('⚙️', t('g_settings'), `<div class="setting"><span>${h(t('updownLabel'))}</span><div class="segmented" role="group"><button type="button" data-action="updown" data-v="tw" aria-pressed="${state.settings.updown === 'tw'}">${h(t('updownTw'))}</button><button type="button" data-action="updown" data-v="us" aria-pressed="${state.settings.updown === 'us'}">${h(t('updownUs'))}</button></div></div>
+      ${appSettingsHtml()}
       ${state.account ? `<div class="setting"><span>${h(t('resetLabel'))}</span><button class="ghost-button danger" type="button" data-action="reset">${h(t('resetAccount'))}</button></div>` : ''}`),
     `<p class="disclaimer">${h(t('disclaimer'))}</p>`
   ].join('');
+  renderTmChart();
+}
+
+// Installing the page as an app, and notifications for price alerts.
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function appSettingsHtml() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const install = standalone()
+    ? `<p class="muted">${h(t('installed'))}</p>`
+    : state.installPrompt
+      ? `<button class="ghost-button" type="button" data-action="install">${h(t('installApp'))}</button>`
+      : `<p class="muted">${h(ios ? t('installIos') : t('installOther'))}</p>`;
+  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  const notifyCtl =
+    perm === 'granted'
+      ? `<p class="muted">${h(t('notifyOn'))}</p>`
+      : perm === 'default'
+        ? `<button class="ghost-button" type="button" data-action="notify-on">${h(t('notifyEnable'))}</button>`
+        : `<p class="muted">${h(perm === 'denied' ? t('alertNoNotify') : t('notifyUnsupported'))}</p>`;
+  return `<div class="setting"><span>${h(t('installLabel'))}</span>${install}</div><div class="setting"><span>${h(t('notifyLabel'))}</span>${notifyCtl}</div>`;
+}
+async function installApp() {
+  const p = state.installPrompt;
+  if (!p) return;
+  state.installPrompt = null;
+  try {
+    await p.prompt();
+    await p.userChoice;
+  } catch {}
+  renderGuide();
 }
 
 // ---- Account setup ------------------------------------------------------------------------
@@ -1848,6 +2540,7 @@ function renderStatus() {
   let text;
   if (state.error && !state.loaded) text = t('statusError');
   else if (!state.loaded) text = t('statusLoading');
+  else if (state.fromCache) text = `${state.online ? t('statusSaved') : t('statusOffline')} · ${t('statusUpdated', { time: dateTime(state.updated) })}`;
   else text = t('statusUpdated', { time: clock(state.updated) }) + (state.error ? ` · ${t('statusStale')}` : '');
   $('status').textContent = text;
   const notice = $('notice');
@@ -1881,6 +2574,13 @@ function render() {
   else if (state.tab === 'history') renderHistory();
   else if (state.tab === 'guide') renderGuide();
   if (state.detail && $('detail').open) refreshDetailLive();
+}
+
+// The whole sheet again, where it was scrolled to.
+function redrawDetail() {
+  const scroll = $('detail').scrollTop;
+  renderDetail();
+  $('detail').scrollTop = scroll;
 }
 
 // Prices changed under an open sheet: update its numbers without touching
@@ -2030,6 +2730,7 @@ document.addEventListener('click', event => {
     case 'hview':
       state.historyView = el.dataset.view;
       renderHistory();
+      if (state.historyView === 'league') loadLeagues();
       break;
     case 'afilter':
       state.activityFilter = el.dataset.f;
@@ -2069,6 +2770,77 @@ document.addEventListener('click', event => {
       state.settings.updown = el.dataset.v;
       saveSettings();
       renderGuide();
+      break;
+    case 'chart-style':
+      state.settings.chart = el.dataset.v;
+      saveSettings();
+      redrawDetail();
+      break;
+    case 'chart-ma':
+      state.settings.ma = !state.settings.ma;
+      saveSettings();
+      redrawDetail();
+      break;
+    case 'alert-preset':
+      state.alertPrice = el.dataset.v;
+      refreshDetailLive();
+      break;
+    case 'alert-add':
+      addAlert();
+      break;
+    case 'alert-off': {
+      const a = state.account.alerts?.[el.dataset.id];
+      if (a) commit(setAlert(state.account, { id: a.id, on: false }).account);
+      render();
+      if (state.detail) refreshDetailLive();
+      break;
+    }
+    case 'plan-add':
+      addPlan();
+      break;
+    case 'plan-off':
+      if (!confirm(t('planStopConfirm'))) return;
+      commit(setPlan(state.account, { id: el.dataset.id, on: false }).account);
+      render();
+      if (state.detail) refreshDetailLive();
+      break;
+    case 'tm-open':
+      state.tm.symbol = el.dataset.symbol;
+      state.tm.result = null;
+      closeDetail();
+      showTab('guide');
+      document.getElementById('time-machine')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      runTimeMachine();
+      break;
+    case 'tm-mode':
+      state.tm.mode = el.dataset.v;
+      if (el.dataset.v === 'monthly' && Number(state.tm.amount) > 50_000) state.tm.amount = '5000';
+      if (el.dataset.v === 'lump' && Number(state.tm.amount) < 10_000) state.tm.amount = '100000';
+      state.tm.result = null;
+      renderGuide();
+      break;
+    case 'tm-go':
+      runTimeMachine();
+      break;
+    case 'league-go':
+      state.historyView = 'league';
+      showTab('history');
+      loadLeagues();
+      break;
+    case 'league-share':
+      shareLeague(el.dataset.code);
+      break;
+    case 'league-refresh':
+      postLeagues({ force: true }).then(loadLeagues);
+      break;
+    case 'league-leave':
+      quitLeague(el.dataset.code);
+      break;
+    case 'install':
+      installApp();
+      break;
+    case 'notify-on':
+      askNotifications().then(renderGuide);
       break;
     case 'sync-create':
       createSyncCode();
@@ -2111,6 +2883,9 @@ document.addEventListener('submit', event => {
   event.preventDefault();
   if (form.dataset.form === 'start') openAccount(form.querySelector('#start-amount').value);
   if (form.dataset.form === 'link') linkDevice(form.querySelector('#link-code').value);
+  if (form.dataset.form === 'nick') saveNick(form.querySelector('#league-nick').value);
+  if (form.dataset.form === 'league-new') newLeague(form.querySelector('#league-name').value);
+  if (form.dataset.form === 'league-join') joinLeague(form.querySelector('#league-code').value);
 });
 
 // Typing: keep the caret where it was when the ticket redraws.
@@ -2157,6 +2932,17 @@ document.addEventListener('input', event => {
       state.loan.amount = cleanNumber(el.value);
       keepCaret(renderFx);
       break;
+    case 'alert-price':
+      state.alertPrice = cleanNumber(el.value);
+      keepCaret(redrawDetail);
+      break;
+    case 'plan-amount':
+      state.plan.amount = cleanNumber(el.value);
+      keepCaret(redrawDetail);
+      break;
+    case 'tm-amount':
+      state.tm.amount = cleanNumber(el.value);
+      break;
   }
 });
 
@@ -2172,6 +2958,12 @@ document.addEventListener('change', event => {
   if (el.id === 'loan-cur') {
     state.loan.currency = el.value;
     renderFx();
+  }
+  if (el.id === 'plan-day') state.plan.day = el.value;
+  if (el.id === 'tm-symbol' || el.id === 'tm-start') {
+    state.tm[el.id === 'tm-symbol' ? 'symbol' : 'start'] = el.value;
+    state.tm.result = null;
+    runTimeMachine();
   }
 });
 
@@ -2246,11 +3038,23 @@ window.addEventListener('resize', () => {
 window.__stockStarted = true;
 applySettings();
 state.sync.code = loadSyncCode();
+loadQuotes();
+{
+  // A shared league link: #league=ABCD2345 opens the league page to join.
+  const m = /^#league=([2-9A-HJ-NP-Z]{8})$/i.exec(location.hash);
+  if (m) {
+    state.tab = 'history';
+    state.historyView = 'league';
+    state.league.pending = m[1].toUpperCase();
+  }
+}
 renderStatic();
 render();
 loadAccount().then(account => {
   state.account = account;
   state.accountReady = true;
+  // Saved prices: the page is usable at once (and offline).
+  if (state.fromCache) $('loading').hidden = true;
   if (!account && !state.sync.code) showSetup();
   render();
   backfillOrders()
@@ -2261,6 +3065,9 @@ loadAccount().then(account => {
         $('loading').hidden = true;
         checkBonds();
         checkCorporateActions();
+        checkPlans();
+        checkAlertHistory();
+        loadLeagues();
       });
     });
   if (state.sync.code)
@@ -2275,6 +3082,36 @@ setTimeout(() => ($('loading').hidden = true), 8000);
 setInterval(() => {
   if (document.visibilityState === 'visible') refresh().then(checkBonds);
 }, QUOTE_REFRESH_MS);
+// Monthly plans due today wait for their market's first price.
+setInterval(() => {
+  if (document.visibilityState === 'visible') checkPlans();
+}, 10 * 60_000);
+
+// ---- Offline and installable ----------------------------------------------------------
+
+window.addEventListener('online', () => {
+  state.online = true;
+  refresh();
+});
+window.addEventListener('offline', () => {
+  state.online = false;
+  renderStatus();
+});
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  state.installPrompt = event;
+  if (state.tab === 'guide') renderGuide();
+});
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker
+    .register('./sw.js')
+    .then(() => navigator.serviceWorker.ready)
+    .then(reg => {
+      const urls = [location.href.split('#')[0], ...performance.getEntriesByType('resource').map(e => e.name)].filter(u => u.startsWith(location.origin));
+      reg.active?.postMessage({ type: 'cache', urls });
+    })
+    .catch(() => {});
+}
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   // Back after a while: settle what happened meanwhile from the history first.
@@ -2283,7 +3120,10 @@ document.addEventListener('visibilitychange', () => {
     .catch(() => {})
     .finally(() => {
       state.backfilled = true;
-      refresh().then(checkBonds);
+      refresh().then(() => {
+        checkBonds();
+        checkPlans();
+      });
     });
   syncNow();
 });

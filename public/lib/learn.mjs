@@ -403,7 +403,10 @@ export const MISSIONS = [
   { id: 'bond', zh: '買一張公債', en: 'Buy a government bond', done: a => fills(a).some(e => e.side === 'buy' && e.kind === 'govbond') },
   { id: 'income', zh: '領到股利或利息', en: 'Receive a dividend or coupon', done: a => (a?.events || []).some(e => e.type === 'div' && e.net > 0) },
   { id: 'spread', zh: '同時持有 3 個不同市場', en: 'Hold 3 different markets at once', done: a => maxMarketsHeld(a) >= 3 },
-  { id: 'patient', zh: '一檔持有超過 30 天', en: 'Hold something for 30+ days', done: (a, now = Date.now()) => heldLong(a, now) }
+  { id: 'patient', zh: '一檔持有超過 30 天', en: 'Hold something for 30+ days', done: (a, now = Date.now()) => heldLong(a, now) },
+  { id: 'plan', zh: '設定一個定期定額', en: 'Start a monthly plan', done: a => Object.keys(a?.plans || {}).length > 0 },
+  { id: 'alert', zh: '設一個到價通知', en: 'Set a price alert', done: a => Object.keys(a?.alerts || {}).length > 0 },
+  { id: 'league', zh: '和朋友開一場比賽', en: 'Join a league with friends', done: a => Object.keys(a?.leagues?.codes || {}).length > 0 }
 ];
 
 const fills = a => (a?.events || []).filter(e => e.type === 'fill' && !e.forced && !e.maturity);
@@ -456,5 +459,10 @@ export const GLOSSARY = [
   ['融資 / 維持率 Margin / maintenance ratio', '借錢買股 / 總資產除以欠款，太低會被追繳、斷頭。', 'Buying with borrowed money / assets ÷ debt; too low brings a call, then a forced sale.'],
   ['放空 Short selling', '借股票來賣，跌了再買回來還，賭它會跌。', 'Selling borrowed shares to buy back cheaper: a bet on a fall.'],
   ['匯率 / 價差 Exchange rate / spread', '兩種貨幣的交換比例 / 銀行買賣價中間賺的差。', 'The price of one currency in another / the bank’s cut between its buy and sell rates.'],
+  ['本益比 P/E', '股價是每股一年賺的錢（EPS）的幾倍；越高代表市場期待越多，或越貴。', 'Price ÷ a year’s earnings per share (EPS); higher means more expected growth, or pricier.'],
+  ['內扣費用 Expense ratio', 'ETF 或基金每年從資產裡扣的管理費，不會出現在帳單上，但會少賺。', 'The yearly fee a fund takes from its assets: never billed, it just lowers the return.'],
+  ['K 線 Candlestick', '一根代表一段時間：實體是開盤到收盤，細線是最高到最低；紅漲綠跌（台灣習慣）。', 'One bar per period: the body spans open to close, the wick high to low.'],
+  ['均線 Moving average (MA)', '最近 N 根 K 線收盤價的平均，看趨勢用；MA20 大約是一個月。', 'The average close of the last N bars, to see the trend; MA20 on daily bars is about a month.'],
+  ['最大回撤 Max drawdown', '從最高點跌到最低點的幅度，代表你中途要忍受多大的帳面虧損。', 'The largest fall from a high to a low: how much paper loss you’d have had to sit through.'],
   ['牛市 / 熊市 Bull / bear market', '大漲一段時間 / 大跌一段時間（通常跌 20% 以上）。', 'A long rise / a long fall (usually 20%+).']
 ];

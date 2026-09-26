@@ -882,15 +882,25 @@ export function mergeAccounts(a, b) {
   }
   const snapshots = { ...(a.snapshots || {}) };
   for (const [day, snap] of Object.entries(b.snapshots || {})) if (!snapshots[day] || snap.t > snapshots[day].t) snapshots[day] = snap;
-  const watch = { ...(a.watch || {}) };
-  for (const [sym, w] of Object.entries(b.watch || {})) if (!watch[sym] || w.t > watch[sym].t) watch[sym] = w;
-  return {
+  const latest = (x = {}, y = {}) => {
+    const out = { ...x };
+    for (const [k, v] of Object.entries(y)) if (!out[k] || v.t > out[k].t) out[k] = v;
+    return out;
+  };
+  const merged = {
     ...a,
     events: [...events.values()].sort(byTime),
     orders: [...orders.values()].sort(byTime),
     snapshots,
-    watch
+    watch: latest(a.watch, b.watch)
   };
+  if (a.plans || b.plans) merged.plans = latest(a.plans, b.plans);
+  if (a.alerts || b.alerts) merged.alerts = latest(a.alerts, b.alerts);
+  if (a.leagues || b.leagues) {
+    const [x, y] = (a.leagues?.t || 0) >= (b.leagues?.t || 0) ? [a.leagues, b.leagues] : [b.leagues, a.leagues];
+    merged.leagues = { ...(y || {}), ...x, codes: latest(y?.codes, x?.codes) };
+  }
+  return merged;
 }
 
 // A saved copy, checked: anything that isn't an account is refused.
@@ -903,3 +913,180 @@ export function toggleWatch(account, symbol, now = Date.now()) {
   return { ...account, watch: { ...(account.watch || {}), [symbol]: { on, t: now } } };
 }
 export const watched = account => Object.entries(account?.watch || {}).filter(([, w]) => w.on).sort((a, b) => a[1].t - b[1].t).map(([s]) => s);
+
+// ---- Monthly plans (定期定額) --------------------------------------------------
+//
+// A plan buys `amount` NT$ worth of one symbol on day `day` of every month
+// (the first price on or after that day, 00:00 Taiwan time). A foreign
+// symbol's NT$ is exchanged first, at that moment's rate. Each month's buy
+// is an order with a fixed id (plan:<plan>:<YYYY-MM>), so a month runs once
+// however many devices catch up on it. Plans merge like the watchlist: the
+// latest change wins.
+
+export const PLAN_MIN = 1000;
+export const PLAN_MAX_CATCHUP = 24;
+
+export function setPlan(account, { id = randomId(), symbol, amount, day, on = true, name, kind, market, currency }, now = Date.now()) {
+  amount = Math.round(Number(amount));
+  day = Math.round(Number(day));
+  const old = account.plans?.[id];
+  if (on && !(amount >= PLAN_MIN && amount <= MAX_START)) return { error: 'planAmount' };
+  if (on && !(day >= 1 && day <= 28)) return { error: 'planDay' };
+  const plan = { ...(old || {}), id, symbol: symbol ?? old?.symbol, amount: amount || old?.amount, day: day || old?.day, on, t: now, since: old?.since ?? now };
+  for (const [k, v] of Object.entries({ name, kind, market, currency })) if (v) plan[k] = v;
+  return { account: { ...account, plans: { ...(account.plans || {}), [id]: plan } }, plan };
+}
+
+export const activePlans = account => Object.values(account?.plans || {}).filter(p => p.on).sort((a, b) => a.since - b.since);
+
+// The Taiwan midnight a month's buy is due: YYYY-MM-DD 00:00 +08:00.
+export function planDue(month, day) {
+  return Date.parse(`${month}-${String(day).padStart(2, '0')}T00:00:00+08:00`);
+}
+const monthOf = t => taipeiDay(t).slice(0, 7);
+const nextMonth = month => {
+  const [y, m] = month.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+};
+
+// Every buy due since the plan started, up to now: [{ month, t }].
+export function planRuns(plan, now = Date.now()) {
+  const out = [];
+  if (!plan?.on) return out;
+  let month = monthOf(plan.since);
+  if (planDue(month, plan.day) < plan.since) month = nextMonth(month);
+  for (let i = 0; i < 1200; i++) {
+    const t = planDue(month, plan.day);
+    if (t > now) break;
+    out.push({ month, t });
+    month = nextMonth(month);
+  }
+  return out.slice(-PLAN_MAX_CATCHUP);
+}
+
+// When the plan buys next.
+export function nextPlanRun(plan, now = Date.now()) {
+  let month = monthOf(Math.max(now, plan.since));
+  for (let i = 0; i < 3; i++) {
+    const t = planDue(month, plan.day);
+    if (t > now && t >= plan.since) return t;
+    month = nextMonth(month);
+  }
+  return null;
+}
+
+export const planOrderId = (plan, month) => `plan:${plan.id}:${month}`;
+
+// Runs one month's buy at `price` (the first price at or after its due
+// time, at moment `at`), `twd` NT$ per unit of its currency then. The NT$
+// budget is exchanged (for a foreign symbol) and spent on as many units as
+// it covers after costs. Not enough NT$ or too small for one unit: the
+// month's order is recorded as rejected, so it isn't tried again.
+export function runPlan(account, plan, run, { price, twd, at = run.t, quote }, now = Date.now()) {
+  const id = planOrderId(plan, run.month);
+  if (account.orders.some(o => o.id === id)) return { account };
+  const meta = { symbol: plan.symbol, name: quote?.name || plan.name, kind: quote?.kind || plan.kind, market: quote?.market || plan.market, currency: quote?.currency || plan.currency };
+  const order = { id, ...meta, side: 'buy', type: 'market', qty: 0, t: at, status: 'open', rev: 1, plan: plan.id, reserve: 0 };
+  const reject = reason => {
+    const rejected = { ...order, status: 'rejected', reason, rev: 2, done: at };
+    return { account: { ...account, orders: [...account.orders, rejected] }, order: rejected };
+  };
+  if (!(price > 0) || !(twd > 0) || !meta.currency) return { account };
+  const avail = available(account, replay(account, now));
+  if ((avail.cash[BASE] || 0) + EPS < plan.amount) return reject('funds');
+  const rates = { [BASE]: 1, [meta.currency]: twd };
+  let budget = plan.amount;
+  let fx = null;
+  if (meta.currency !== BASE) {
+    fx = quoteExchange(BASE, meta.currency, plan.amount, rates, true);
+    if (!fx?.received) return reject('tooSmall');
+    budget = fx.received;
+  }
+  let qty = roundQty(budget / price, meta.kind);
+  const first = qty > 0 ? estimate({ ...meta, side: 'buy', qty, price }).total : 0;
+  if (first > budget) qty = roundQty((qty * budget) / first, meta.kind);
+  while (qty > 0 && estimate({ ...meta, side: 'buy', qty, price }).total > budget + EPS) qty = roundQty(qty - (qtyStep(meta.kind) >= 1 ? 1 : qty * 0.001), meta.kind);
+  if (!(qty > 0)) return reject('tooSmall');
+  let next = account;
+  if (fx) {
+    // Only what the units need is exchanged: the rest stays in NT$.
+    const cost = estimate({ ...meta, side: 'buy', qty, price }).total;
+    const need = amountFor(BASE, meta.currency, cost, rates, true);
+    const r = exchange(next, { from: BASE, to: meta.currency, amount: Math.min(plan.amount, need) }, { rates, fxOpen: true, now: at, id: `plan:${plan.id}:${run.month}` });
+    if (r.error) return reject(r.error === 'funds' ? 'funds' : 'tooSmall');
+    next = r.account;
+  }
+  const open = { ...order, qty };
+  next = { ...next, orders: [...next.orders, open] };
+  const r = fillOrder(next, open, price, rates, now, at);
+  return { account: r.account, order: r.order, fill: r.fill };
+}
+
+// ---- Price alerts --------------------------------------------------------------
+//
+// "Tell me when TSMC goes above / below X": checked on every price update
+// and, for the time the page was closed, against the price bars since.
+// Alerts merge like the watchlist (the latest change wins).
+
+export function setAlert(account, { id = randomId(), symbol, op, price, on = true, note }, now = Date.now()) {
+  const old = account.alerts?.[id];
+  price = Number(price ?? old?.price);
+  op = op ?? old?.op;
+  if (on && !(price > 0)) return { error: 'alertPrice' };
+  if (op !== 'above' && op !== 'below') return { error: 'alertPrice' };
+  const alert = { id, symbol: symbol ?? old?.symbol, op, price, on, t: now, since: on && !old?.on ? now : old?.since ?? now };
+  if (note) alert.note = note;
+  if (on) delete alert.hit;
+  return { account: { ...account, alerts: { ...(account.alerts || {}), [id]: alert } }, alert };
+}
+
+export const activeAlerts = account => Object.values(account?.alerts || {}).filter(a => a.on).sort((a, b) => a.since - b.since);
+export const alertsFor = (account, symbol) => Object.values(account?.alerts || {}).filter(a => a.symbol === symbol && (a.on || a.hit)).sort((a, b) => b.t - a.t);
+
+const crossed = (a, price) => (a.op === 'above' ? price >= a.price : price <= a.price);
+
+// Alerts whose price is reached on these quotes: they turn off, marked hit.
+export function checkAlerts(account, quotes, now = Date.now()) {
+  const hits = [];
+  let alerts = account.alerts;
+  for (const a of activeAlerts(account)) {
+    const q = quotes.get(a.symbol);
+    if (!q || !Number.isFinite(q.price) || !crossed(a, q.price)) continue;
+    const hit = { ...a, on: false, t: now, hit: { t: now, price: q.price } };
+    alerts = { ...alerts, [a.id]: hit };
+    hits.push(hit);
+  }
+  return hits.length ? { account: { ...account, alerts }, hits } : { account, hits };
+}
+
+// When a price alert would have gone off in these bars (oldest first).
+export function alertHitInBars(alert, bars) {
+  for (const b of bars) {
+    if (b.t < alert.since) continue;
+    if (alert.op === 'above' && b.h >= alert.price) return { t: b.t, price: Math.max(b.o, alert.price) };
+    if (alert.op === 'below' && b.l <= alert.price) return { t: b.t, price: Math.min(b.o, alert.price) };
+  }
+  return null;
+}
+
+export function markAlertHit(account, id, { t, price }, now = Date.now()) {
+  const a = account.alerts?.[id];
+  if (!a?.on) return account;
+  return { ...account, alerts: { ...account.alerts, [id]: { ...a, on: false, t: now, hit: { t, price } } } };
+}
+
+// ---- Friend leagues -------------------------------------------------------------
+//
+// Who this account is in its friend leagues: a nickname, a member id and a
+// secret (only this person's devices can change their row), and the league
+// codes joined. Kept in the account so it follows the account's sync.
+
+export function setLeagues(account, change, now = Date.now()) {
+  const old = account.leagues || { id: randomId().slice(0, 12).toLowerCase().replace(/[^a-z0-9]/g, '0'), secret: randomId() + randomId(), nick: '', codes: {} };
+  const codes = { ...old.codes };
+  if (change.join) codes[change.join] = { on: true, t: now };
+  if (change.leave) codes[change.leave] = { on: false, t: now };
+  const next = { ...old, nick: change.nick ?? old.nick, codes, t: now };
+  return { ...account, leagues: next };
+}
+export const leagueCodes = account => Object.entries(account?.leagues?.codes || {}).filter(([, c]) => c.on).sort((a, b) => a[1].t - b[1].t).map(([code]) => code);

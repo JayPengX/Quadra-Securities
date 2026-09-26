@@ -1,0 +1,86 @@
+// Stock Study's service worker: keeps the page's own files so the app opens
+// without a connection (with the last prices it saved) and can be installed.
+// Prices, sync and leagues go to other sites and are never touched here.
+//
+// A file with a ?v= version (every deploy stamps one) is served from the
+// cache first, since that exact version never changes; anything else (the
+// page itself) comes from the network first, the cache only when offline.
+// One copy per file is kept: a new version replaces the old one.
+const CACHE = 'stock-study-v1';
+
+self.addEventListener('install', event => {
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(['./'])).then(() => self.skipWaiting()));
+});
+
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches
+      .keys()
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+
+async function keep(request, response) {
+  if (!response || response.status !== 200 || response.type === 'opaque') return;
+  const cache = await caches.open(CACHE);
+  const url = new URL(request.url);
+  // Drop older versions of the same file.
+  for (const old of await cache.keys()) {
+    const o = new URL(old.url);
+    if (o.pathname === url.pathname && o.search !== url.search) await cache.delete(old);
+  }
+  await cache.put(request, response);
+}
+
+async function networkFirst(request) {
+  try {
+    const response = await fetch(request);
+    await keep(request, response.clone());
+    return response;
+  } catch (error) {
+    const cached = (await caches.match(request, { ignoreSearch: request.mode === 'navigate' })) || (request.mode === 'navigate' && (await caches.match('./')));
+    if (cached) return cached;
+    throw error;
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+  const response = await fetch(request);
+  await keep(request, response.clone());
+  return response;
+}
+
+self.addEventListener('fetch', event => {
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.endsWith('/version.json')) return;
+  event.respondWith(url.searchParams.has('v') && request.mode !== 'navigate' ? cacheFirst(request) : networkFirst(request));
+});
+
+// The page lists the files it loaded before this worker was in charge, so
+// the very first visit already works offline next time.
+self.addEventListener('message', event => {
+  if (event.data?.type !== 'cache') return;
+  const urls = (event.data.urls || []).filter(u => new URL(u).origin === self.location.origin && !u.endsWith('/version.json'));
+  event.waitUntil(
+    Promise.all(
+      urls.map(u =>
+        caches.match(u).then(hit => hit || fetch(u).then(r => keep(new Request(u), r)).catch(() => {}))
+      )
+    )
+  );
+});
+
+// A tap on a price alert's notification opens (or focuses) the page.
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      const open = list.find(c => c.url.startsWith(self.registration.scope));
+      return open ? open.focus() : self.clients.openWindow('./#portfolio');
+    })
+  );
+});

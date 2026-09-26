@@ -100,9 +100,14 @@ export function parseChart(json) {
   const { factor } = normalizeCurrency(r.meta.currency);
   const q = r.indicators?.quote?.[0] || {};
   const bars = [];
+  // Closes with dividends added back (Yahoo's adjusted close): what holding
+  // it and reinvesting every dividend would have made.
+  const adj = r.indicators?.adjclose?.[0]?.adjclose || [];
+  const adjusted = [];
   for (let i = 0; i < (r.timestamp || []).length; i++) {
     const [o, h, l, c] = [q.open?.[i], q.high?.[i], q.low?.[i], q.close?.[i]];
-    if ([o, h, l, c].every(Number.isFinite)) bars.push({ t: r.timestamp[i] * 1000, o: o / factor, h: h / factor, l: l / factor, c: c / factor });
+    if ([o, h, l, c].every(Number.isFinite)) bars.push({ t: r.timestamp[i] * 1000, o: o / factor, h: h / factor, l: l / factor, c: c / factor, v: q.volume?.[i] || 0 });
+    if (Number.isFinite(adj[i])) adjusted.push([r.timestamp[i] * 1000, adj[i] / factor]);
   }
   const dividends = Object.values(r.events?.dividends || {})
     .map(d => ({ date: d.date * 1000, amount: d.amount / factor }))
@@ -111,7 +116,7 @@ export function parseChart(json) {
     .filter(s => s.numerator > 0 && s.denominator > 0)
     .map(s => ({ date: s.date * 1000, ratio: s.numerator / s.denominator }))
     .sort((a, b) => a.date - b.date);
-  return { quote, points: quote.line, bars, dividends, splits };
+  return { quote, points: quote.line, bars, adjusted, dividends, splits };
 }
 
 // A passbook metal: the future's US$ per troy ounce, in NT$ per gram.
@@ -314,4 +319,70 @@ export async function searchSymbols(query) {
   // Yahoo's search takes Latin letters and digits only (Chinese is refused).
   if (!q || /[^\x20-\x7e]/.test(q)) return [];
   return parseSearch(await getJson(`${YAHOO}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=12&newsCount=0&listsCount=0`));
+}
+
+// A company's or fund's numbers from Yahoo's quoteSummary (the Worker adds
+// the session Yahoo asks for): for a stock its P/E, EPS, market value,
+// dividend yield and what it does; for a fund its fees, size, yield and
+// biggest holdings. Missing numbers are null.
+const raw = x => (x && typeof x === 'object' ? (Number.isFinite(x.raw) ? x.raw : null) : Number.isFinite(x) ? x : null);
+export function parseFundamentals(json) {
+  const r = json?.quoteSummary?.result?.[0];
+  if (!r) return null;
+  const sd = r.summaryDetail || {};
+  const ks = r.defaultKeyStatistics || {};
+  const fd = r.financialData || {};
+  const ap = r.assetProfile || {};
+  const fp = r.fundProfile || {};
+  const th = r.topHoldings || {};
+  const currency = sd.currency || fd.financialCurrency || null;
+  const { factor } = normalizeCurrency(currency || 'USD');
+  const money = x => (raw(x) == null ? null : raw(x) / factor);
+  const out = {
+    currency: currency ? normalizeCurrency(currency).currency : null,
+    marketCap: money(sd.marketCap),
+    pe: raw(sd.trailingPE),
+    forwardPe: raw(sd.forwardPE),
+    eps: money(ks.trailingEps),
+    pb: raw(ks.priceToBook),
+    dividendYield: raw(sd.dividendYield) ?? raw(sd.yield) ?? raw(sd.trailingAnnualDividendYield),
+    beta: raw(sd.beta) ?? raw(ks.beta3Year),
+    margin: raw(fd.profitMargins) ?? raw(ks.profitMargins),
+    roe: raw(fd.returnOnEquity),
+    growth: raw(fd.revenueGrowth),
+    revenue: money(fd.totalRevenue),
+    debtToEquity: raw(fd.debtToEquity),
+    sector: ap.sector || null,
+    industry: ap.industry || null,
+    country: ap.country || null,
+    employees: raw(ap.fullTimeEmployees),
+    website: /^https?:\/\//.test(ap.website || '') ? ap.website : null,
+    summary: ap.longBusinessSummary || null,
+    // Funds.
+    family: fp.family || ks.fundFamily || null,
+    category: fp.categoryName || ks.category || null,
+    expenseRatio: raw(fp.feesExpensesInvestment?.annualReportExpenseRatio) ?? raw(ks.annualReportExpenseRatio) ?? raw(ks.netExpenseRatio),
+    totalAssets: money(sd.totalAssets) ?? money(ks.totalAssets),
+    inception: raw(ks.fundInceptionDate) ? raw(ks.fundInceptionDate) * 1000 : null,
+    holdings: (th.holdings || []).map(h => ({ symbol: h.symbol || '', name: h.holdingName || h.symbol || '', weight: raw(h.holdingPercent) })).filter(h => h.weight > 0).slice(0, 10)
+  };
+  return out;
+}
+
+export async function fetchFundamentals(symbol) {
+  const modules = 'assetProfile,summaryDetail,defaultKeyStatistics,financialData,fundProfile,topHoldings';
+  return parseFundamentals(await getJson(`${YAHOO}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`));
+}
+
+// Recent news headlines about a symbol (Yahoo's search; English sources).
+export function parseNews(json) {
+  return (json?.news || [])
+    .filter(n => n.title && /^https:\/\//.test(n.link || ''))
+    .map(n => ({ title: n.title, publisher: n.publisher || '', link: n.link, t: (n.providerPublishTime || 0) * 1000 }))
+    .sort((a, b) => b.t - a.t);
+}
+export async function fetchNews(query) {
+  const q = String(query || '').trim();
+  if (!q || /[^\x20-\x7e]/.test(q)) return [];
+  return parseNews(await getJson(`${YAHOO}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=0&newsCount=6&listsCount=0`));
 }

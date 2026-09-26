@@ -606,3 +606,70 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .glossary dt { font-weight: 700; color: var(--text-primary); }
 .glossary dd { margin: 2px 0 0; }
 .button-row.center { justify-content: center; margin-top: 10px; }
+
+/* ---- Charts: style toggle, candles, averages -------------------------------------------- */
+.chart-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.chart-controls .ranges { margin: 0; }
+.chart-style { display: flex; gap: 6px; align-items: center; }
+.chart-svg .candle line { stroke: var(--text-muted); stroke-width: 1; }
+.chart-svg .candle rect { fill: var(--text-muted); }
+.chart-svg .candle.up line { stroke: var(--up); }
+.chart-svg .candle.up rect { fill: var(--up); }
+.chart-svg .candle.down line { stroke: var(--down); }
+.chart-svg .candle.down rect { fill: var(--down); }
+.chart-svg .vol { opacity: 0.35; fill: var(--text-muted); }
+.chart-svg .vol.up { fill: var(--up); }
+.chart-svg .vol.down { fill: var(--down); }
+.chart-svg .line.ma1 { stroke: var(--c4); stroke-width: 1.5; }
+.chart-svg .line.ma2 { stroke: var(--c1); stroke-width: 1.5; }
+.chart-svg .line.ma3 { stroke: var(--c7); stroke-width: 1.5; }
+.chart-svg .hover-dot.ma1 { fill: var(--c4); }
+.chart-svg .hover-dot.ma2 { fill: var(--c1); }
+.chart-svg .hover-dot.ma3 { fill: var(--c7); }
+.sw.ma1 { background: var(--c4); }
+.sw.ma2 { background: var(--c1); }
+.sw.ma3 { background: var(--c7); }
+.chart-box .legend-inline { margin: 6px 0 0; }
+.chart-tip .ohlc { color: var(--text-secondary); white-space: nowrap; }
+
+/* ---- Detail sheet: company, alerts, plans ------------------------------------------------- */
+.about-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 10px; margin: 0; }
+.about-grid > div { background: var(--surface-raised); border-radius: 12px; padding: 10px 12px; }
+.about-grid dt { font-size: 0.74rem; color: var(--text-muted); }
+.about-grid dd { margin: 2px 0 4px; font-size: 1.02rem; font-weight: 700; }
+.about-grid p { margin: 0; font-size: 0.78rem; color: var(--text-secondary); line-height: 1.45; }
+.holdings li { grid-template-columns: minmax(110px, 42%) 1fr auto; }
+.holdings .bar { background: var(--c1); }
+.summary-text summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+.summary-text p { font-size: 0.86rem; line-height: 1.55; color: var(--text-secondary); }
+.news { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.news li { display: grid; gap: 2px; }
+.news a { color: var(--text-primary); font-weight: 600; text-decoration: none; line-height: 1.35; }
+.news a:hover { text-decoration: underline; }
+.news small { color: var(--text-muted); font-size: 0.76rem; }
+.tool-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tool-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.88rem; padding: 6px 10px; background: var(--surface-raised); border-radius: 10px; }
+.tools-row { margin: 0 0 14px; }
+.guide-text .loan-form, .guide-text .fx-amount { margin: 0; }
+
+/* ---- Time machine ------------------------------------------------------------------------- */
+.tm-card { display: grid; gap: 12px; }
+.tm-card h2 { font-size: 1.15rem; margin: 0; }
+.tm-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; align-items: end; }
+.tm-form .segmented { align-self: end; }
+.tm-card > .primary-button { justify-self: start; }
+.tm-result { display: grid; gap: 10px; border-top: 1px solid var(--grid); padding-top: 12px; }
+.tm-line { font-weight: 700; margin: 0; }
+
+/* ---- Friends league ----------------------------------------------------------------------- */
+.league-teaser { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.league-teaser .card-title { margin-bottom: 2px; }
+.league-teaser p { margin: 0; }
+.two-col.tight { gap: 10px; margin: 10px 0; }
+.sync-code.small { font-size: 0.95rem; letter-spacing: 0.08em; color: var(--text-secondary); }
+.leaderboard { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 6px; }
+.leaderboard li { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-raised); }
+.leaderboard li.me { background: var(--accent-wash); outline: 1px solid var(--accent); }
+.leaderboard .rank { font-size: 1.15rem; text-align: center; font-weight: 800; color: var(--text-secondary); }
+.leaderboard strong { font-size: 1.05rem; }
+.league-top { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

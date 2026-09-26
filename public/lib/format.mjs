@@ -53,10 +53,12 @@ export function compact(n) {
   const a = Math.abs(n);
   const s = n < 0 ? '−' : '';
   if (locale === 'zh') {
+    if (a >= 1e12) return `${s}${nf(0, a >= 1e14 ? 0 : 2).format(a / 1e12)}兆`;
     if (a >= 1e8) return `${s}${nf(0, a >= 1e10 ? 0 : 2).format(a / 1e8)}億`;
     if (a >= 1e4) return `${s}${nf(0, a >= 1e6 ? 0 : 1).format(a / 1e4)}萬`;
     return `${s}${nf(0, a < 10 ? 2 : 0).format(a)}`;
   }
+  if (a >= 1e12) return `${s}${nf(0, 2).format(a / 1e12)}T`;
   if (a >= 1e9) return `${s}${nf(0, 1).format(a / 1e9)}B`;
   if (a >= 1e6) return `${s}${nf(0, 1).format(a / 1e6)}M`;
   if (a >= 1e4) return `${s}${nf(0, 0).format(a / 1e3)}K`;

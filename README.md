@@ -23,7 +23,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 ### The detail sheet
 
 - The price, the change, and whether the market is open, with local and Taiwan time. A closed market shows its next open.
-- Charts over 1D, 5D, 1M, 6M, YTD, 1Y, 5Y or everything, with a crosshair.
+- Charts over 1D, 5D, 1M, 6M, YTD, 1Y, 5Y or everything, with a crosshair: as a line or **candlesticks with volume**, and **moving averages** (MA5, MA20, MA60) on either.
 - The facts: previous close, day and 52-week range, volume, currency, market, trading hours, trading costs, the price in NT$.
 - Your position: quantity, average cost, value, P/L.
 - **The ticket:**
@@ -31,6 +31,10 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
   - quick sizes: max affordable, 1/100 shares, 1 lot (1,000 shares in Taiwan), or ¼, ½ and all of a holding;
   - a preview of the price, amount, commission, taxes, exchange fees and total, in NT$ too.
   - **Short of a currency?** One tap exchanges exactly the NT$ needed.
+- **Price alert** (🔔): tell me when it rises or falls to a price. Checked on every refresh and, for the time the page was closed, against the price bars since (reported with when it happened). With notifications allowed, it notifies through the service worker.
+- **Monthly plan** (📅 定期定額): buy NT$X on day N of every month. Each month buys at the first price after 00:00 Taiwan time on its day, as many units as the money covers after costs (a foreign one exchanges only the NT$ it needs, at that moment's rate). Missed months are bought from the price history when the page opens again; a month without enough NT$ is skipped and recorded.
+- **Time machine** link: what buying this years ago would be worth now.
+- **About the company / fund:** market value, P/E, EPS, dividend yield, margins, ROE, revenue growth, beta, P/B, sector, with a one-line explanation of each; for funds the expense ratio, size, yield, issuer and top 10 holdings; what it does; recent news (English).
 - Indexes and futures are watch-only and point to what tracks them (TAIEX → 0050, S&P 500 → VOO/SPY/00646, gold → the gold passbook/GLD/00635U …). Exchange rates point to the FX tab.
 
 ### 公債 Government bonds
@@ -56,6 +60,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - Net worth over time: rebuilt for every day since the account opened from the log and each day's closing prices and exchange rates, so there's no need to open the app daily. The money put in is a dashed line.
 - Allocation by kind, currency or market.
 - Positions (value, P/L, today, weight), open orders, and a wallet for every currency (cash held for open orders shown). Loans show here too, and the maintenance ratio when there are any.
+- Monthly plans (next buy, last result, stop) and price alerts (distance from the price, remove).
 - Add money (tracked as money put in, not as return), sync and backups.
 
 ### 換匯・融資 FX & loans
@@ -77,6 +82,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
   - closed trades (win rate, average return and hold, best and worst);
   - P/L by market;
   - **you vs. just buying an index**: the same deposits on the same days into 0050, VOO (in NT$), Bitcoin (in NT$) or the gold passbook.
+- **Friends:** leagues ranked by return (so any starting amount is fair). Pick a nickname, create a league or join one by its 8-character code or a shared `#league=CODE` link. Each member's row (nickname, return, net worth, money put in, days, trades, top holdings) is posted at most every 10 minutes; only the browser holding the row's secret can change it.
 
 ### 學習 Learn
 
@@ -85,9 +91,10 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - **13 short lessons:** what a stock is, reading a quote, order types, fees and taxes, ETFs and diversification, dividends, currency risk, government bonds, crypto and gold, time and compounding, leverage, common beginner mistakes, and a practice plan.
 - **Live examples:** each lesson uses today's real prices (a lot of TSMC with its fees and round-trip cost, the US 10-year yield, the NT$ rate…).
 - **Try it:** buttons open the relevant stock or tab.
+- **Time machine:** NT$X once, or every month, into 0050, TSMC, VOO, QQQ, Bitcoin, gold… since any year from 2000. Monthly closes with dividends reinvested, foreign ones at each month's NT$ rate. Shows what it's worth now, the yearly return, the biggest drop along the way (and when), the best and worst years, and the same money in a bank deposit.
 - **A one-question quiz** ends each lesson; the right answer marks the lesson done, with a progress bar.
-- **Beginner missions** tick themselves off from the account's history: first Taiwan stock, first ETF, a limit order, an exchange, something abroad, a government bond, a dividend or coupon, three markets at once, a 30-day hold.
-- **A glossary** of 20 terms.
+- **Beginner missions** tick themselves off from the account's history: first Taiwan stock, first ETF, a limit order, an exchange, something abroad, a government bond, a dividend or coupon, three markets at once, a 30-day hold, a monthly plan, a price alert, a league.
+- **A glossary** of 25 terms.
 
 Below it, the reference:
 
@@ -134,7 +141,8 @@ Two devices' copies merge by uniting their logs:
 
 - `/v7/finance/spark`: up to 20 quotes per request, with today's line.
 - `/v8/finance/chart`: charts, dividends and splits.
-- `/v1/finance/search`: search.
+- `/v1/finance/search`: search, and news.
+- `/v10/finance/quoteSummary`: company and fund numbers (the Worker adds Yahoo's session cookie and crumb).
 
 **What's still limited:**
 
@@ -148,6 +156,8 @@ Two devices' copies merge by uniting their logs:
 - Waiting orders are checked and today's net worth recorded after each refresh.
 - Dividends and splits are checked twice a day for everything ever held.
 
+**Offline and installable:** `public/sw.js` keeps the page's own files (each stamped version once), and the last prices are saved, so the app opens without a connection and shows when its prices are from; trading and exchanging wait for live prices. It can be installed to a phone's home screen.
+
 **Saves** are gzip-compressed (`codec.mjs`) in `localStorage`. The optional sync goes through Shared-Proxy's `/stock-sync` route (Firestore, 8-character passcode, `sync.mjs`). A backup file can be downloaded and restored (merged, nothing counted twice).
 
 | File | Purpose |
@@ -157,9 +167,12 @@ Two devices' copies merge by uniting their logs:
 | `public/lib/markets.mjs` | Currencies (spreads, loan rates), markets (commissions, taxes, withholding), kinds, hours, margin rules |
 | `public/lib/quotes.mjs` | Fetching and parsing Yahoo's quotes, charts, events and search; passbook metals |
 | `public/lib/catalog.mjs` | The curated lists with Chinese names, the overview strip, trackers for indexes |
-| `public/lib/chart.mjs` | SVG sparklines, charts with a crosshair, 100% bars |
+| `public/lib/chart.mjs` | SVG sparklines, line and candlestick charts with a crosshair, 100% bars |
 | `public/lib/format.mjs` | Money, prices, percentages, 萬/億, dates |
 | `public/lib/i18n.mjs` | Traditional Chinese and English (follows the browser) |
+| `public/lib/timemachine.mjs` | The time machine and moving averages |
+| `public/lib/league.mjs` | Friend leagues through `/stock-league` |
+| `public/sw.js` | Offline files and alert notifications |
 | `public/lib/sync.mjs`, `codec.mjs` | Sync and compressed saves |
 | `public/app.js` | Rendering and wiring |
 

@@ -160,3 +160,100 @@ export function stackBar(parts, { format = v => v } = {}) {
 
 // Categorical colours (validated order), light and dark via CSS variables.
 export const SERIES = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)', 'var(--c6)', 'var(--c7)', 'var(--c8)'];
+
+// Candlesticks (one per bar, evenly spaced so nights and weekends leave no
+// gaps), optional average lines over them, and volume underneath.
+// bars: [{ t, o, h, l, c, v }]; lines: [{ points: [[t, v]], cls }] on the
+// same bar times. Rising candles use the "up" colour, falling "down".
+export function candleChart(bars, { width = 640, height = 260, lines = [], yFormat = v => v, xFormat = t => t, volume = true } = {}) {
+  if (!bars?.length) return { svg: '', frame: null };
+  const pad = { l: 8, r: 64, t: 12, b: 24 };
+  const W = width - pad.l - pad.r;
+  const hasVolume = volume && bars.some(b => b.v > 0);
+  const volH = hasVolume ? Math.round((height - pad.t - pad.b) * 0.18) : 0;
+  const H = height - pad.t - pad.b - volH - (hasVolume ? 6 : 0);
+  const index = new Map(bars.map((b, i) => [b.t, i]));
+  const values = [...bars.flatMap(b => [b.h, b.l]), ...lines.flatMap(s => s.points.map(p => p[1]))];
+  const [lo0, hi0] = extent(values);
+  const room = (hi0 - lo0) * 0.06;
+  const lo = lo0 - room;
+  const hi = hi0 + room;
+  const step = W / bars.length;
+  const X = i => pad.l + step * (i + 0.5);
+  const Y = v => pad.t + H - ((v - lo) / (hi - lo)) * H;
+  const body = Math.max(1, Math.min(14, step * 0.66));
+  const ticks = [];
+  for (let i = 0; i <= 3; i++) ticks.push(lo0 + ((hi0 - lo0) * i) / 3);
+  const grid = ticks
+    .map(v => `<line class="grid" x1="${pad.l}" x2="${pad.l + W}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="axis-label" x="${pad.l + W + 6}" y="${f(Y(v) + 4)}">${escapeHtml(yFormat(v))}</text>`)
+    .join('');
+  const candles = bars
+    .map((b, i) => {
+      const dir = b.c > b.o ? 'up' : b.c < b.o ? 'down' : 'flat';
+      const top = Y(Math.max(b.o, b.c));
+      const h = Math.max(1, Y(Math.min(b.o, b.c)) - top);
+      return `<g class="candle ${dir}"><line x1="${f(X(i))}" x2="${f(X(i))}" y1="${f(Y(b.h))}" y2="${f(Y(b.l))}"/><rect x="${f(X(i) - body / 2)}" y="${f(top)}" width="${f(body)}" height="${f(h)}"/></g>`;
+    })
+    .join('');
+  const overlay = lines
+    .map(s => {
+      const pts = s.points.filter(p => index.has(p[0]));
+      if (pts.length < 2) return '';
+      return `<path class="line ${s.cls}" d="${pts.map((p, j) => `${j ? 'L' : 'M'}${f(X(index.get(p[0])))} ${f(Y(p[1]))}`).join('')}"/>`;
+    })
+    .join('');
+  let vol = '';
+  if (hasVolume) {
+    const vmax = Math.max(...bars.map(b => b.v || 0)) || 1;
+    const base = height - pad.b;
+    vol = bars
+      .map((b, i) => {
+        const h = ((b.v || 0) / vmax) * volH;
+        return h > 0 ? `<rect class="vol ${b.c >= b.o ? 'up' : 'down'}" x="${f(X(i) - body / 2)}" y="${f(base - h)}" width="${f(body)}" height="${f(h)}"/>` : '';
+      })
+      .join('');
+  }
+  const xticks = [0, 0.5, 1]
+    .map(k => {
+      const i = Math.round((bars.length - 1) * k);
+      const anchor = k === 0 ? 'start' : k === 1 ? 'end' : 'middle';
+      return `<text class="axis-label" text-anchor="${anchor}" x="${f(k === 0 ? pad.l : k === 1 ? pad.l + W : X(i))}" y="${height - 6}">${escapeHtml(xFormat(bars[i].t))}</text>`;
+    })
+    .join('');
+  const svg = `<svg class="chart-svg candles" viewBox="0 0 ${width} ${height}" role="img">${grid}${vol}${candles}${overlay}${xticks}<g class="hover" visibility="hidden"><line class="cross" y1="${pad.t}" y2="${height - pad.b}"/></g><rect class="hit" x="${pad.l}" y="0" width="${W}" height="${height}" fill="transparent"/></svg>`;
+  return { svg, frame: { pad, W, H, step, width, height, count: bars.length } };
+}
+
+// Crosshair and tooltip for candleChart: `label(bar, i)` returns its HTML.
+export function attachCandleHover(box, bars, frame, label) {
+  const svg = box.querySelector('svg');
+  if (!svg || !frame) return;
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  tip.hidden = true;
+  box.append(tip);
+  const hover = svg.querySelector('.hover');
+  const cross = hover.querySelector('.cross');
+  const move = event => {
+    const rect = svg.getBoundingClientRect();
+    const sx = ((event.clientX - rect.left) / rect.width) * frame.width;
+    const i = Math.max(0, Math.min(frame.count - 1, Math.floor((sx - frame.pad.l) / frame.step)));
+    const x = frame.pad.l + frame.step * (i + 0.5);
+    cross.setAttribute('x1', x);
+    cross.setAttribute('x2', x);
+    hover.setAttribute('visibility', 'visible');
+    tip.innerHTML = label(bars[i], i);
+    tip.hidden = false;
+    const boxRect = box.getBoundingClientRect();
+    const px = (x / frame.width) * rect.width + (rect.left - boxRect.left);
+    const tipW = tip.offsetWidth;
+    tip.style.left = `${Math.min(Math.max(px - tipW / 2, 0), boxRect.width - tipW)}px`;
+  };
+  const leave = () => {
+    hover.setAttribute('visibility', 'hidden');
+    tip.hidden = true;
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerdown', move);
+  svg.addEventListener('pointerleave', leave);
+}

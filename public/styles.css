@@ -276,6 +276,8 @@ footer { padding: 10px 0 0; text-align: center; }
 .row-title { font-weight: 700; font-size: 0.95rem; white-space: normal; overflow-wrap: anywhere; }
 .row-title small { font-weight: 500; color: var(--text-muted); font-size: 0.8rem; }
 .row-sub { font-size: 0.75rem; color: var(--text-muted); white-space: normal; overflow-wrap: anywhere; }
+/* Figures wrap between words, never inside a number (e.g. a bank rate on a 320px phone). */
+.row-sub.num { overflow-wrap: normal; }
 .row-spark { flex: none; width: 96px; }
 .row-spark .spark { width: 96px; height: 30px; }
 .row-price { flex: none; display: grid; justify-items: end; min-width: 84px; }

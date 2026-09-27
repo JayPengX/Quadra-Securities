@@ -37,7 +37,11 @@ async function keep(request, response) {
 
 async function networkFirst(request) {
   try {
-    const response = await fetch(request);
+    // The page itself is checked with the server every time (a cheap 304
+    // when unchanged): GitHub Pages lets browsers keep it 10 minutes, which
+    // would open the last deploy's page right after a new one. By address,
+    // since a navigation can't be re-sent with options.
+    const response = request.mode === 'navigate' ? await fetch(request.url, { cache: 'no-cache', credentials: 'same-origin', redirect: 'manual' }) : await fetch(request);
     await keep(request, response.clone());
     return response;
   } catch (error) {

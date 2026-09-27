@@ -3390,7 +3390,7 @@ window.addEventListener('resize', () => {
 window.__stockStarted = true;
 // Phones and tablets: from the home screen only. Always the newest deploy.
 installGate('stock', locale);
-watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.content, key: 'stockStudy', busy: () => Boolean(state.game?.live) });
+watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.content, key: 'stockStudy', cachePrefix: 'stock-study-', busy: () => Boolean(state.game?.live) });
 applySettings();
 state.sync.code = loadSyncCode();
 if (onPass()) state.wallet = cachedWallet(state.sync.code);

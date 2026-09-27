@@ -327,7 +327,9 @@ export function installGate(app, lang = 'zh') {
 // worker updates, and the page reloads under the new version, once.
 // `busy()` (optional): true while reloading now would interrupt something
 // (a game round, typing); the reload then waits for the next check.
-export function watchUpdates({ current, key, busy = () => false, every = 5 * 60_000 } = {}) {
+// Only this app's own caches (`cachePrefix`, its service worker's names):
+// the four apps share the origin, and with it the Cache Storage.
+export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 5 * 60_000 } = {}) {
   if (!current || current === 'dev') return;
   let checking = false;
   async function check() {
@@ -341,8 +343,8 @@ export function watchUpdates({ current, key, busy = () => false, every = 5 * 60_
       if (sessionStorage.getItem(flag) === latest) return;
       sessionStorage.setItem(flag, latest);
       document.documentElement.classList.add('quadra-updating');
-      if (globalThis.caches) for (const name of await caches.keys()) await caches.delete(name);
-      const reg = await navigator.serviceWorker?.getRegistration?.();
+      if (globalThis.caches && cachePrefix) for (const name of await caches.keys()) if (name.startsWith(cachePrefix)) await caches.delete(name);
+      const reg = await navigator.serviceWorker?.getRegistration?.(location.pathname);
       await reg?.update?.().catch(() => {});
       location.replace(`${location.pathname}?v=${encodeURIComponent(latest)}${location.hash}`);
     } catch {

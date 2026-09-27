@@ -91,16 +91,19 @@ body {
   }
 }
 
-/* ---- The loading screen: the app's icon, its name under "四方 Quadra", a
-   spinner in the app's colour, and a bar when there's progress to show. ---- */
+/* ---- The loading screen: the same in all four apps (and the only styles
+   for it: no app restyles it). The app's icon, "四方 QUADRA", its name, a
+   spinner in the app's colour, and when there's progress to show a line
+   of text, a bar and the time left; if loading fails, a way out. ---- */
 .loading {
   position: fixed;
   inset: 0;
   z-index: 1000;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
   background: var(--q-page);
+  color: var(--q-text);
   font-family: var(--q-font);
   transition: opacity 0.25s ease;
 }
@@ -110,40 +113,88 @@ body {
 .loading-box {
   display: grid;
   justify-items: center;
+  align-content: start;
   gap: 10px;
-  width: min(340px, 100%);
+  width: min(320px, 100%);
+  /* The same height whatever an app shows under the spinner, so the icon
+     sits in exactly the same place in every app. */
+  min-height: 300px;
   text-align: center;
-  color: var(--q-text);
 }
 .loading-logo {
-  width: 72px;
-  height: 72px;
+  width: 76px;
+  height: 76px;
   border-radius: 20px;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 12px 32px -8px rgba(15, 18, 25, 0.35);
   animation: quadra-breathe 1.8s ease-in-out infinite;
 }
 .loading-brand {
-  margin: 4px 0 0;
-  font-size: 0.72rem;
+  margin: 10px 0 0;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  letter-spacing: 0.24em;
   color: var(--q-muted);
 }
 .loading-title {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 20px;
   font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--q-text);
+}
+.loading .spinner {
+  margin-top: 8px;
 }
 .spinner {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
-  border: 3px solid color-mix(in srgb, var(--q-accent) 20%, transparent);
+  border: 3px solid color-mix(in srgb, var(--q-accent) 18%, transparent);
   border-top-color: var(--q-accent);
   animation: quadra-spin 0.8s linear infinite;
 }
 .spinner[hidden] {
+  display: none;
+}
+.loading-text {
+  margin: 0;
+  min-height: 1.3em;
+  font-size: 13px;
+  color: var(--q-text-2);
+}
+.loading-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--q-sunken);
+  overflow: hidden;
+}
+.loading-bar[hidden] {
+  display: none;
+}
+.loading-bar > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--q-accent);
+  transition: width 0.25s ease;
+}
+.loading-eta {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: 12px;
+  color: var(--q-muted);
+  font-variant-numeric: tabular-nums;
+}
+.loading-error {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  font-size: 14px;
+  color: var(--q-text-2);
+}
+.loading-error[hidden] {
   display: none;
 }
 @keyframes quadra-spin {
@@ -160,6 +211,76 @@ body {
   .loading-logo,
   .spinner {
     animation: none;
+  }
+}
+
+/* ---- The bottom tab bar on phones: the same in all four apps. Each app's
+   <nav> carries .q-tabbar and its buttons .q-tab (an <svg> icon, or the
+   app's own ::before mask icon, and a label); the selected one is
+   [aria-selected='true'] or .active. In px, since the apps' root font
+   sizes differ. Wider screens keep each app's own top navigation. ---- */
+@media (max-width: 720px) {
+  .q-tabbar.q-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    display: flex;
+    gap: 2px;
+    margin: 0;
+    padding: 5px 8px calc(5px + env(safe-area-inset-bottom));
+    border: 0;
+    border-top: 1px solid var(--q-border);
+    border-radius: 0;
+    background: var(--q-bar);
+    -webkit-backdrop-filter: saturate(1.6) blur(16px);
+    backdrop-filter: saturate(1.6) blur(16px);
+    box-shadow: none;
+  }
+  .q-tabbar .q-tab {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 50px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    margin: 0;
+    padding: 6px 2px;
+    border: 0;
+    border-radius: 14px;
+    background: none;
+    box-shadow: none;
+    color: var(--q-muted);
+    font: 600 11px/1.2 var(--q-font);
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    white-space: normal;
+    text-align: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .q-tabbar .q-tab svg,
+  .q-tabbar .q-tab::before {
+    width: 22px;
+    height: 22px;
+    flex: none;
+  }
+  .q-tabbar .q-tab svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .q-tabbar .q-tab[aria-selected='true'],
+  .q-tabbar .q-tab.active {
+    background: var(--q-accent-wash);
+    color: var(--q-accent);
+    box-shadow: none;
   }
 }
 

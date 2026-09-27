@@ -38,6 +38,18 @@ This app is part of **Quadra 四方**, four apps sharing one account:
   data-entry game was dropped (pure grind, nothing to learn); Securities
   gained 換匯計算, a bank-rate exchange quiz.
 
+  **What each app pays back** (measured on the board of 2026-09-27):
+  Sportsbook returns about NT$85 of every NT$100 on a single bet (totals,
+  handicaps, winners 85-86; correct scores and margins 66-73; the top-
+  inning table 52, as the lottery's own), and parlays multiply the cut
+  (2 legs ~73, 3 ~62, 6 ~38), with 20.4% withheld from any win over
+  NT$5,000. Securities earns what the markets do (a diversified portfolio
+  about 6-8% a year) less real costs, and 0.8% on NT$ cash. Both are left
+  as they are: realistic, and a clear lesson. What needed a guard is that
+  the pool is shared: Sportsbook could bet away Securities' savings in an
+  evening. Its weekly betting limit now starts at NT$2,000 (a little more
+  than a week of pay and allowance), until you set your own (0: none).
+
 - **One pass, signed in everywhere**: the same Quadra Pass panel in all four
   apps; links between the apps carry the pass (in the address's #hash), so
   the app they open is already signed in, even in the iPhone pop-up browser.

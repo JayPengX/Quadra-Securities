@@ -51,6 +51,10 @@ export const ECONOMY = {
   oddsStart: 10_000,
   // Every Monday (Taiwan time), when Sportsbook is opened.
   oddsWeekly: 500,
+  // Sportsbook's weekly betting limit until you set your own (0: none). The
+  // pool is shared, so betting could otherwise spend Securities' savings:
+  // NT$2,000 is a little more than a week's pay and allowance together.
+  oddsDefaultLimit: 2_000,
   // Quadra Words: per right answer, per word newly mastered, at most a day.
   vocab: { perCorrect: 3, perMastered: 25, dailyCap: 600 },
   // Each app's mini games: about this much a minute of typical play, and at most a Taiwan day.

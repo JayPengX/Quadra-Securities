@@ -1,6 +1,6 @@
 # 四方證券 Quadra Securities (Stock Study)
 
-**Live site: https://jaypengx.github.io/Stock-Study/**
+**Live site: https://jaypengx.github.io/Quadra-Securities/**
 
 ## Quadra 四方
 
@@ -14,8 +14,8 @@ This app is part of **Quadra 四方**, four apps sharing one account:
 | **四方單字 Quadra Words** | Orbit Vocab 英單力 | A big mini game with real benefit: English words that pay |
 
 - **The Quadra Pass 四方通行碼**: one 10-character code for all four apps and
-  every device (Shared-Proxy's `/eco` route). New syncs are passes only; an
-  old app-only code still works until it's upgraded or merged.
+  every device (Shared-Proxy's `/eco` route). Passes are the only kind of
+  code; an old app-only code is upgraded to one the next time its app opens.
 - **One money pool**: Securities' NT$ cash and Sportsbook's balance are the
   same money. Sportsbook's bets and winnings, Words' study rewards and
   transfers between passes all land in it, with records on every side.
@@ -25,8 +25,10 @@ This app is part of **Quadra 四方**, four apps sharing one account:
   right answer and NT$20 a newly mastered word (NT$800 a day at most);
   Securities' and Sportsbook's mini games pay for skill, up to NT$1,000 and
   NT$1,500 a day. Sportsbook has a weekly betting limit you can set.
-- **Merge tool** (`/Stock-Study/merge.html`): every old code in, one new
-  pass out; the old codes and their data are removed.
+- **One pass, signed in everywhere**: the same Quadra Pass panel in all four
+  apps; links between the apps carry the pass (in the address's #hash), so
+  the app they open is already signed in, even in the iPhone pop-up browser.
+  An old one-app code turns into a pass by itself.
 - **Installed only** on phones and tablets (added to the home screen), and
   every app checks for a new deploy on opening, on coming back and every
   five minutes, clearing old cached files before it reloads.
@@ -37,7 +39,7 @@ A play-money brokerage for markets around the world. Every account starts with N
 
 > Educational simulation with play money. Not investment advice.
 
-Built on [Odds Study](https://github.com/JayPengX/Odds-Study)'s setup: a static site with no build step and no dependencies, prices through [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy)'s Worker, the same gzip-compressed saves and passcode sync, Traditional Chinese and English, and deploys to GitHub Pages.
+Built on [Odds Study](https://github.com/JayPengX/Quadra-Sportsbook)'s setup: a static site with no build step and no dependencies, prices through [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy)'s Worker, the same gzip-compressed saves and passcode sync, Traditional Chinese and English, and deploys to GitHub Pages.
 
 ## The app
 
@@ -222,7 +224,6 @@ Two devices' copies merge by uniting their logs:
 | `public/lib/holidays.mjs` | Exchange holiday calendars |
 | `public/lib/games.mjs` | The mini games (ticker match, the fee check) |
 | `public/lib/quadra.mjs` | Quadra: the pass, the pool, the shell (shared by the four apps) |
-| `public/merge.html` | The one-time merge tool |
 | `public/lib/timemachine.mjs` | The time machine and moving averages |
 | `public/sw.js` | Offline files and alert notifications |
 | `public/lib/sync.mjs`, `codec.mjs` | Sync and compressed saves |

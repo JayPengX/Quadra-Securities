@@ -1,5 +1,5 @@
 // Quadra 四方: what the four Quadra apps share. The same file sits in each of
-// them (Stock-Study, Odds-Study and Match-Find under public/lib/, Orbit-Vocab
+// them (Quadra-Securities, Quadra-Sportsbook and Quadra-Fixtures under public/lib/, Quadra-Words
 // at its root); change one, copy it to the other three.
 //
 //   Quadra Securities 四方證券  (Stock Study)   the base: a brokerage
@@ -18,10 +18,10 @@ export const SITE = 'https://jaypengx.github.io';
 export const BRAND = { zh: '四方', en: 'Quadra', passZh: '四方通行碼', passEn: 'Quadra Pass' };
 
 export const APPS = {
-  stock: { zh: '四方證券', en: 'Quadra Securities', short: { zh: '證券', en: 'Securities' }, path: '/Stock-Study/', color: '#0d9488', icon: '📈' },
-  odds: { zh: '四方運彩', en: 'Quadra Sportsbook', short: { zh: '運彩', en: 'Sportsbook' }, path: '/Odds-Study/', color: '#2563eb', icon: '🎟️' },
-  match: { zh: '四方賽程', en: 'Quadra Fixtures', short: { zh: '賽程', en: 'Fixtures' }, path: '/Match-Find/', color: '#d97706', icon: '📅' },
-  vocab: { zh: '四方單字', en: 'Quadra Words', short: { zh: '單字', en: 'Words' }, path: '/Orbit-Vocab/', color: '#5655e8', icon: '🔤' }
+  stock: { zh: '四方證券', en: 'Quadra Securities', short: { zh: '證券', en: 'Securities' }, path: '/Quadra-Securities/', color: '#0d9488', icon: '📈' },
+  odds: { zh: '四方運彩', en: 'Quadra Sportsbook', short: { zh: '運彩', en: 'Sportsbook' }, path: '/Quadra-Sportsbook/', color: '#2563eb', icon: '🎟️' },
+  match: { zh: '四方賽程', en: 'Quadra Fixtures', short: { zh: '賽程', en: 'Fixtures' }, path: '/Quadra-Fixtures/', color: '#d97706', icon: '📅' },
+  vocab: { zh: '四方單字', en: 'Quadra Words', short: { zh: '單字', en: 'Words' }, path: '/Quadra-Words/', color: '#5655e8', icon: '🔤' }
 };
 export const appName = (app, lang = 'zh') => APPS[app]?.[lang === 'en' ? 'en' : 'zh'] || app;
 
@@ -60,9 +60,10 @@ export const formatPass = code => (code && code.length === 10 ? `${code.slice(0,
 // ---- This browser's pass ---------------------------------------------------------
 //
 // The four apps are one site (jaypengx.github.io), so in a browser they share
-// storage: the pass entered in one app is there in the others. (Apps added
-// to an iPhone's home screen each keep their own storage, so there it's
-// entered once per app.)
+// storage: the pass entered in one app is there in the others. Apps added to
+// an iPhone's home screen each keep their own storage, so the links between
+// the apps carry the pass along (appUrl / acceptHandoff below): open one app
+// from another and it's already signed in.
 
 const PASS_KEY = 'quadra.pass';
 const WALLET_KEY = 'quadra.wallet';
@@ -89,6 +90,59 @@ export function storePass(code) {
   writeStore(PASS_KEY, code && PASS_PATTERN.test(code) ? code : null);
   if (!code) writeStore(WALLET_KEY, null);
 }
+
+// ---- Moving between the apps ------------------------------------------------------
+//
+// A link to another Quadra app carries this browser's pass in the address's
+// #hash (#qp=CODE; a hash never reaches the server). The app it opens takes
+// the pass, drops it from the address and starts signed in. On an iPhone a
+// home-screen app opens another app's page in a pop-up browser (the other
+// app's own home-screen icon can't be opened from a link), so such a visit
+// isn't asked to add itself to the home screen either.
+
+const HANDOFF = 'qp';
+const VISIT_KEY = 'quadra.visit';
+// Each app's own key for its sync code, from before the Quadra Pass. An old
+// one-app code there gives way to a pass that arrives from another app.
+const APP_CODE_KEYS = ['stockStudy.syncCode', 'oddsStudy.syncCode', 'vocab_sync_passcode'];
+
+export function appUrl(app, hash = '') {
+  const pass = storedPass();
+  const parts = [String(hash || '').replace(/^#/, ''), pass ? `${HANDOFF}=${pass}` : ''].filter(Boolean);
+  return `${APPS[app]?.path || '/'}${parts.length ? `#${parts.join('&')}` : ''}`;
+}
+
+// Takes a pass handed over in the address (see above); returns it, or ''.
+export function acceptHandoff() {
+  const loc = globalThis.location;
+  if (!loc?.hash) return '';
+  const parts = loc.hash.slice(1).split('&');
+  const at = parts.findIndex(part => part.startsWith(`${HANDOFF}=`));
+  if (at < 0) return '';
+  const code = cleanCode(decodeURIComponent(parts[at].slice(HANDOFF.length + 1)));
+  parts.splice(at, 1);
+  try {
+    globalThis.history?.replaceState(globalThis.history.state, '', `${loc.pathname}${loc.search}${parts.length ? `#${parts.join('&')}` : ''}`);
+  } catch {}
+  if (!PASS_PATTERN.test(code)) return '';
+  try {
+    sessionStorage.setItem(VISIT_KEY, '1');
+  } catch {}
+  for (const key of APP_CODE_KEYS) {
+    const had = readStore(key);
+    if (had && !PASS_PATTERN.test(had)) writeStore(key, null);
+  }
+  writeStore(PASS_KEY, code);
+  return code;
+}
+const visiting = () => {
+  try {
+    return sessionStorage.getItem(VISIT_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+if (globalThis.location && globalThis.document) acceptHandoff();
 
 // The last wallet seen, so the pool shows at once (and offline).
 export function cachedWallet(code) {
@@ -221,7 +275,7 @@ const inAppBrowser = () => /Line\/|FBAN|FBAV|Instagram|Messenger|MicroMessenger|
 // browser tab there, this covers the page with how to add it. Returns true
 // if it did (the app shouldn't start).
 export function installGate(app, lang = 'zh') {
-  if (!isPhoneOrTablet() || isStandalone()) return false;
+  if (!isPhoneOrTablet() || isStandalone() || visiting()) return false;
   const en = lang === 'en';
   const name = appName(app, lang);
   const steps = inAppBrowser()
@@ -300,4 +354,180 @@ export function watchUpdates({ current, key, busy = () => false, every = 5 * 60_
   document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && check());
   globalThis.addEventListener?.('pageshow', event => event.persisted && check());
   setInterval(check, every);
+}
+
+// ---- The Quadra Pass panel ------------------------------------------------------
+//
+// The same panel in all four apps: signed out, one box for the pass (and a
+// button for a new one); signed in, the pass, the shared pool, the other
+// apps (opening already signed in) and signing out. The app does the work:
+//
+//   const panel = passPanel({ app: 'odds', lang, create, enter, sync, signOut });
+//   someBox.append(panel.el);
+//   panel.update({ pass, busy, error, note, syncedAt, pool });
+//
+// create() and enter(code) return promises (the panel shows them working);
+// sync is optional. update() leaves a pass being typed alone.
+
+const PANEL_TEXT = {
+  zh: {
+    title: '四方通行碼',
+    intro: '一組通行碼，四個 App 共用同一個帳戶和資金池。',
+    placeholder: 'XXXXX-XXXXX',
+    enter: '登入',
+    or: '還沒有通行碼？',
+    create: '建立新的通行碼',
+    bad: '通行碼是 10 個字（英文和數字），例如 ABCDE-23456。',
+    copy: '複製',
+    copied: '已複製',
+    pool: '共用資金池',
+    apps: '四方的 App',
+    here: '目前在這裡',
+    open: '已登入',
+    syncNow: '立即同步',
+    signOut: '在這台裝置登出',
+    signOutAsk: '在這台裝置登出？資料都還在通行碼裡，之後再輸入同一組通行碼就回來了。',
+    syncing: '同步中…',
+    synced: '已同步',
+    keep: '請記下通行碼：它是這個帳戶唯一的鑰匙。'
+  },
+  en: {
+    title: 'Quadra Pass',
+    intro: 'One pass: the same account and money pool in all four apps.',
+    placeholder: 'XXXXX-XXXXX',
+    enter: 'Sign in',
+    or: 'No pass yet?',
+    create: 'Create a new pass',
+    bad: 'A pass is 10 letters and digits, like ABCDE-23456.',
+    copy: 'Copy',
+    copied: 'Copied',
+    pool: 'Shared money pool',
+    apps: 'Quadra apps',
+    here: 'You are here',
+    open: 'Signed in',
+    syncNow: 'Sync now',
+    signOut: 'Sign out on this device',
+    signOutAsk: 'Sign out on this device? Everything stays with the pass: enter it again to come back.',
+    syncing: 'Syncing…',
+    synced: 'Synced',
+    keep: 'Write your pass down: it is the only key to this account.'
+  }
+};
+
+const node = (tag, props = {}, children = []) => {
+  const el = document.createElement(tag);
+  for (const [key, value] of Object.entries(props)) {
+    if (value == null || value === false) continue;
+    if (key === 'text') el.textContent = value;
+    else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
+    else el.setAttribute(key, value === true ? '' : value);
+  }
+  for (const child of children) if (child) el.append(child);
+  return el;
+};
+const timeText = (t, lang) => {
+  const d = new Date(t);
+  const today = new Date().toDateString() === d.toDateString();
+  return d.toLocaleString(lang === 'en' ? 'en-US' : 'zh-TW', today ? { hour: 'numeric', minute: '2-digit' } : { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
+const typedPass = text => {
+  const code = cleanCode(text).replace(/[^2-9A-HJ-NP-Z]/g, '').slice(0, 10);
+  return code.length > 5 ? `${code.slice(0, 5)}-${code.slice(5)}` : code;
+};
+
+// The four apps as tiles; the others open already signed in.
+export function appTiles(here, lang = 'zh') {
+  const en = lang === 'en';
+  return node(
+    'div',
+    { class: 'qp-apps' },
+    Object.entries(APPS).map(([id, app]) =>
+      node('a', { class: `qp-app${id === here ? ' here' : ''}`, href: id === here ? app.path : appUrl(id), 'aria-current': id === here ? 'page' : null }, [
+        node('img', { src: `${app.path}favicon.svg`, alt: '' }),
+        node('span', {}, [document.createTextNode(en ? app.en : app.zh), id === here ? node('small', { text: PANEL_TEXT[en ? 'en' : 'zh'].here }) : null])
+      ])
+    )
+  );
+}
+
+export function passPanel({ app, lang = 'zh', create, enter, sync, signOut }) {
+  const T = PANEL_TEXT[lang === 'en' ? 'en' : 'zh'];
+  const el = node('section', { class: 'qp', 'aria-label': T.title });
+  const input = node('input', { class: 'qp-input', type: 'text', inputmode: 'text', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', maxlength: '11', placeholder: T.placeholder, 'aria-label': T.title });
+  input.addEventListener('input', () => {
+    const at = input.value.length;
+    input.value = typedPass(input.value);
+    if (at >= input.value.length) input.setSelectionRange?.(input.value.length, input.value.length);
+  });
+  let view = {};
+  let working = false;
+  let localError = '';
+  const run = async task => {
+    working = true;
+    localError = '';
+    render();
+    try {
+      await task();
+    } catch (error) {
+      localError = error?.message || String(error);
+    } finally {
+      working = false;
+      render();
+    }
+  };
+  function render() {
+    const { pass, busy, error, note, syncedAt, pool } = view;
+    const wait = busy || working;
+    const err = localError || error || '';
+    const status = err ? node('p', { class: 'qp-sub bad', role: 'alert', text: err }) : pass ? node('p', { class: 'qp-sub good', text: wait ? T.syncing : syncedAt ? `✓ ${T.synced} · ${timeText(syncedAt, lang)}` : `✓ ${T.open}` }) : node('p', { class: 'qp-sub', text: T.intro });
+    const head = node('div', { class: 'qp-head' }, [node('span', { class: 'qp-mark', 'aria-hidden': 'true' }, [node('i'), node('i'), node('i'), node('i')]), node('div', {}, [node('h3', { class: 'qp-title', text: T.title }), status])]);
+    const parts = [head];
+    if (pass) {
+      const copy = node('button', {
+        class: 'qp-btn small',
+        type: 'button',
+        text: T.copy,
+        onclick: () => navigator.clipboard?.writeText(formatPass(pass)).then(() => (copy.textContent = T.copied)).catch(() => {})
+      });
+      parts.push(node('div', { class: 'qp-code' }, [node('strong', { text: formatPass(pass) }), copy]));
+      if (note) parts.push(node('p', { class: 'qp-sub', text: note }));
+      if (pool != null && Number.isFinite(pool)) parts.push(node('div', { class: 'qp-pool' }, [node('span', { text: T.pool }), node('strong', { text: `NT$${Math.round(pool).toLocaleString('en-US')}` })]));
+      parts.push(node('p', { class: 'qp-apps-title', text: T.apps }), appTiles(app, lang));
+      parts.push(
+        node('div', { class: 'qp-links' }, [
+          sync ? node('button', { class: 'qp-link', type: 'button', text: T.syncNow, disabled: wait, onclick: () => run(sync) }) : null,
+          node('button', { class: 'qp-link', type: 'button', text: T.signOut, onclick: () => confirm(T.signOutAsk) && run(async () => signOut()) })
+        ])
+      );
+    } else {
+      const form = node(
+        'form',
+        {
+          class: 'qp-field',
+          onsubmit: event => {
+            event.preventDefault();
+            const code = cleanCode(input.value);
+            if (!PASS_PATTERN.test(code)) {
+              localError = T.bad;
+              return render();
+            }
+            run(() => enter(code));
+          }
+        },
+        [input, node('button', { class: 'qp-btn primary block', type: 'submit', disabled: wait, text: wait ? T.syncing : T.enter })]
+      );
+      parts.push(form, node('p', { class: 'qp-or', text: T.or }), node('button', { class: 'qp-btn block', type: 'button', disabled: wait, text: T.create, onclick: () => run(create) }), node('p', { class: 'qp-sub', text: T.keep }));
+    }
+    el.replaceChildren(...parts);
+  }
+  return {
+    el,
+    update(next = {}) {
+      // Nothing new: leave it be (a pass being typed keeps its keyboard).
+      if (JSON.stringify(next) === JSON.stringify(view) && el.childElementCount) return;
+      view = next;
+      if (next.pass) input.value = '';
+      render();
+    }
+  };
 }

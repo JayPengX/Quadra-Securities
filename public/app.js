@@ -23,10 +23,10 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { LESSONS, MISSIONS, GLOSSARY } from './lib/learn.mjs';
 import { GAMES, earnedToday as gameEarned, roomToday as gameRoom, payRound, scorer, tickerQuestion, feeQuestion } from './lib/games.mjs';
 import { pack, unpack } from './lib/codec.mjs';
-import { readSync, writeSync, cleanPasscode, PASSCODE_PATTERN, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
+import { readSync, writeSync, cleanPasscode, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
 import {
   APPS, PASS_PATTERN, formatPass, storedPass, storePass, cachedWallet, cacheWallet, poolBalance, describeEntry, ecoMerge, ecoTransfer,
-  installGate, watchUpdates, randomId as quadraId
+  installGate, watchUpdates, passPanel, randomId as quadraId
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -1564,6 +1564,7 @@ function renderPortfolio() {
     ${sourcesCardHtml()}
     ${syncCardHtml()}
   `;
+  mountPassPanel();
   renderNetWorthChart(v, s);
 }
 
@@ -2618,35 +2619,25 @@ function saveSyncCode(code) {
 }
 const onPass = () => isPassCode(state.sync.code);
 
+// The Quadra Pass (the same panel as in the other Quadra apps, mounted into
+// .pass-slot after each draw) and backups.
 function syncCardHtml() {
-  const sy = state.sync;
-  const pass = onPass();
-  const code = sy.code ? (pass ? formatPass(sy.code) : `${sy.code.slice(0, 4)} ${sy.code.slice(4)}`) : '';
-  const linkForm = `<form class="custom-start" data-form="link"><label class="field grow"><span>${h(t('passOrCode'))}</span><input id="link-code" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX" /></label><button class="ghost-button" type="submit">${h(t('linkDevice'))}</button></form>`;
   return `<div class="card sync-card">
-    <h3 class="card-title">${h(t(pass || !sy.code ? 'passTitle' : 'syncTitle'))}</h3>
-    ${
-      sy.code
-        ? `<p>${h(t(pass ? 'passOn' : 'syncOn'))}</p><p class="sync-code num">${h(code)}</p>
-      ${sy.note ? `<p class="note">${h(sy.note)}</p>` : ''}
-      ${pass ? '' : `<p class="note">${h(t('legacyNote'))}</p><div class="button-row"><button class="primary-button" type="button" data-action="pass-upgrade" ${sy.busy ? 'disabled' : ''}>${h(t('legacyUpgrade'))}</button></div>`}
-      <p class="muted">${h(sy.error ? sy.error : sy.at ? t('syncedAt', { time: dateTime(sy.at) }) : t('syncing'))}</p>
-      <div class="button-row"><button class="ghost-button" type="button" data-action="sync-now" ${sy.busy ? 'disabled' : ''}>${h(t('syncNow'))}</button><button class="ghost-button" type="button" data-action="sync-off">${h(t('syncOff'))}</button></div>`
-        : `<p class="lede">${h(t('passIntro'))}</p>
-      <div class="button-row"><button class="primary-button" type="button" data-action="sync-create" ${sy.busy ? 'disabled' : ''}>${h(t('passCreate'))}</button></div>
-      ${linkForm}`
-    }
-    ${sy.error && !sy.code ? `<p class="warn">${h(sy.error)}</p>` : ''}
-    <details class="fold-lite">
-      <summary>${h(t('linkTitle'))}</summary>
-      <p class="muted">${h(t('linkIntro'))}</p>
-      <form class="custom-start" data-form="link-odds"><label class="field grow"><span>${h(t('linkPlaceholder'))}</span><input id="link-odds" autocomplete="off" autocapitalize="characters" placeholder="ABCD 2345" /></label><button class="ghost-button" type="submit" ${sy.busy ? 'disabled' : ''}>${h(t('linkGo'))}</button></form>
-      <p><a href="./merge.html">${h(t('mergeTool'))}</a></p>
-    </details>
-    <hr />
+    <div class="pass-slot"></div>
     <div class="button-row"><button class="ghost-button" type="button" data-action="backup">${h(t('backup'))}</button><button class="ghost-button" type="button" data-action="restore">${h(t('restore'))}</button></div>
     <p class="note">${h(t('backupNote'))}</p>
   </div>`;
+}
+function mountPassPanel() {
+  const slot = document.querySelector('.pass-slot');
+  if (!slot) return;
+  if (!state.passPanel || state.passPanel.lang !== locale) {
+    state.passPanel = passPanel({ app: 'stock', lang: locale, create: createSyncCode, enter: linkDevice, sync: () => syncNow({ pull: true }), signOut: syncOff });
+    state.passPanel.lang = locale;
+  }
+  const sy = state.sync;
+  state.passPanel.update({ pass: onPass() ? sy.code : '', busy: Boolean(sy.busy), error: sy.error || '', note: sy.note || '', syncedAt: sy.at || 0 });
+  slot.replaceChildren(state.passPanel.el);
 }
 
 // The shared pool, what went in and out from the other apps, and sending
@@ -2787,25 +2778,21 @@ async function createSyncCode() {
 
 async function linkDevice(text) {
   const code = cleanPasscode(text);
-  if (!PASSCODE_PATTERN.test(code) && !PASS_PATTERN.test(code)) return toast(t('badPass'), 'bad');
+  if (!PASS_PATTERN.test(code)) return toast(t('badPass'), 'bad');
+  state.sync.error = null;
   try {
-    if (PASS_PATTERN.test(code)) {
-      const remote = await readPass(code);
-      if (!remote) return toast(t('codeNotFound'), 'bad');
-      const theirs = isAccount(remote.account) ? remote.account : null;
-      if (theirs && state.account && state.account.id !== theirs.id && state.account.events.length > 1 && !confirm(t('linkReplace'))) return;
-      if (theirs) commit(state.account?.id === theirs.id ? mergeAccounts(state.account, theirs) : theirs, { sync: false });
-      state.sync = { code, busy: false, error: null, at: Date.now() };
-      state.wallet = remote.wallet;
-      saveSyncCode(code);
-    } else {
-      const remote = await readSync(code);
-      if (!isAccount(remote)) return toast(t('codeNotFound'), 'bad');
-      if (state.account && state.account.id !== remote.id && state.account.events.length > 1 && !confirm(t('linkReplace'))) return;
-      commit(state.account?.id === remote.id ? mergeAccounts(state.account, remote) : remote, { sync: false });
-      state.sync = { code, busy: false, error: null, at: Date.now() };
-      saveSyncCode(code);
+    const remote = await readPass(code);
+    if (!remote) {
+      state.sync.error = t('codeNotFound');
+      toast(t('codeNotFound'), 'bad');
+      return render();
     }
+    const theirs = isAccount(remote.account) ? remote.account : null;
+    if (theirs && state.account && state.account.id !== theirs.id && state.account.events.length > 1 && !confirm(t('linkReplace'))) return;
+    if (theirs) commit(state.account?.id === theirs.id ? mergeAccounts(state.account, theirs) : theirs, { sync: false });
+    state.sync = { code, busy: false, error: null, at: Date.now() };
+    state.wallet = remote.wallet;
+    saveSyncCode(code);
     state.bench = null;
     if ($('setup').open) $('setup').close();
     toast(t('linked'), 'good');
@@ -2818,18 +2805,18 @@ async function linkDevice(text) {
   render();
 }
 
-// An old code to a Quadra Pass, optionally with other apps' accounts (their
-// codes): the Worker moves everything to one new pass and deletes the old.
-async function moveToPass(extra = []) {
+// An old one-app code → a Quadra Pass: the Worker moves the account to a new
+// pass and deletes the old code.
+async function moveToPass() {
   const code = state.sync.code;
-  const sources = [...(code && !isPassCode(code) ? [{ app: 'stock', passcode: code }] : []), ...extra];
+  const sources = code && !isPassCode(code) ? [{ app: 'stock', passcode: code }] : [];
   if (!sources.length) return;
   if (code && !isPassCode(code)) await syncNow();
   state.sync.busy = true;
   render();
   try {
     const res = await ecoMerge(sources, isPassCode(code) ? code : undefined);
-    state.sync = { code: res.passcode, busy: false, error: null, at: 0, note: t(extra.length ? 'linkDone' : 'legacyUpgraded', { code: formatPass(res.passcode) }) };
+    state.sync = { code: res.passcode, busy: false, error: null, at: 0, note: t('legacyUpgraded', { code: formatPass(res.passcode) }) };
     state.wallet = res.wallet;
     saveSyncCode(res.passcode);
     await syncNow({ pull: true });
@@ -2858,7 +2845,6 @@ async function sendTransfer(form) {
 }
 
 function syncOff() {
-  if (!confirm(t('syncOffConfirm'))) return;
   if (onPass()) {
     storePass('');
     // The other apps' money stays with the pass.
@@ -2874,7 +2860,7 @@ function backup() {
   const blob = new Blob([JSON.stringify(state.account)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `stock-study-${taipeiDay(Date.now())}.json`;
+  a.download = `quadra-securities-${taipeiDay(Date.now())}.json`;
   document.body.append(a);
   a.click();
   a.remove();
@@ -3216,17 +3202,8 @@ document.addEventListener('click', event => {
     case 'game-end':
       endGame();
       break;
-    case 'pass-upgrade':
-      moveToPass();
-      break;
     case 'sync-create':
       createSyncCode();
-      break;
-    case 'sync-now':
-      syncNow();
-      break;
-    case 'sync-off':
-      syncOff();
       break;
     case 'backup':
       backup();
@@ -3260,11 +3237,6 @@ document.addEventListener('submit', event => {
   event.preventDefault();
   if (form.dataset.form === 'start') openAccount();
   if (form.dataset.form === 'link') linkDevice(form.querySelector('#link-code').value);
-  if (form.dataset.form === 'link-odds') {
-    const other = cleanPasscode(form.querySelector('#link-odds').value);
-    if (!PASSCODE_PATTERN.test(other) && !PASS_PATTERN.test(other)) return toast(t('badPass'), 'bad');
-    if (confirm(t('linkConfirm'))) moveToPass([{ app: PASS_PATTERN.test(other) ? 'eco' : 'odds', passcode: other }]);
-  }
   if (form.dataset.form === 'transfer') sendTransfer(form);
 });
 
@@ -3449,6 +3421,8 @@ loadAccount().then(account => {
   if (state.sync.code)
     syncNow({ pull: !account }).then(() => {
       if (!state.account) showSetup();
+      // An old one-app code becomes a Quadra Pass by itself (one kind of code, everywhere).
+      if (state.sync.code && !onPass()) moveToPass();
       render();
     });
 });

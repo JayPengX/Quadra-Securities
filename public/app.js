@@ -25,7 +25,7 @@ import { GAMES, earnedToday as gameEarned, roomToday as gameRoom, payRound, scor
 import { pack, unpack } from './lib/codec.mjs';
 import { readSync, writeSync, cleanPasscode, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
 import {
-  APPS, PASS_PATTERN, formatPass, storedPass, storePass, cachedWallet, cacheWallet, poolBalance, describeEntry, ecoMerge, ecoTransfer,
+  APPS, appUrl, PASS_PATTERN, formatPass, storedPass, storePass, cachedWallet, cacheWallet, poolBalance, describeEntry, ecoMerge, ecoTransfer,
   installGate, watchUpdates, passPanel, randomId as quadraId
 } from './lib/quadra.mjs';
 
@@ -1757,7 +1757,7 @@ function orderRow(o) {
   const q = state.quotes.get(o.symbol);
   const price = o.type === 'limit' ? t('atLimit', { p: fmtPrice(o.limit, o.currency) }) : o.type === 'stop' ? t('atStop', { p: fmtPrice(o.stop, o.currency) }) : t('atMarket');
   const status = o.status === 'open' ? (q && !isOpen(q) ? t('waitingOpen') : t('waitingPrice')) : t(`status_${o.status}`);
-  return `<div class="order-row">
+  return `<div class="order-row" role="button" tabindex="0" data-action="open" data-symbol="${h(o.symbol)}">
     <span class="side-tag ${o.side}">${h(t(o.side))}</span>
     <span class="row-main"><span class="row-title">${h(nameOf(o.symbol, q))} <small>${h(fmtQty(o.qty))} ${h(unitOf(o.symbol))} ${h(price)}</small></span>
     <span class="row-sub">${h(dateTime(o.t))} · ${h(status)}${o.forced ? ` · ${h(t('forcedTag'))}` : ''}${o.reason ? ` · ${h(t(`err_${o.reason}`))}` : ''}</span></span>
@@ -1982,10 +1982,24 @@ function activityRow(e) {
     default:
       return '';
   }
-  const clickable = e.symbol && e.type !== 'deposit';
-  return `<${clickable ? 'button type="button" data-action="open" data-symbol="' + h(e.symbol) + '"' : 'div'} class="activity-row">
+  const [tag, attrs] = activityTarget(e);
+  return `<${tag} ${attrs} class="activity-row">
     ${icon}<span class="row-main"><span class="row-title">${h(title)}</span><span class="row-sub">${h(dateTime(e.t))}${sub ? ` · ${h(sub)}` : ''}</span></span>
-    <span class="row-amt">${amount}</span></${clickable ? 'button' : 'div'}>`;
+    <span class="row-amt">${amount}</span></${tag}>`;
+}
+
+// Where a record takes you when tapped: its stock's page, the exchange (the
+// two currencies set), the loans, the mini games, the portfolio, or the
+// Quadra app the money came from (signed in).
+function activityTarget(e) {
+  const button = attrs => ['button', `type="button" ${attrs}`];
+  if (e.symbol && e.type !== 'deposit') return button(`data-action="open" data-symbol="${h(e.symbol)}"`);
+  if (e.type === 'fx') return button(`data-action="fx-pair" data-from="${h(e.from)}" data-to="${h(e.to)}"`);
+  if (e.type === 'interest' || e.type === 'borrow' || e.type === 'repay') return button('data-action="goto" data-tab="fx"');
+  if (e.type === 'deposit' && e.pool && APPS[e.app]) return ['a', `href="${h(appUrl(e.app))}"`];
+  if (e.type === 'deposit' && e.game) return button('data-action="goto" data-tab="guide"');
+  if (e.type === 'deposit') return button('data-action="goto" data-tab="portfolio"');
+  return ['div', ''];
 }
 
 const ACTIVITY_FILTERS = {
@@ -2659,7 +2673,7 @@ function poolCardHtml() {
     <div class="pool-line"><span class="pool-label">${h(t('poolOpenBets'))}</span><strong class="pool-value num">${h(money(openBets, BASE))}</strong></div>
     ${w ? `<div class="pool-line"><span class="pool-label">${h(t('poolServer'))}</span><strong class="pool-value num">${h(money(poolBalance(w), BASE))}</strong></div>` : ''}
     <h4 class="pool-head">${h(t('poolRecords'))}</h4>
-    ${recent.length ? `<ul class="pool-records">${recent.map(e => `<li><span class="pool-when">${h(dateTime(e.t))}</span><span class="pool-what">${h(describeEntry(e, locale))}</span><strong class="num ${e.amount < 0 ? 'down-ink' : 'up-ink'}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, BASE))}</strong></li>`).join('')}</ul>` : `<p class="muted">${h(t('poolNone'))}</p>`}
+    ${recent.length ? `<ul class="pool-records">${recent.map(e => `<li>${poolRecordOpen(e)}<span class="pool-when">${h(dateTime(e.t))}</span><span class="pool-what">${h(describeEntry(e, locale))}</span><strong class="num ${e.amount < 0 ? 'down-ink' : 'up-ink'}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, BASE))}</strong>${poolRecordClose(e)}</li>`).join('')}</ul>` : `<p class="muted">${h(t('poolNone'))}</p>`}
     <details class="fold-lite">
       <summary>${h(t('transferTitle'))}</summary>
       <form class="transfer-form" data-form="transfer">
@@ -2672,8 +2686,20 @@ function poolCardHtml() {
   </div>`;
 }
 
+// A pool record opens the Quadra app it came from (signed in).
+const poolRecordOpen = e => (APPS[e.app] ? `<a class="pool-record-link" href="${h(appUrl(e.app))}">` : '');
+const poolRecordClose = e => (APPS[e.app] ? '</a>' : '');
+
 // Where the money came from: the opening amount, paydays, mini games, the
 // other Quadra apps, transfers.
+// Each source opens where it comes from: Sportsbook, Words, the mini games.
+function sourceLine(key, inner) {
+  const app = { srcOdds: 'odds', srcVocab: 'vocab' }[key];
+  if (app) return `<a class="pool-line pool-line-link" href="${h(appUrl(app))}">${inner}</a>`;
+  if (key === 'srcGame') return `<button class="pool-line pool-line-link" type="button" data-action="goto" data-tab="guide">${inner}</button>`;
+  return `<div class="pool-line">${inner}</div>`;
+}
+
 function sourcesCardHtml() {
   if (!state.account) return '';
   const m = moneySources(state.account);
@@ -2683,7 +2709,7 @@ function sourcesCardHtml() {
   const days = Math.max(1, Math.round((Date.now() - state.account.created) / 86_400_000));
   return `<div class="card">
     <h3 class="card-title">${h(t('srcTitle'))}</h3>
-    ${rows.map(([k, v]) => `<div class="pool-line"><span class="pool-label">${h(t(k))}</span><strong class="pool-value num ${v < 0 ? 'down-ink' : ''}">${h(money(v, BASE))}</strong></div>`).join('')}
+    ${rows.map(([k, v]) => sourceLine(k, `<span class="pool-label">${h(t(k))}</span><strong class="pool-value num ${v < 0 ? 'down-ink' : ''}">${h(money(v, BASE))}</strong>`)).join('')}
     <p class="muted">${h(t('srcAge', { days: num(days, 0), date: fmtDate(state.account.created) }))}</p>
   </div>`;
 }
@@ -3049,6 +3075,11 @@ document.addEventListener('click', event => {
     case 'fx-from':
       state.fx.from = el.dataset.cur;
       if (state.fx.to === state.fx.from) state.fx.to = state.fx.from === BASE ? 'USD' : BASE;
+      showTab('fx');
+      break;
+    case 'fx-pair':
+      state.fx.from = el.dataset.from;
+      state.fx.to = el.dataset.to;
       showTab('fx');
       break;
     case 'fx-to':

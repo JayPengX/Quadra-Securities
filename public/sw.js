@@ -16,7 +16,9 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches
       .keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      // Only this app's own old copies: the other Quadra apps share this site
+      // (and its caches), and the logos are kept for all of them.
+      .then(keys => Promise.all(keys.filter(k => k.startsWith('stock-study-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });

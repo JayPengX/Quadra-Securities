@@ -87,6 +87,9 @@ button { font: inherit; cursor: pointer; color: inherit; }
 button:disabled { cursor: not-allowed; opacity: 0.5; }
 input, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Touch screens: tapping a row or button shouldn't leave a ring or grey flash on it. */
+html { -webkit-tap-highlight-color: transparent; }
+@media (hover: none) and (pointer: coarse) { button:focus, button:focus-visible, a:focus-visible, [role='button']:focus-visible { outline: none; } }
 [hidden] { display: none !important; }
 h1, h2, h3, p { margin: 0; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }

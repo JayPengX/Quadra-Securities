@@ -1511,6 +1511,9 @@ function renderPortfolio() {
   const open = state.account.orders.filter(o => o.status === 'open');
   const avail = available(state.account, s);
   const unsettledNow = unsettled(state.account);
+  // Money held for open buy orders isn't spendable, so cash shows without it.
+  const heldFor = c => Math.max(0, c.amount - (avail.cash[c.currency] ?? c.amount));
+  const heldTWD = v.cash.reduce((sum, c) => sum + (c.amount ? (heldFor(c) / c.amount) * c.twd : 0), 0);
   box.innerHTML = `
     <div class="card hero-card">
       <p class="hero-label">${h(t('netWorth'))}${incomplete ? ` <small>${h(t('pricesLoading'))}</small>` : ''}</p>
@@ -1521,7 +1524,8 @@ function renderPortfolio() {
         ${heroStat(t('putIn'), money(v.deposits, BASE), t('since', { date: fmtDate(state.account.created) }))}
       </div>
       <div class="hero-split">
-        <span>${h(t('cash'))} <strong class="num">${h(money(v.cashTWD, BASE))}</strong></span>
+        <span>${h(t('cash'))} <strong class="num">${h(money(v.cashTWD - heldTWD, BASE))}</strong></span>
+        ${heldTWD > 0.5 ? `<span>${h(t('openOrders'))} <strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
         <span>${h(t('holdings'))} <strong class="num">${h(money(v.longTWD, BASE))}</strong></span>
         ${v.receivable > 0 ? `<span>${h(t('pendingDivTitle'))} <strong class="num">${h(money(v.receivable, BASE))}</strong></span>` : ''}
         ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
@@ -1557,7 +1561,7 @@ function renderPortfolio() {
     ${alertsListHtml()}
     <div class="card">
       <h3 class="card-title">${h(t('wallets'))}</h3>
-      <div class="wallets">${v.cash.map(c => walletRow(c, c.amount - (avail.cash[c.currency] ?? c.amount), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
+      <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
       <p class="note">${h(t('walletsNote'))}</p>
     </div>
     ${poolCardHtml()}
@@ -1623,6 +1627,7 @@ function positionRow(p) {
 
 function walletRow(c, reserved = 0, settling = 0) {
   const info = currencyInfo(c.currency);
+  if (reserved > 1e-9 && c.amount) c = { ...c, amount: c.amount - reserved, twd: c.twd * (1 - reserved / c.amount) };
   return `<button class="wallet" type="button" data-action="fx-from" data-cur="${h(c.currency)}">
     <span class="wallet-flag">${info.flag}</span>
     <span class="wallet-main"><strong>${h(c.currency)}</strong><small>${h(L(info))}</small></span>

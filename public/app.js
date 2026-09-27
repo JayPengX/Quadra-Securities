@@ -21,7 +21,7 @@ import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, stac
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { LESSONS, MISSIONS, GLOSSARY } from './lib/learn.mjs';
-import { GAMES, earnedToday as gameEarned, roomToday as gameRoom, payRound, scorer, tickerQuestion, feeQuestion } from './lib/games.mjs';
+import { GAMES, earnedToday as gameEarned, roomToday as gameRoom, payRound, scorer, tickerQuestion, feeQuestion, fxQuestion } from './lib/games.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { readSync, writeSync, cleanPasscode, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
 import {
@@ -2436,7 +2436,7 @@ function renderGames() {
     <div class="games-cap"><div class="games-cap-bar"><span style="width:${Math.min(100, (earned / cap) * 100)}%"></span></div><small>${h(earned >= cap ? t('sgCapped') : t('sgEarned', { v: money(earned, BASE), cap: money(cap, BASE) }))}</small></div>
     ${last}
     <div class="games-tiles">${GAMES.list
-      .map(game => `<button class="games-tile" type="button" data-action="game-start" data-game="${game}" ${state.account && earned < cap ? '' : 'disabled'}><span class="games-icon" aria-hidden="true">${game === 'ticker' ? '🔤' : '🧾'}</span><strong>${h(t(`sg_${game}`))}</strong><small>${h(t(`sgHow_${game}`))}</small></button>`)
+      .map(game => `<button class="games-tile" type="button" data-action="game-start" data-game="${game}" ${state.account && earned < cap ? '' : 'disabled'}><span class="games-icon" aria-hidden="true">${{ ticker: '🔤', fee: '🧾', fx: '💱' }[game]}</span><strong>${h(t(`sg_${game}`))}</strong><small>${h(t(`sgHow_${game}`))}</small></button>`)
       .join('')}</div>
     ${state.account ? '' : `<p class="muted">${h(t('needAccount'))}</p>`}
   </div>`;
@@ -2461,7 +2461,17 @@ function startGame(game) {
 
 function nextQuestion() {
   const g = state.game;
-  g.q = g.game === 'ticker' ? tickerQuestion() : feeQuestion();
+  g.q = g.game === 'ticker' ? tickerQuestion() : g.game === 'fx' ? fxQuestion(Math.random, liveMids()) : feeQuestion();
+}
+
+// Today's mid rates (NT$ a unit) for the exchange game, where they're loaded.
+function liveMids() {
+  const out = {};
+  for (const c of Object.keys(CURRENCIES)) {
+    const q = state.quotes.get(fxSymbol(c));
+    if (q?.price > 0) out[c] = q.price;
+  }
+  return out;
 }
 
 function answerGame(choice) {
@@ -2497,13 +2507,15 @@ function renderGameRound() {
   const prompt =
     g.game === 'ticker'
       ? `<p class="game-ask">${h(t('sgAsk_ticker'))}</p><p class="game-subject">${h(locale === 'zh' ? q.name[0] : q.name[1])}${q.name[0] !== q.name[1] ? ` <small>${h(locale === 'zh' ? q.name[1] : q.name[0])}</small>` : ''}</p>`
+      : g.game === 'fx'
+        ? `<p class="game-ask">${h(t(q.side === 'buy' ? 'sgAsk_fxBuy' : 'sgAsk_fxSell'))}</p><p class="game-subject">${h(t(q.side === 'buy' ? 'sgFxBuy' : 'sgFxSell', { amount: money(q.amount, q.currency) }))}</p><p class="muted small">${h(t('sgFxQuote', { cur: q.currency, sell: num(q.sell, 4), buy: num(q.buy, 4), mid: num(q.mid, 4) }))}</p>`
       : `<p class="game-ask">${h(t('sgAsk_fee'))}</p><p class="game-subject">${h(t('sgTrade', { side: t(q.side), qty: num(q.qty, 0), kind: t(`kind_${q.kind}`), price: fmtPrice(q.price, BASE), gross: money(q.gross, BASE) }))}</p>`;
   const fb = g.feedback;
   $('games-body').innerHTML = `<div class="card games-card live">
     <div class="game-head"><strong>${h(t(`sg_${g.game}`))}</strong><span class="game-clock">⏱ <span id="game-left">${Math.ceil((g.ends - Date.now()) / 1000)}</span>s</span><span class="num">${h(money(g.paid, BASE))}</span><button class="ghost-button small" type="button" data-action="game-end">${h(t('sgStop'))}</button></div>
     ${prompt}
-    <div class="game-options">${q.options.map(o => `<button class="game-option num" type="button" data-action="game-answer" data-choice="${h(String(o))}">${h(g.game === 'fee' ? money(o, BASE) : String(o))}</button>`).join('')}</div>
-    <p class="game-feedback ${fb ? (fb.right ? 'up-ink' : 'down-ink') : ''}">${fb ? h(fb.right ? t('sgRight', { v: money(fb.change, BASE) }) : t('sgWrong', { a: g.game === 'fee' ? money(fb.answer, BASE) : fb.answer })) : '&nbsp;'}</p>
+    <div class="game-options">${q.options.map(o => `<button class="game-option num" type="button" data-action="game-answer" data-choice="${h(String(o))}">${h(g.game === 'ticker' ? String(o) : money(o, BASE))}</button>`).join('')}</div>
+    <p class="game-feedback ${fb ? (fb.right ? 'up-ink' : 'down-ink') : ''}">${fb ? h(fb.right ? t('sgRight', { v: money(fb.change, BASE, { digits: Number.isInteger(fb.change) ? 0 : 1 }) }) : t('sgWrong', { a: g.game === 'ticker' ? fb.answer : money(fb.answer, BASE) })) : '&nbsp;'}</p>
     <p class="muted small">${h(t('sgStreak', { n: g.score.streak }))}</p>
   </div>`;
 }

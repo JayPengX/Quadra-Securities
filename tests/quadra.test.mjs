@@ -62,3 +62,25 @@ test('mini games: pay per round within the daily cap', () => {
   const tq = tickerQuestion(() => 0.1);
   assert.ok(tq.options.includes(tq.answer));
 });
+
+test('exchange check: the bank sells high and buys low; the answer is the real total', async () => {
+  const { fxQuestion } = await import('../public/lib/games.mjs');
+  for (let i = 0; i < 50; i++) {
+    const q = fxQuestion(Math.random, { USD: 31.5 });
+    assert.ok(q.sell > q.mid && q.buy < q.mid);
+    assert.equal(q.answer, Math.round(q.amount * (q.side === 'buy' ? q.sell : q.buy)));
+    assert.equal(new Set(q.options).size, 4);
+    assert.ok(q.options.includes(q.answer));
+  }
+});
+
+test('mini games pay about the Quadra rate for a minute of ordinary play', async () => {
+  const { GAMES } = await import('../public/lib/games.mjs');
+  const { ECONOMY } = await import('../public/lib/quadra.mjs');
+  // Ordinary play: tickers 24 answers a minute, fees and exchanges 7.5; 80% right.
+  const minute = (rule, answers) => answers * 0.8 * rule.right + (answers * 0.8 * rule.bonus) / rule.every / 2 - answers * 0.2 * rule.wrong;
+  for (const [game, answers] of [['ticker', 24], ['fee', 7.5], ['fx', 7.5]]) {
+    const rate = minute(GAMES.pay[game], answers);
+    assert.ok(Math.abs(rate - ECONOMY.gamesPerMinute) / ECONOMY.gamesPerMinute < 0.35, `${game} ${rate}`);
+  }
+});

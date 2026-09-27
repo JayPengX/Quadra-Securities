@@ -19,12 +19,25 @@ This app is part of **Quadra 四方**, four apps sharing one account:
 - **One money pool**: Securities' NT$ cash and Sportsbook's balance are the
   same money. Sportsbook's bets and winnings, Words' study rewards and
   transfers between passes all land in it, with records on every side.
-- **The economy**: every account opens with NT$100,000 in Securities, which
-  pays NT$3,000 on the 1st of each month; Sportsbook adds NT$10,000 once and
-  NT$1,000 each week; both only when that app is opened. Words pays NT$2 a
-  right answer and NT$20 a newly mastered word (NT$800 a day at most);
-  Securities' and Sportsbook's mini games pay for skill, up to NT$1,000 and
-  NT$1,500 a day. Sportsbook has a weekly betting limit you can set.
+- **The economy** (balanced 2026-09-27, `ECONOMY` in `quadra.mjs`):
+
+  | Source | Pays | Why |
+  |---|---|---|
+  | Securities salary | NT$100,000 to start, NT$5,000 on the 1st of each month | the dependable base; where money lives and grows |
+  | Sportsbook allowance | NT$10,000 once, NT$500 each Monday | a small side budget for betting |
+  | Words | NT$3 a right answer, NT$25 a word newly mastered, NT$600 a day at most | the best pay for effort (about NT$20 a minute), because the effort is real |
+  | Mini games | about NT$15 a minute, NT$300 a day in each app | a little for skill, never the thing to farm |
+  | Investing | about 6-8% a year on a diversified portfolio (~NT$600 a month on NT$100,000) | slow, real growth |
+  | Betting | the lottery keeps about 22% of stakes | where money shrinks |
+
+  Salary and allowance come to about NT$7,200 a month; 20 minutes of daily
+  study adds NT$9,000-12,000; everything maxed every day, about NT$36,000
+  (it was up to ~NT$100,000 a month before, mostly from mini games, which
+  made saving and investing pointless). Paid only when each app is opened.
+  Sportsbook has a weekly betting limit you can set. Sportsbook's
+  data-entry game was dropped (pure grind, nothing to learn); Securities
+  gained 換匯計算, a bank-rate exchange quiz.
+
 - **One pass, signed in everywhere**: the same Quadra Pass panel in all four
   apps; links between the apps carry the pass (in the address's #hash), so
   the app they open is already signed in, even in the iPhone pop-up browser.

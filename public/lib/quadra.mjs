@@ -25,20 +25,37 @@ export const APPS = {
 };
 export const appName = (app, lang = 'zh') => APPS[app]?.[lang === 'en' ? 'en' : 'zh'] || app;
 
-// The economy, in one place so the four apps stay in balance: Securities is
-// where money lives and grows, Sportsbook a small side play, Words the one
-// that pays for real effort.
+// The economy, in one place so the four apps stay in balance.
+//
+// Who pays what, and why (NT$, play money):
+//   - Securities is where money lives and grows: NT$100,000 to start and a
+//     salary of NT$5,000 on the 1st of each month. A diversified portfolio
+//     adds about 6-8% a year; costs are real (fees, taxes, spreads).
+//   - Sportsbook is a small side play: NT$10,000 once and NT$500 a week
+//     for betting, into the same pool. It keeps about 22% of what is staked
+//     on average, so betting is where money goes to shrink.
+//   - Words pays best for effort, because the effort is real: NT$3 a right
+//     answer (about NT$20 a minute of study) and NT$25 for each word
+//     mastered, up to NT$600 a day.
+//   - Mini games pay for a little skill: about NT$15 a minute, up to NT$300 a
+//     day in each app.
+// A month of pay is NT$7,200 (salary and allowance). A daily studier (20
+// minutes) adds about NT$9,000-12,000; everything maxed every day, about
+// NT$36,000 on top: enough to matter, never enough to make investing or
+// saving pointless. Investing NT$100,000 well earns about NT$600 a month,
+// betting NT$5,000 a month costs about NT$1,100.
 export const ECONOMY = {
   stockStart: 100_000,
   // On the 1st of every month, when Securities is opened.
-  stockMonthly: 3_000,
+  stockMonthly: 5_000,
   oddsStart: 10_000,
   // Every Monday (Taiwan time), when Sportsbook is opened.
-  oddsWeekly: 1_000,
+  oddsWeekly: 500,
   // Quadra Words: per right answer, per word newly mastered, at most a day.
-  vocab: { perCorrect: 2, perMastered: 20, dailyCap: 800 },
-  // Each app's mini games, at most a Taiwan day.
-  gamesDailyCap: { odds: 1_500, stock: 1_000 }
+  vocab: { perCorrect: 3, perMastered: 25, dailyCap: 600 },
+  // Each app's mini games: about this much a minute of typical play, and at most a Taiwan day.
+  gamesPerMinute: 15,
+  gamesDailyCap: { odds: 300, stock: 300 }
 };
 
 // ---- Codes ---------------------------------------------------------------------

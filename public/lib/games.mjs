@@ -1,25 +1,33 @@
 // 小遊戲: stock mini games that earn play money by skill, not luck, like
-// Quadra Sportsbook's. Each round is about a minute and pays about NT$25 for
-// ordinary play (more for a good one); together they pay at most
-// GAMES.dailyCap a Taiwan day. What they teach is real: which ticker is which
-// company, and what a Taiwan trade really costs.
+// Quadra Sportsbook's. Each round is about a minute and pays about
+// ECONOMY.gamesPerMinute (NT$15) for ordinary play (more for a good one);
+// together they pay at most GAMES.dailyCap a Taiwan day. What they teach is
+// real: which ticker is which company, what a Taiwan trade really costs, and
+// what an exchange at the bank really costs.
 //
 //   ticker  代號配對  a company, four tickers: pick its own
 //   fee     手續費    a Taiwan trade, four totals: pick the fees and tax it really pays
+//   fx      換匯計算  an exchange at the bank's rates: pick what it really costs or returns
 //
 // Pay goes into the account as a deposit with a fixed id per round
 // ('game:<round>', `game: '<name>'`), set to the round's running total, so it
 // syncs and merges like everything else and counts as money put in, not return.
 import { ECONOMY } from './quadra.mjs';
 import { GAME_COMPANIES } from './catalog.mjs';
-import { tradeCosts } from './markets.mjs';
+import { tradeCosts, CURRENCIES } from './markets.mjs';
 
 export const GAMES = {
   dailyCap: ECONOMY.gamesDailyCap.stock,
   roundSeconds: 60,
-  list: ['ticker', 'fee'],
-  // Pay per right answer, the streak bonus (every `every` in a row) and what a wrong answer costs.
-  pay: { ticker: { right: 1, every: 5, bonus: 2, wrong: 1 }, fee: { right: 4, every: 3, bonus: 3, wrong: 2 } }
+  list: ['ticker', 'fee', 'fx'],
+  // Pay per right answer, the streak bonus (every `every` in a row) and what
+  // a wrong answer costs: about NT$15 a minute of ordinary play (tickers take
+  // about 2.5 s an answer, fees and exchanges about 8 s).
+  pay: {
+    ticker: { right: 0.8, every: 5, bonus: 1, wrong: 0.5 },
+    fee: { right: 2.4, every: 3, bonus: 2, wrong: 1 },
+    fx: { right: 2.4, every: 3, bonus: 2, wrong: 1 }
+  }
 };
 
 const TPE = 8 * 3_600_000;
@@ -115,4 +123,29 @@ export function feeQuestion(rand = Math.random) {
   const wrong = [...new Set(candidates.filter(x => x !== right && x > 0))];
   while (wrong.length < 3) wrong.push(right + 10 * (wrong.length + 1));
   return { kind, side, qty, price, gross, answer: right, options: shuffle([right, ...shuffle(wrong, rand).slice(0, 3)], rand) };
+}
+
+// 換匯計算: buying foreign currency at the bank (it sells at its higher
+// price) or selling it back (it buys at its lower one), and four NT$ totals.
+// The wrong ones are the real mistakes: the mid rate from the news, the
+// bank's price for the other direction, and paying the spread twice.
+// `mids`: today's mid rates (NT$ per unit) when the app has them.
+const SAMPLE_MIDS = { USD: 31.7, JPY: 0.215, EUR: 36.6, HKD: 4.07, GBP: 42.4, AUD: 20.9, CNY: 4.43, SGD: 24.4 };
+const FX_AMOUNTS = { USD: [100, 300, 500, 1000, 2500], JPY: [10000, 30000, 50000, 100000], EUR: [100, 200, 500, 1000], HKD: [500, 1000, 3000], GBP: [100, 300, 800], AUD: [200, 500, 1500], CNY: [500, 1000, 3000], SGD: [200, 500, 1000] };
+export function fxQuestion(rand = Math.random, mids = {}) {
+  const currency = pick(Object.keys(SAMPLE_MIDS), rand);
+  const mid = mids[currency] > 0 ? mids[currency] : SAMPLE_MIDS[currency] * (0.98 + rand() * 0.04);
+  const spread = CURRENCIES[currency]?.spread ?? 0.003;
+  const digits = mid < 1 ? 4 : 3;
+  const round = x => Math.round(x * 10 ** digits) / 10 ** digits;
+  const sell = round(mid * (1 + spread));
+  const buy = round(mid * (1 - spread));
+  const side = rand() < 0.6 ? 'buy' : 'sell';
+  const amount = pick(FX_AMOUNTS[currency], rand);
+  const at = rate => Math.round(amount * rate);
+  const answer = side === 'buy' ? at(sell) : at(buy);
+  const candidates = side === 'buy' ? [at(round(mid)), at(buy), at(round(sell * (1 + spread)))] : [at(round(mid)), at(sell), at(round(buy * (1 - spread)))];
+  const wrong = [...new Set(candidates.filter(x => x !== answer && x > 0))];
+  while (wrong.length < 3) wrong.push(answer + 10 * (wrong.length + 1));
+  return { currency, side, amount, sell, buy, mid: round(mid), answer, options: shuffle([answer, ...wrong.slice(0, 3)], rand) };
 }

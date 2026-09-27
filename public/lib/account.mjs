@@ -1232,8 +1232,8 @@ export function applyCashInterest(account, now = Date.now()) {
 //
 // No adding money by hand: like a salary, new NT$ arrives on its own on the
 // 1st of every month (00:00 Taiwan time), paid when the app is opened: the
-// same NT$3,000 for every account (Quadra's economy; it used to be 3% of a
-// chosen start). Each payday is a deposit with a fixed id (pay:YYYY-MM), paid
+// same ECONOMY.stockMonthly (NT$5,000) for every account (Quadra's economy;
+// it used to be 3% of a chosen start). Each payday is a deposit with a fixed id (pay:YYYY-MM), paid
 // once however many devices catch up on it. `income.since`: when paydays
 // began (the account's opening, or when an older account first got them).
 

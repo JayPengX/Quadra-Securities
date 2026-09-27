@@ -237,6 +237,24 @@ export function othersBalance(wallet, app) {
   return Math.round((entries + snaps) * 100) / 100;
 }
 
+// The pool by where its money is: each app's part (its own cash and what it
+// put in or took out) and the rest (transfers, merges), biggest first.
+export function poolParts(wallet) {
+  if (!wallet) return [];
+  const parts = {};
+  const add = (app, v) => {
+    const key = APPS[app] ? app : 'other';
+    parts[key] = (parts[key] || 0) + v;
+  };
+  for (const [app, s] of Object.entries(wallet.snap || {})) add(app, cash(s));
+  for (const e of wallet.entries || []) add(e.app, e.amount);
+  return Object.entries(parts)
+    .map(([app, amount]) => ({ app, amount: Math.round(amount) }))
+    .filter(p => p.amount !== 0)
+    .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+}
+export const poolPartName = (app, lang = 'zh') => (APPS[app] ? appName(app, lang) : lang === 'en' ? 'Transfers and other' : '轉帳與其他');
+
 // Entries that came from elsewhere than `app` (newest first).
 export const entriesNotFrom = (wallet, app) => (wallet?.entries || []).filter(e => e.app !== app).sort((a, b) => b.t - a.t);
 
@@ -275,6 +293,61 @@ export const activePins = wallet =>
     .filter(([, p]) => p.on)
     .map(([id, p]) => ({ id, ...p }))
     .sort((a, b) => String(a.start).localeCompare(String(b.start)));
+
+// ---- The tab bar stays where the thumb expects it ----------------------------------
+//
+// An iOS home-screen app coming back from the background can report no
+// bottom safe area for a while, and a layout viewport taller than what's
+// on screen, so the fixed tab bar slides down onto the home indicator. The
+// inset seen before is kept (per orientation) and applied as a floor
+// (--q-safe-bottom in quadra.css), and the bar is lifted to the visible
+// viewport's bottom whenever the two disagree.
+const SAFE_KEY = 'quadra.safeBottom';
+function steadyTabBar() {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || !window.getComputedStyle) return;
+  const root = document.documentElement;
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:fixed;left:0;bottom:0;width:0;height:0;visibility:hidden;pointer-events:none;padding-bottom:env(safe-area-inset-bottom)';
+  let seen = { p: 0, l: 0 };
+  try {
+    seen = { ...seen, ...JSON.parse(localStorage.getItem(SAFE_KEY) || '{}') };
+  } catch {}
+  const standalone = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
+  const fix = () => {
+    if (!document.body) return;
+    if (!probe.isConnected) document.body.append(probe);
+    const side = window.innerWidth > window.innerHeight ? 'l' : 'p';
+    const inset = parseFloat(getComputedStyle(probe).paddingBottom) || 0;
+    if (inset > (seen[side] || 0) && inset < 80) {
+      seen[side] = inset;
+      try {
+        localStorage.setItem(SAFE_KEY, JSON.stringify(seen));
+      } catch {}
+    }
+    root.style.setProperty('--q-safe-bottom', `${standalone() ? seen[side] || 0 : 0}px`);
+    const vv = window.visualViewport;
+    const gap = vv && Math.abs(vv.scale - 1) < 0.01 ? window.innerHeight - vv.height - vv.offsetTop : 0;
+    const lift = gap > 1 && gap < 120 ? Math.round(gap) : 0;
+    for (const bar of document.querySelectorAll('.q-tabbar')) bar.style.transform = lift ? `translateY(${-lift}px)` : '';
+  };
+  // Right away, then again as iOS settles the viewport after a resume.
+  const settle = () => {
+    fix();
+    requestAnimationFrame(fix);
+    for (const ms of [120, 400, 1000, 2000]) setTimeout(fix, ms);
+  };
+  window.visualViewport?.addEventListener('resize', fix);
+  window.visualViewport?.addEventListener('scroll', fix);
+  window.addEventListener('resize', settle);
+  window.addEventListener('orientationchange', settle);
+  window.addEventListener('pageshow', settle);
+  window.addEventListener('focus', settle);
+  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && settle());
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', settle, { once: true });
+  else settle();
+}
+steadyTabBar();
 
 // ---- The shell: installed-only on phones, and always the newest version ----------
 

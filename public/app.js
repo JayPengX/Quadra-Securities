@@ -25,7 +25,7 @@ import { GAMES, earnedToday as gameEarned, roomToday as gameRoom, payRound, scor
 import { pack, unpack } from './lib/codec.mjs';
 import { readSync, writeSync, cleanPasscode, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
 import {
-  APPS, appUrl, PASS_PATTERN, formatPass, storedPass, storePass, cachedWallet, cacheWallet, poolBalance, describeEntry, ecoMerge, ecoTransfer,
+  APPS, appUrl, PASS_PATTERN, formatPass, storedPass, storePass, cachedWallet, cacheWallet, poolBalance, poolParts, poolPartName, describeEntry, ecoMerge, ecoTransfer,
   installGate, watchUpdates, passPanel, randomId as quadraId
 } from './lib/quadra.mjs';
 
@@ -2547,8 +2547,7 @@ function renderGuide() {
     fold('📊', t('g_numbers'), ['g_numbers1', 'g_numbers2', 'g_numbers3'].map(para).join('')),
     fold('🛰️', t('g_data'), ['g_data1', 'g_data2', 'g_data3'].map(para).join('')),
     fold('⚙️', t('g_settings'), `<div class="setting"><span>${h(t('updownLabel'))}</span><div class="segmented" role="group"><button type="button" data-action="updown" data-v="tw" aria-pressed="${state.settings.updown === 'tw'}">${h(t('updownTw'))}</button><button type="button" data-action="updown" data-v="us" aria-pressed="${state.settings.updown === 'us'}">${h(t('updownUs'))}</button></div></div>
-      ${appSettingsHtml()}
-      ${state.account ? `<div class="setting"><span>${h(t('resetLabel'))}</span><button class="ghost-button danger" type="button" data-action="reset">${h(t('resetAccount'))}</button></div>` : ''}`),
+      ${appSettingsHtml()}`),
     `<p class="disclaimer">${h(t('disclaimer'))}</p>`
   ].join('');
   renderTmChart();
@@ -2622,16 +2621,7 @@ function showSetup() {
   if (!$('setup').open) $('setup').showModal();
 }
 
-function resetAccount() {
-  if (!confirm(t('resetConfirm'))) return;
-  commit(null, { sync: false });
-  state.bench = null;
-  closeDetail();
-  render();
-  showSetup();
-}
-
-// ---- Sync and backups ---------------------------------------------------------------------
+// ---- Sync -----------------------------------------------------------------------------
 
 function loadSyncCode() {
   try {
@@ -2651,12 +2641,10 @@ function saveSyncCode(code) {
 const onPass = () => isPassCode(state.sync.code);
 
 // The Quadra Pass (the same panel as in the other Quadra apps, mounted into
-// .pass-slot after each draw) and backups.
+// .pass-slot after each draw).
 function syncCardHtml() {
   return `<div class="card sync-card">
     <div class="pass-slot"></div>
-    <div class="button-row"><button class="ghost-button" type="button" data-action="backup">${h(t('backup'))}</button><button class="ghost-button" type="button" data-action="restore">${h(t('restore'))}</button></div>
-    <p class="note">${h(t('backupNote'))}</p>
   </div>`;
 }
 function mountPassPanel() {
@@ -2676,21 +2664,22 @@ function mountPassPanel() {
 function poolCardHtml() {
   if (!onPass() || !state.account) return '';
   const w = state.wallet;
-  const s = snap();
-  const own = ownCash(state.account, s);
-  const cash = available(state.account, s).cash[BASE] || 0;
-  const openBets = w?.snap?.odds?.open || 0;
-  const recent = state.account.events.filter(e => e.pool).sort((a, b) => b.t - a.t).slice(0, 12);
+  if (!w) return '';
+  // The pool at a glance: its total and each app's part (each one's own
+  // records are in its history tab, so none are repeated here).
+  const parts = poolParts(w);
+  const plus = parts.filter(p => p.amount > 0).reduce((sum, p) => sum + p.amount, 0);
+  const color = app => APPS[app]?.color || 'var(--q-muted)';
+  const openBets = w.snap?.odds?.open || 0;
+  const part = p => {
+    const inner = `<span class="qpool-dot" style="background:${color(p.app)}"></span><span class="qpool-name">${h(poolPartName(p.app, locale))}${p.app === 'odds' && openBets > 0 ? `<small>${h(t('poolRiding', { v: money(openBets, BASE) }))}</small>` : ''}</span><strong class="qpool-amt${p.amount < 0 ? ' neg' : ''}">${h(money(p.amount, BASE))}</strong>`;
+    return APPS[p.app] && p.app !== 'stock' ? `<li><a class="qpool-part" href="${h(appUrl(p.app))}">${inner}</a></li>` : `<li><div class="qpool-part">${inner}</div></li>`;
+  };
   return `<div class="card pool-card">
-    <h3 class="card-title">${h(t('poolTitle'))}</h3>
-    <p class="lede">${h(t('poolNote'))}</p>
-    <div class="pool-line"><span class="pool-label">${h(t('poolCash'))}</span><strong class="pool-value num">${h(money(cash, BASE))}</strong></div>
-    <div class="pool-line"><span class="pool-label">${h(t('poolMine'))}</span><strong class="pool-value num">${h(money(own, BASE))}</strong></div>
-    <div class="pool-line"><span class="pool-label">${h(t('poolOthers'))}</span><strong class="pool-value num">${h(money(cash - own, BASE))}</strong></div>
-    <div class="pool-line"><span class="pool-label">${h(t('poolOpenBets'))}</span><strong class="pool-value num">${h(money(openBets, BASE))}</strong></div>
-    ${w ? `<div class="pool-line"><span class="pool-label">${h(t('poolServer'))}</span><strong class="pool-value num">${h(money(poolBalance(w), BASE))}</strong></div>` : ''}
-    <h4 class="pool-head">${h(t('poolRecords'))}</h4>
-    ${recent.length ? `<ul class="pool-records">${recent.map(e => `<li>${poolRecordOpen(e)}<span class="pool-when">${h(dateTime(e.t))}</span><span class="pool-what">${h(describeEntry(e, locale))}</span><strong class="num ${e.amount < 0 ? 'down-ink' : 'up-ink'}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, BASE))}</strong>${poolRecordClose(e)}</li>`).join('')}</ul>` : `<p class="muted">${h(t('poolNone'))}</p>`}
+    <div class="qpool-top"><span>${h(t('poolTitle'))}</span><strong>${h(money(poolBalance(w), BASE))}</strong></div>
+    ${plus > 0 ? `<div class="qpool-bar" aria-hidden="true">${parts.filter(p => p.amount > 0).map(p => `<i style="flex:${p.amount / plus};background:${color(p.app)}"></i>`).join('')}</div>` : ''}
+    <ul class="qpool-parts">${parts.map(part).join('')}</ul>
+    <p class="qpool-note">${h(t('poolNote'))}</p>
     <details class="fold-lite">
       <summary>${h(t('transferTitle'))}</summary>
       <form class="transfer-form" data-form="transfer">
@@ -2702,10 +2691,6 @@ function poolCardHtml() {
     </details>
   </div>`;
 }
-
-// A pool record opens the Quadra app it came from (signed in).
-const poolRecordOpen = e => (APPS[e.app] ? `<a class="pool-record-link" href="${h(appUrl(e.app))}">` : '');
-const poolRecordClose = e => (APPS[e.app] ? '</a>' : '');
 
 // Where the money came from: the opening amount, paydays, mini games, the
 // other Quadra apps, transfers.
@@ -2897,36 +2882,6 @@ function syncOff() {
   state.wallet = null;
   saveSyncCode(null);
   render();
-}
-
-function backup() {
-  const blob = new Blob([JSON.stringify(state.account)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `quadra-securities-${taipeiDay(Date.now())}.json`;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
-function restore() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'application/json,.json';
-  input.onchange = async () => {
-    try {
-      const data = JSON.parse(await input.files[0].text());
-      if (!isAccount(data)) throw new Error('not an account');
-      if (state.account && state.account.id !== data.id && !confirm(t('restoreReplace'))) return;
-      commit(state.account?.id === data.id ? mergeAccounts(state.account, data) : data);
-      toast(t('restored'), 'good');
-      render();
-    } catch {
-      toast(t('restoreFailed'), 'bad');
-    }
-  };
-  input.click();
 }
 
 // ---- Page frame: tabs, status, rendering -----------------------------------------------------
@@ -3162,9 +3117,6 @@ document.addEventListener('click', event => {
     case 'close-setup':
       $('setup').close();
       break;
-    case 'reset':
-      resetAccount();
-      break;
     case 'quiz':
       answerQuiz(el.dataset.lesson, Number(el.dataset.i));
       break;
@@ -3252,12 +3204,6 @@ document.addEventListener('click', event => {
       break;
     case 'sync-create':
       createSyncCode();
-      break;
-    case 'backup':
-      backup();
-      break;
-    case 'restore':
-      restore();
       break;
   }
 });

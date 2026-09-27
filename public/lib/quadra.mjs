@@ -297,11 +297,10 @@ export const activePins = wallet =>
 // ---- The tab bar stays where the thumb expects it ----------------------------------
 //
 // An iOS home-screen app coming back from the background can report no
-// bottom safe area for a while, and a layout viewport taller than what's
-// on screen, so the fixed tab bar slides down onto the home indicator. The
-// inset seen before is kept (per orientation) and applied as a floor
-// (--q-safe-bottom in quadra.css), and the bar is lifted to the visible
-// viewport's bottom whenever the two disagree.
+// bottom safe area for a while, so the fixed tab bar slides down onto the
+// home indicator. The inset seen before is kept (per orientation) and
+// applied as a floor (--q-safe-bottom in quadra.css). Nothing here moves the
+// bar itself: it stays pinned while the page scrolls or bounces.
 const SAFE_KEY = 'quadra.safeBottom';
 function steadyTabBar() {
   if (typeof window === 'undefined' || typeof document === 'undefined' || !window.getComputedStyle) return;
@@ -326,10 +325,6 @@ function steadyTabBar() {
       } catch {}
     }
     root.style.setProperty('--q-safe-bottom', `${standalone() ? seen[side] || 0 : 0}px`);
-    const vv = window.visualViewport;
-    const gap = vv && Math.abs(vv.scale - 1) < 0.01 ? window.innerHeight - vv.height - vv.offsetTop : 0;
-    const lift = gap > 1 && gap < 120 ? Math.round(gap) : 0;
-    for (const bar of document.querySelectorAll('.q-tabbar')) bar.style.transform = lift ? `translateY(${-lift}px)` : '';
   };
   // Right away, then again as iOS settles the viewport after a resume.
   const settle = () => {
@@ -337,8 +332,6 @@ function steadyTabBar() {
     requestAnimationFrame(fix);
     for (const ms of [120, 400, 1000, 2000]) setTimeout(fix, ms);
   };
-  window.visualViewport?.addEventListener('resize', fix);
-  window.visualViewport?.addEventListener('scroll', fix);
   window.addEventListener('resize', settle);
   window.addEventListener('orientationchange', settle);
   window.addEventListener('pageshow', settle);

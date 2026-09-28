@@ -80,10 +80,28 @@
   --q-accent-wash: color-mix(in srgb, var(--q-accent) 18%, transparent);
 }
 
-/* Text never cut off or wrapped mid-number; inputs 16px so iOS never zooms. */
+/* Text never cut off or wrapped mid-number; inputs 16px so iOS never zooms.
+   No double-tap zoom (a quick second tap on a button zoomed the page);
+   pinching still zooms. */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+body,
+button,
+a,
+input,
+select,
+label,
+[role='button'] {
+  touch-action: manipulation;
+}
+/* While the loading screen is up the page behind it doesn't scroll. */
+html:has(.loading:not([hidden])),
+html:has(.loading:not([hidden])) body {
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 body {
   overflow-wrap: break-word;
@@ -127,6 +145,10 @@ html::before {
   background: var(--q-page);
   color: var(--q-text);
   font-family: var(--q-font);
+}
+.loading {
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 .loading[hidden] {
   display: none;

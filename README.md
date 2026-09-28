@@ -1,70 +1,36 @@
-# 四方證券 Quadra Securities (Stock Study)
+# Quadra Securities
 
 **Live site: https://jaypengx.github.io/Quadra-Securities/**
 
-## Quadra 四方
+## Quadra
 
-This app is part of **Quadra 四方**, four apps sharing one account:
+Quadra Securities is the financial powerhouse of **Quadra**, a family of
+apps sharing one account and one money pool:
 
-| App | Was | Part it plays |
-| --- | --- | --- |
-| **四方證券 Quadra Securities** | Stock Study 股市研究室 | The base: a play-money brokerage where the money lives and grows |
-| **四方運彩 Quadra Sportsbook** | Odds Study 賠率研究室 | A side play: sports lottery odds and betting |
-| **四方賽程 Quadra Fixtures** | Match Find | A schedule tool: what's worth watching |
-| **四方單字 Quadra Words** | Orbit Vocab 英單力 | A big mini game with real benefit: English words that pay |
+| App | Part it plays |
+| --- | --- |
+| **Quadra Securities** | Where money lives and grows: a play-money brokerage for markets worldwide |
+| **Quadra Play** | A place to play: sports bets and the lottery |
+| **Quadra Fixtures** | The sports data centre, and the way into Play |
+| **Quadra Rewards** | The centre of Quadra: earning, goals, and every app's guide |
+| Orbit Class | A related add-on: the class schedule |
 
-- **The Quadra Pass 四方通行碼**: one 10-character code for all four apps and
-  every device (Shared-Proxy's `/eco` route). Passes are the only kind of
-  code; an old app-only code is upgraded to one the next time its app opens.
-- **One money pool**: Securities' NT$ cash and Sportsbook's balance are the
-  same money. Sportsbook's bets and winnings, Words' study rewards and
-  transfers between passes all land in it, with records on every side.
-- **The economy** (balanced 2026-09-27, `ECONOMY` in `quadra.mjs`):
-
-  | Source | Pays | Why |
-  |---|---|---|
-  | Securities salary | NT$100,000 to start, NT$5,000 on the 1st of each month | the dependable base; where money lives and grows |
-  | Sportsbook allowance | NT$10,000 once, NT$500 each Monday | a small side budget for betting |
-  | Words | NT$3 a right answer, NT$25 a word newly mastered, NT$600 a day at most | the best pay for effort (about NT$20 a minute), because the effort is real |
-  | Mini games | about NT$15 a minute, NT$300 a day in each app | a little for skill, never the thing to farm |
-  | Investing | about 6-8% a year on a diversified portfolio (~NT$600 a month on NT$100,000) | slow, real growth |
-  | Betting | the lottery keeps about 22% of stakes | where money shrinks |
-
-  Salary and allowance come to about NT$7,200 a month; 20 minutes of daily
-  study adds NT$9,000-12,000; everything maxed every day, about NT$36,000
-  (it was up to ~NT$100,000 a month before, mostly from mini games, which
-  made saving and investing pointless). Paid only when each app is opened.
-  Sportsbook has a weekly betting limit you can set. Sportsbook's
-  data-entry game was dropped (pure grind, nothing to learn); Securities
-  gained 換匯計算, a bank-rate exchange quiz.
-
-  **What each app pays back** (measured on the board of 2026-09-27):
-  Sportsbook returns about NT$85 of every NT$100 on a single bet (totals,
-  handicaps, winners 85-86; correct scores and margins 66-73; the top-
-  inning table 52, as the lottery's own), and parlays multiply the cut
-  (2 legs ~73, 3 ~62, 6 ~38), with 20.4% withheld from any win over
-  NT$5,000. Securities earns what the markets do (a diversified portfolio
-  about 6-8% a year) less real costs, and 0.8% on NT$ cash. Both are left
-  as they are: realistic, and a clear lesson. What needed a guard is that
-  the pool is shared: Sportsbook could bet away Securities' savings in an
-  evening. Its weekly betting limit now starts at NT$2,000 (a little more
-  than a week of pay and allowance), until you set your own (0: none).
-
-- **One pass, signed in everywhere**: the same Quadra Pass panel in all four
-  apps; links between the apps carry the pass (in the address's #hash), so
-  the app they open is already signed in, even in the iPhone pop-up browser.
-  An old one-app code turns into a pass by itself.
-- **Installed only** on phones and tablets (added to the home screen), and
-  every app checks for a new deploy on opening, on coming back and every
-  five minutes, clearing old cached files before it reloads.
-- `quadra.mjs` and `quadra.css` are the same file in all four apps; the
-  icons and link cards come from Shared-Proxy's `brand/generate.mjs`.
-
-A play-money brokerage for markets around the world. Every account starts with NT$100,000; exchange it into other currencies, and buy stocks, ETFs, government bonds, bond ETFs, mutual funds, crypto and gold at real prices, or sell short. Commissions, taxes, FX spreads, loan interest, borrow fees and dividend and coupon withholding all follow real rules.
-
-> Educational simulation with play money. Not investment advice.
-
-Built on [Odds Study](https://github.com/JayPengX/Quadra-Sportsbook)'s setup: a static site with no build step and no dependencies, prices through [Shared-Proxy](https://github.com/JayPengX/Shared-Proxy)'s Worker, the same gzip-compressed saves and passcode sync, Traditional Chinese and English, and deploys to GitHub Pages.
+- **Quadra Pass required.** The app opens on the sign-in screen until there's
+  a pass (the shared kit, `public/lib/quadra.mjs`, from Shared-Proxy's
+  `kit/`). The account is kept with the pass (a copy on the device under the
+  pass, so it opens at once), and the market data proxy answers signed-in
+  apps only.
+- **One app at a time.** The app in use is the account's live one; opening
+  another Quadra app pauses this one (it stops refreshing) until you come
+  back, so two apps never overwrite each other.
+- **One money pool.** This account's NT$ cash is the Quadra balance: Play's
+  bets and winnings, what Rewards earns, transfers and Quadra's own pay
+  (NT$5,000 a month, NT$500 a week, paid into the pool by the Worker from
+  October 2026; Securities paid the month itself before that) all move it.
+  A new pass opens with NT$110,000 from Quadra.
+- **The guide lives in Rewards.** Every explanation (fees, orders, FX,
+  bonds, loans…) is in Quadra Rewards' help centre; the account sheet links
+  to it. The lessons, quizzes and mini games were removed.
 
 ## The app
 
@@ -76,7 +42,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - **World markets strip:** TAIEX, S&P 500, Nasdaq, SOX, Nikkei, Hang Seng, Bitcoin, USD/TWD, the gold passbook, the US 10-year yield.
 - **Lists** (`public/lib/catalog.mjs`, about 300 items with Chinese names): Taiwan stocks (TWSE and TPEx), Taiwan ETFs (0050, 0056, 00878, leveraged and inverse ones …), US stocks, US ETFs, government bonds (see below), bond ETFs (Taiwan's bond ETFs, US Treasury and corporate bond ETFs, and Treasury yields to watch), crypto, forex (18 currency pairs), gold and commodities, Japan, Hong Kong and China A-shares, Korea, Europe, US mutual funds, more markets (Canada, Australia, Singapore, India), and indexes. There's a watchlist (☆ on any item) too.
 - **Each row:** today's price line against yesterday's close, the price and its currency, whether its market is open, and the day's change.
-- **Up and down colours:** red for up and green for down (Taiwan's way) in Chinese, green for up in English. The guide's settings switch either way.
+- **Up and down colours:** red for up and green for down (Taiwan's way) in Chinese, green for up in English. The account sheet's settings switch either way.
 
 ### The detail sheet
 
@@ -147,21 +113,11 @@ Currency pairs trade like stocks (market, limit and stop orders, shorting, alert
   - P/L by market;
   - **you vs. just buying an index**: the same deposits on the same days into 0050, VOO (in NT$), Bitcoin (in NT$) or the gold passbook.
 
-### 學習 Learn
+### Time machine (回測)
 
-`public/lib/learn.mjs`: a beginner school for people who have never invested.
-
-- **13 short lessons:** what a stock is, reading a quote, order types, fees and taxes, ETFs and diversification, dividends, currency risk, government bonds, crypto and gold, time and compounding, leverage, common beginner mistakes, and a practice plan.
-- **Live examples:** each lesson uses today's real prices (a lot of TSMC with its fees and round-trip cost, the US 10-year yield, the NT$ rate…).
-- **Try it:** buttons open the relevant stock or tab.
-- **Time machine:** NT$X once, or every month, into 0050, TSMC, VOO, QQQ, Bitcoin, gold… since any year from 2000. Monthly closes with dividends reinvested, foreign ones at each month's NT$ rate. Shows what it's worth now, the yearly return, the biggest drop along the way (and when), the best and worst years, and the same money in a bank deposit.
-- **A one-question quiz** ends each lesson; the right answer marks the lesson done, with a progress bar.
-- **Beginner missions** tick themselves off from the account's history: first Taiwan stock, first ETF, a limit order, an exchange, something abroad, a government bond, a dividend or coupon, three markets at once, a 30-day hold, a monthly plan, a price alert.
-- **A glossary** of 26 terms.
-
-Below it, the reference:
-
-How it works, the fee and tax table for every market, FX spreads and loan rates, order types, trading hours, margin, dividends and splits, passbooks, crypto, how the numbers work, data sources, settings (colours, start over).
+In 紀錄, beside the activity: what a lump sum or a monthly plan in one of the
+well-known funds and stocks would be worth today, with its worst drop, best
+and worst years and a bank deposit to compare.
 
 ## The rules
 
@@ -184,7 +140,7 @@ How it works, the fee and tax table for every market, FX spreads and loan rates,
 | Hours | Each market's own session and holidays from Yahoo; crypto always; government bonds on weekdays in the issuer's business hours |
 | Short selling | Stocks, ETFs, bond ETFs, crypto; 150% initial cover; 3% a year borrow fee; dividends charged; bought back first in a forced sale |
 
-All the rates live in `public/lib/markets.mjs`, and the guide's tables are built from that same file.
+All the rates live in `public/lib/markets.mjs`.
 
 ## How it works
 
@@ -234,7 +190,7 @@ Two devices' copies merge by uniting their logs:
 
 **Offline and installable:** opened from the home screen, the top bar starts below the status bar (`env(safe-area-inset-top)`) and is solid rather than see-through, which iPadOS smeared. `public/sw.js` keeps the page's own files (each stamped version once), and the last prices are saved, so the app opens without a connection and shows when its prices are from; trading and exchanging wait for live prices. It can be installed to a phone's home screen.
 
-**Saves** are gzip-compressed (`codec.mjs`) in `localStorage`. The optional sync goes through Shared-Proxy's `/stock-sync` route (Firestore, 8-character passcode, `sync.mjs`). A backup file can be downloaded and restored (merged, nothing counted twice).
+**Saves** are gzip-compressed (`codec.mjs`) and kept with the Quadra Pass through Shared-Proxy's `/eco` (a copy on the device under the pass). Two devices' copies merge (nothing counted twice).
 
 | File | Purpose |
 | --- | --- |
@@ -247,11 +203,12 @@ Two devices' copies merge by uniting their logs:
 | `public/lib/format.mjs` | Money, prices, percentages, 萬/億, dates |
 | `public/lib/i18n.mjs` | Traditional Chinese and English (follows the browser) |
 | `public/lib/holidays.mjs` | Exchange holiday calendars |
-| `public/lib/games.mjs` | The mini games (ticker match, the fee check) |
+| `public/lib/foryou.mjs` | For you: candidates and their qualities for the shared recommender |
 | `public/lib/quadra.mjs` | Quadra: the pass, the pool, the shell (shared by the four apps) |
 | `public/lib/timemachine.mjs` | The time machine and moving averages |
 | `public/sw.js` | Offline files and alert notifications |
-| `public/lib/sync.mjs`, `codec.mjs` | Sync and compressed saves |
+| `public/lib/quadra.mjs`, `public/quadra.css` | The shared Quadra kit (sign-in, session, pool, recommender; copied from Shared-Proxy's `kit/`) |
+| `public/lib/codec.mjs` | Compressed saves |
 | `public/app.js` | Rendering and wiring |
 
 ## Setup

@@ -6,7 +6,7 @@ import {
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
-  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, moneySources, mergeDistinct
+  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, moneySources, mergeDistinct, requiredCash
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
@@ -14,23 +14,21 @@ import {
 } from './lib/markets.mjs';
 import { BONDS, ISSUERS } from './lib/bonds.mjs';
 import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs';
-import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol } from './lib/quotes.mjs';
+import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol, useSession } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, stackBar, SERIES } from './lib/chart.mjs';
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
-import { LESSONS, MISSIONS, GLOSSARY } from './lib/learn.mjs';
-import { GAMES, earnedToday as gameEarned, roomToday as gameRoom, payRound, scorer, tickerQuestion, feeQuestion, fxQuestion } from './lib/games.mjs';
 import { pack, unpack } from './lib/codec.mjs';
-import { readSync, writeSync, cleanPasscode, isPassCode, readPass, writePass, createPass, dropInbox } from './lib/sync.mjs';
+import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
-  APPS, appUrl, PASS_PATTERN, formatPass, storedPass, storePass, cachedWallet, cacheWallet, poolBalance, poolParts, poolPartName, describeEntry, ecoMerge, ecoTransfer,
-  installGate, watchUpdates, passPanel, randomId as quadraId
+  APPS, appUrl, poolBalance, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
+  affinity, helpUrl, randomId as quadraId
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
-const TABS = ['markets', 'portfolio', 'fx', 'history', 'guide'];
+const TABS = ['markets', 'portfolio', 'fx', 'history'];
 const QUOTE_REFRESH_MS = 45_000;
 const LIST_REFRESH_MS = 90_000;
 const ACTIONS_EVERY_MS = 12 * 3_600_000;
@@ -39,11 +37,8 @@ const STORE = {
   sync: 'stockStudy.syncCode',
   settings: 'stockStudy.settings',
   actions: 'stockStudy.actionsChecked',
-  learn: 'stockStudy.learn',
   quotes: 'stockStudy.quotes'
 };
-// The live examples in the lessons.
-const LEARN_SYMBOLS = ['2330.TW', '0050.TW', '^TNX', 'BTC-USD'];
 
 const locale = detectLocale();
 const t = makeT(locale);
@@ -76,11 +71,10 @@ const state = {
   activityShown: 60,
   bench: null,
   settings: loadSettings(),
-  learn: loadLearn(),
-  // Which folding cards in the Learn tab are open (they survive redraws).
-  openFolds: new Set(['lessons']),
-  sync: { code: null, busy: false, error: null, at: 0 },
-  // The Quadra Pass's wallet (the shared money pool), when the code is a pass.
+  // Which folding cards are open (they survive redraws).
+  openFolds: new Set(),
+  // The Quadra Pass session (quadra.mjs) and its wallet: the one money pool.
+  sync: { busy: false, error: null, at: 0 },
   wallet: null,
   // Company numbers and news per symbol, fetched when its sheet opens.
   about: new Map(),
@@ -101,20 +95,6 @@ function loadSettings() {
     return { updown: locale === 'zh' ? 'tw' : 'us', chart: 'line', ma: true };
   }
 }
-function loadLearn() {
-  try {
-    const l = JSON.parse(localStorage.getItem(STORE.learn) || '{}');
-    return { done: l.done || {}, answers: l.answers || {} };
-  } catch {
-    return { done: {}, answers: {} };
-  }
-}
-function saveLearn() {
-  try {
-    localStorage.setItem(STORE.learn, JSON.stringify(state.learn));
-  } catch {}
-}
-
 function saveSettings() {
   try {
     localStorage.setItem(STORE.settings, JSON.stringify(state.settings));
@@ -125,9 +105,12 @@ function applySettings() {
   document.body.dataset.updown = state.settings.updown;
 }
 
+// The account is kept with the Quadra Pass (synced); this device keeps a
+// copy under the pass so the app opens at once, and offline.
+const accountKey = () => `${STORE.account}:${q.pass}`;
 async function loadAccount() {
   try {
-    const saved = await unpack(localStorage.getItem(STORE.account));
+    const saved = await unpack(localStorage.getItem(accountKey()));
     return isAccount(saved) ? saved : null;
   } catch {
     return null;
@@ -141,11 +124,11 @@ function commit(account, { sync = true } = {}) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
-      if (state.account) localStorage.setItem(STORE.account, await pack(state.account));
-      else localStorage.removeItem(STORE.account);
+      if (state.account) localStorage.setItem(accountKey(), await pack(state.account));
+      else localStorage.removeItem(accountKey());
     } catch {}
   }, 200);
-  if (sync && state.sync.code) {
+  if (sync && q.pass) {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(syncNow, 1200);
   }
@@ -284,7 +267,10 @@ async function refresh({ list = false } = {}) {
   refreshing = (async () => {
     const symbols = coreSymbols();
     const now = Date.now();
-    if (state.tab === 'guide') for (const sym of LEARN_SYMBOLS) symbols.add(sym);
+    if (state.tab === 'markets' && (list || now - (state.listAt.get('home') || 0) > LIST_REFRESH_MS)) {
+      for (const sym of homeSymbols()) symbols.add(sym);
+      state.listAt.set('home', now);
+    }
     if (list || now - (state.listAt.get(state.category) || 0) > LIST_REFRESH_MS) {
       for (const s of listSymbols()) symbols.add(s);
       state.listAt.set(state.category, now);
@@ -348,7 +334,6 @@ function afterPrices() {
 function saveQuotes() {
   try {
     const keep = coreSymbols();
-    for (const sym of LEARN_SYMBOLS) keep.add(sym);
     const quotes = [...state.quotes].filter(([sym]) => keep.has(sym) || sym.endsWith('=X'));
     localStorage.setItem(STORE.quotes, JSON.stringify({ at: state.updated, rates: state.rates, crossFx: [...state.crossFx], quotes }));
   } catch {}
@@ -673,6 +658,62 @@ function valuation() {
 
 // ---- Markets tab ---------------------------------------------------------------------
 
+// The home screen's rows: for you, today's movers, and popular lists, each a
+// row that scrolls sideways (the full lists stay below, by category).
+const homeSymbols = () => {
+  const out = new Set(forYouSymbols());
+  for (const [id, n] of [['tw', 10], ['us', 10], ['twetf', 6], ['usetf', 6], ['crypto', 8]]) for (const [sym] of (CATEGORIES.find(c => c.id === id)?.items || []).slice(0, n)) out.add(sym);
+  return out;
+};
+const forYouSymbols = () =>
+  wantedSymbols({ aff: affinityMap(), held: Object.keys(snap()?.positions || {}), watched: watched(state.account) });
+let affMemo = { at: 0, map: {} };
+function affinityMap() {
+  if (Date.now() - affMemo.at > 30_000) affMemo = { at: Date.now(), map: affinity(state.wallet) };
+  return affMemo.map;
+}
+function recCard(symbol, why) {
+  const q = state.quotes.get(symbol);
+  const info = catalogInfo(symbol);
+  const whyText = why ? t(why.key, { what: why.what ? kindOrCat(why.what) : '' }) : '';
+  return `<button class="q-rec" type="button" data-action="open" data-symbol="${h(symbol)}">
+    ${whyText ? `<span class="q-rec-why">${h(whyText)}</span>` : ''}
+    <p class="q-rec-title">${h(nameOf(symbol, q))}</p>
+    <p class="q-rec-sub">${flagOf(symbol, q)} ${h(bareSymbol(symbol))}${info ? ` · ${h(L(CATEGORIES.find(c => c.id === info.category)))}` : ''}</p>
+    <span class="q-rec-foot"><span class="q-rec-big">${q ? fmtPrice(q.price, q.currency) : '…'}</span>${pctPill(q)}</span>
+    ${q ? `<span class="rec-spark">${sparkline(q.line, q.kind === 'crypto' ? null : q.prev, { width: 200, height: 30 })}</span>` : ''}
+  </button>`;
+}
+const kindOrCat = id => {
+  const cat = CATEGORIES.find(c => c.id === id);
+  return cat ? L(cat) : t(`kind_${id}`);
+};
+function recRow(title, cards, { sub = '', cat = '' } = {}) {
+  if (!cards.length) return '';
+  return `<section class="q-section home-row">
+    <div class="q-section-head"><h2>${h(title)}</h2>${cat ? `<button type="button" data-action="cat" data-id="${h(cat)}">${h(t('seeAll'))}</button>` : ''}</div>
+    ${sub ? `<p class="row-sub-note">${h(sub)}</p>` : ''}
+    <div class="q-recs">${cards.join('')}</div>
+  </section>`;
+}
+function renderHomeRows() {
+  const box = $('home-rows');
+  if (!box) return;
+  if (state.query) return void (box.innerHTML = '');
+  const held = Object.keys(snap()?.positions || {});
+  const recs = forYou({ quotes: state.quotes, held, watched: watched(state.account), wallet: state.wallet, aff: affinityMap(), n: 10 });
+  const pick = (id, n = 10) => (CATEGORIES.find(c => c.id === id)?.items || []).map(i => i[0]).filter(sym => state.quotes.has(sym)).slice(0, n);
+  box.innerHTML = [
+    recRow(t('forYou'), recs.map(r => recCard(r.symbol, r.why)), { sub: t('forYouSub') }),
+    recRow(t('moversUp'), movers(state.quotes, { up: true }).map(q => recCard(q.symbol))),
+    recRow(t('moversDown'), movers(state.quotes, { up: false }).map(q => recCard(q.symbol))),
+    recRow(t('popularTw'), pick('tw').map(sym => recCard(sym)), { cat: 'tw' }),
+    recRow(t('popularUs'), pick('us').map(sym => recCard(sym)), { cat: 'us' }),
+    recRow(t('popularEtf'), [...pick('twetf', 6), ...pick('usetf', 6)].map(sym => recCard(sym)), { cat: 'usetf' }),
+    recRow(t('popularCrypto'), pick('crypto', 8).map(sym => recCard(sym)), { cat: 'crypto' })
+  ].join('');
+}
+
 function renderMarkets() {
   // Overview tiles.
   $('overview').innerHTML = OVERVIEW.map(sym => {
@@ -684,6 +725,7 @@ function renderMarkets() {
     </button>`;
   }).join('');
 
+  renderHomeRows();
   const watch = watched(state.account);
   const chips = [
     ...(watch.length ? [{ id: 'watch', icon: '⭐', zh: '自選', en: 'Watchlist' }] : []),
@@ -746,6 +788,7 @@ function renderSearch() {
 // ---- Detail sheet: chart, facts, trade ticket ------------------------------------------
 
 async function openDetail(symbol) {
+  track(null, symbolKeys(symbol), 1);
   const q0 = state.quotes.get(symbol);
   const held = snap()?.positions[symbol];
   state.detail = {
@@ -1077,7 +1120,7 @@ function planHistoryHtml(plan) {
 function addAlert() {
   const d = state.detail;
   const q = state.quotes.get(d.symbol);
-  if (!state.account) return showSetup();
+  if (!state.account) return;
   const price = Number(state.alertPrice);
   const r = setAlert(state.account, { symbol: d.symbol, op: price > q.price ? 'above' : 'below', price });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
@@ -1091,7 +1134,7 @@ function addAlert() {
 function addPlan() {
   const d = state.detail;
   const q = state.quotes.get(d.symbol);
-  if (!state.account) return showSetup();
+  if (!state.account) return;
   const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
   commit(r.account);
@@ -1341,19 +1384,29 @@ function ticketInfo() {
   const est = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref }) : null;
   const cash = Math.max(0, avail.cash[q.currency] || 0);
   const shares = Math.max(0, avail.qty[d.symbol] || 0);
-  // Largest quantity whose all-in cost fits the cash.
+  // Largest quantity whose held amount fits the cash, NT$ that could be
+  // exchanged for it included.
+  const fromTwd = q.currency !== BASE && state.rates[q.currency] ? quoteExchange(BASE, q.currency, Math.max(0, avail.cash[BASE] || 0), state.rates, state.fxOpen)?.received || 0 : 0;
+  const spendable = cash + fromTwd;
+  const holdFor = n => requiredCash({ type: d.type, qty: n, limit: Number(d.limit), stop: Number(d.stop) }, q, Date.now()).reserve;
   let max = 0;
   if (ref > 0) {
     const step = qtyStep(q.kind);
-    const perUnit = dealPrice(q.market, 'buy', ref) * (1 + ((MARKETS[q.market] || MARKETS.INTL).commission.rate || 0) + 0.006);
-    max = roundQty(cash / perUnit, q.kind);
-    while (max > 0 && estimate({ market: q.market, kind: q.kind, currency: q.currency, side: 'buy', qty: max, price: ref }).total > cash) max = roundQty(max - (step >= 1 ? 1 : max * 0.001), q.kind);
+    const perUnit = dealPrice(q.market, 'buy', ref) * (1 + ((MARKETS[q.market] || MARKETS.INTL).commission.rate || 0) + 0.006) * 1.03;
+    max = roundQty(spendable / perUnit, q.kind);
+    while (max > 0 && holdFor(max) > spendable) max = roundQty(max - (step >= 1 ? 1 : max * 0.001), q.kind);
   }
-  const short = d.side === 'buy' && est ? Math.max(0, est.total - cash) : 0;
+  // Exactly what the order will hold (placeOrder checks the same figure):
+  // the estimate, plus a 3% buffer when it has to wait for its market.
+  const req = d.side === 'buy' && est ? requiredCash({ type: d.type, qty, limit: Number(d.limit), stop: Number(d.stop) }, q, Date.now()) : null;
+  const need = req ? req.reserve : 0;
+  const short = d.side === 'buy' && est ? Math.max(0, need - cash) : 0;
+  // Short of this currency but holding NT$: the exchange that covers it
+  // (spread included), done with the order in one tap.
   let topUp = null;
   if (short > 0 && q.currency !== BASE && state.rates[q.currency]) {
-    const need = amountFor(BASE, q.currency, short, state.rates, state.fxOpen);
-    if (need && (avail.cash[BASE] || 0) >= need) topUp = { need, get: short };
+    const pay = amountFor(BASE, q.currency, short, state.rates, state.fxOpen);
+    if (pay) topUp = { need: pay, get: short, enough: (avail.cash[BASE] || 0) >= pay, have: avail.cash[BASE] || 0 };
   }
   // How much can be sold short on top of what's held.
   let shortRoom = 0;
@@ -1362,7 +1415,7 @@ function ticketInfo() {
     const room = Math.max(0, (v.assets - 1.5 * (v.debtTWD + v.shortTWD)) / 0.5);
     shortRoom = v.margin === 'ok' ? roundQty(room / (q.price * state.rates[q.currency]), q.kind) : 0;
   }
-  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom };
+  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need };
 }
 
 function renderTicket() {
@@ -1370,10 +1423,10 @@ function renderTicket() {
   const d = state.detail;
   if (!box || !d) return;
   if (!state.account) {
-    box.innerHTML = `<div class="card ticket"><p>${h(t('needAccount'))}</p><button class="primary-button" type="button" data-action="setup">${h(t('openAccount'))}</button></div>`;
+    box.innerHTML = `<div class="card ticket"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
     return;
   }
-  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom } = ticketInfo();
+  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need } = ticketInfo();
   const open = isOpen(q);
   const unit = unitOf(d.symbol);
   const presets =
@@ -1402,7 +1455,7 @@ function renderTicket() {
   const shorting = d.side === 'sell' && qty > shares + 1e-9;
   if (shorting && !isShortable(q.kind)) problems.push(t('notEnoughShares', { have: fmtQty(shares) }));
   else if (shorting && qty > shares + shortRoom + 1e-9) problems.push(t('shortTooBig', { max: fmtQty(shares + shortRoom) }));
-  if (short > 0) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));
+  if (short > 0 && !topUp?.enough) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));
   if (d.qty && Math.abs(roundQty(qty, q.kind) - qty) > qtyStep(q.kind) * 1e-3) problems.push(t('err_qtyStep'));
   // The exchange's rules for the price typed.
   const typed = d.type === 'limit' ? Number(d.limit) : d.type === 'stop' ? Number(d.stop) : null;
@@ -1412,7 +1465,7 @@ function renderTicket() {
     if (!onTick(typed, tick)) problems.push(t('err_tick', { tick: num(tick, 4, 0) }));
     else if (band && d.type === 'limit' && (typed > band.up + 1e-9 || typed < band.down - 1e-9)) problems.push(t('err_priceLimit', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }));
   }
-  const canPlace = est && !problems.length;
+  const canPlace = est && !problems.length && !(short > 0);
   const rate = state.rates[q.currency];
   box.innerHTML = `<div class="card ticket">
     <div class="ticket-top">
@@ -1434,17 +1487,23 @@ function renderTicket() {
     ${
       est
         ? `<dl class="preview">${lines.map(([k, v]) => `<div><dt>${h(k)}</dt><dd class="num">${h(v)}</dd></div>`).join('')}
-        <div class="preview-total"><dt>${h(d.side === 'buy' ? t('totalCost') : t('totalProceeds'))}</dt><dd class="num"><strong>${h(money(est.total, q.currency))}</strong>${rate && q.currency !== BASE ? `<small>≈ ${h(money(est.total * rate, BASE))}</small>` : ''}</dd></div></dl>`
+        <div class="preview-total"><dt>${h(d.side === 'buy' ? t('totalCost') : t('totalProceeds'))}</dt><dd class="num"><strong>${h(money(est.total, q.currency))}</strong>${rate && q.currency !== BASE ? `<small>≈ ${h(money(est.total * rate, BASE))}</small>` : ''}</dd></div>
+        ${req && req.buffer > 0 ? `<div class="preview-held"><dt>${h(t('heldUntilFill'))}<small>${h(t('bufferNote'))}</small></dt><dd class="num"><strong>${h(money(need, q.currency))}</strong></dd></div>` : ''}
+        ${d.side === 'buy' ? `<div class="preview-have ${short > 0 ? 'short' : ''}"><dt>${h(t('youHave', { amount: '' }).trim())}</dt><dd class="num">${h(money(cash, q.currency))}</dd></div>` : ''}</dl>`
         : ''
     }
     ${shorting && isShortable(q.kind) && !problems.length ? `<p class="note">${h(t('shortNote', { qty: fmtQty(qty - shares), unit, fee: rateText(SHORT_FEE) }))}</p>` : ''}
     ${problems.map(p => `<p class="warn">${h(p)}</p>`).join('')}
-    ${topUp ? `<button class="ghost-button topup" type="button" data-action="topup" data-need="${topUp.need}" data-cur="${h(q.currency)}">${h(t('topUp', { get: money(topUp.get, q.currency), pay: money(topUp.need, BASE) }))}</button>` : ''}
+    ${topUp?.enough ? `<p class="note">${h(t('autoFxLine', { pay: money(topUp.need, BASE), get: money(topUp.get, q.currency) }))}</p>` : ''}
     ${!open ? `<p class="note">${h(q.kind === 'metal' ? t('closedMetal') : t('closedQueue'))}</p>` : ''}
     ${qty > 0 && isOddLot(q.market, q.kind, qty) ? `<p class="note">${h(open && !oddLotOpen(Date.now()) ? t('oddLotWait') : t('oddLotNote'))}</p>` : ''}
     ${d.type !== 'limit' && est ? `<p class="note">${h(t('spreadNote', { price: fmtPrice(ref, q.currency), last: fmtPrice(last, q.currency) }))}</p>` : ''}
     ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
-    <button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>
+    ${
+      topUp?.enough && est && !problems.length
+        ? `<button class="primary-button place ${d.side}" type="button" data-action="place-fx" data-need="${topUp.need}" ${pricesLive() ? '' : 'disabled'}>${h(t('autoFx'))}</button>`
+        : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
+    }
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
   </div>`;
 }
@@ -1461,6 +1520,7 @@ function placeFromTicket() {
     d.msg = { kind: 'bad', text: errorText(r) };
   } else {
     commit(r.account);
+    track('trade', symbolKeys(d.symbol), 3);
     if (r.fill) {
       d.msg = { kind: 'good', text: t('filledMsg', { side: t(r.fill.side), qty: fmtQty(r.fill.qty), price: fmtPrice(r.fill.price, r.fill.currency), total: money(r.fill.total, r.fill.currency) }) };
       toast(d.msg.text, 'good');
@@ -1502,7 +1562,7 @@ function errorText(r) {
 function renderPortfolio() {
   const box = $('portfolio-body');
   if (!state.account) {
-    box.innerHTML = setupCardHtml();
+    box.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
     return;
   }
   const v = valuation();
@@ -1537,7 +1597,6 @@ function renderPortfolio() {
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
       </div>
     </div>
-    ${!state.sync.code && !standalone() && Date.now() - state.account.created > 2 * 86_400_000 ? `<div class="card safety-card"><p>🛟 ${h(t('safetyNote'))}</p><button class="ghost-button" type="button" data-action="sync-create">${h(t('syncCreate'))}</button></div>` : ''}
     ${marginCardHtml(v)}
     <div class="two-col">
       <div class="card">
@@ -1553,7 +1612,7 @@ function renderPortfolio() {
     </div>
     <div class="card">
       <h3 class="card-title">${h(t('positions'))} <span class="count">${v.positions.length}</span></h3>
-      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><button class="ghost-button" type="button" data-action="goto" data-tab="guide">${h(t('newHere'))}</button></div></div>`}
+      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><a class="ghost-button" href="${h(helpUrl('stock'))}" data-go="vocab" data-hash="help=stock">${h(t('newHere'))}</a></div></div>`}
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
     ${pendingDivHtml()}
@@ -1566,9 +1625,7 @@ function renderPortfolio() {
     </div>
     ${poolCardHtml()}
     ${sourcesCardHtml()}
-    ${syncCardHtml()}
   `;
-  mountPassPanel();
   renderNetWorthChart(v, s);
 }
 
@@ -1795,7 +1852,7 @@ function renderFx() {
     <div class="two-col">
       <div class="card fx-card">
         <h3 class="card-title">${h(t('exchangeTitle'))}</h3>
-        ${!state.account ? `<p>${h(t('needAccount'))}</p><button class="primary-button" type="button" data-action="setup">${h(t('openAccount'))}</button>` : `
+        ${!state.account ? `<p>${h(t('needAccount'))}</p><div class="spinner"></div>` : `
         <label class="field"><span>${h(t('fxFrom'))}</span><select id="fx-from">${currencyOptions(f.from)}</select></label>
         <div class="segmented fx-mode" role="group" aria-label="${h(t('fxModeLabel'))}">
           <button type="button" data-action="fx-mode" data-mode="pay" aria-pressed="${f.mode !== 'get'}">${h(t('fxModePay', { cur: f.from }))}</button>
@@ -2019,11 +2076,16 @@ const ACTIVITY_FILTERS = {
 function renderHistory() {
   const box = $('history-body');
   if (!state.account) {
-    box.innerHTML = setupCardHtml();
+    box.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
     return;
   }
-  const views = ['activity', 'orders', 'stats'];
+  const views = ['activity', 'orders', 'stats', 'tm'];
   const tabs = `<div class="segmented history-tabs" role="group">${views.map(x => `<button type="button" data-action="hview" data-view="${x}" aria-pressed="${state.historyView === x}">${h(t(`hview_${x}`))}</button>`).join('')}</div>`;
+  if (state.historyView === 'tm') {
+    box.innerHTML = `${tabs}${tmHtml()}`;
+    renderTmChart();
+    return;
+  }
   if (state.historyView === 'orders') {
     const open = state.account.orders.filter(o => o.status === 'open').reverse();
     const done = state.account.orders.filter(o => o.status !== 'open').reverse().slice(0, 100);
@@ -2186,120 +2248,10 @@ async function renderBench() {
   if ($('bench')) draw();
 }
 
-// ---- Guide tab ----------------------------------------------------------------------------
-
+// A folding card that remembers being opened or closed across redraws.
 function fold(icon, title, body, open = false, id = title) {
   const isOpen = state.openFolds.has(id) || (open && !state.openFolds.has(`closed:${id}`));
   return `<details class="card fold" data-fold="${h(id)}"${isOpen ? ' open' : ''}><summary><span class="fold-icon">${icon}</span><h2>${h(title)}</h2></summary><div class="guide-text">${body}</div></details>`;
-}
-const para = key => `<p>${h(t(key))}</p>`;
-
-function feeTable() {
-  const rows = Object.entries(MARKETS).map(([id, m]) => {
-    const cur = m.currency || '—';
-    const taxes = [];
-    for (const side of ['buy', 'sell'])
-      for (const [kind, r] of Object.entries(m[side] || {})) {
-        if (r.tax) taxes.push(`${t(side)}${kind === 'all' ? '' : `（${kindLabel(kind)}）`} ${rateText(r.tax)}`);
-        if (r.fee && kind === 'all') taxes.push(`${t('exchangeFee')} ${rateText(r.fee)}`);
-      }
-    if (m.spread) taxes.push(t('feeSpread', { rate: rateText(m.spread) }));
-    return `<tr><td>${m.flag} ${h(L(m))}</td><td>${h(cur)}</td><td class="num">${m.commission.rate ? h(rateText(m.commission.rate)) : '0'}${m.commission.min ? ` <small>(${h(t('minShort'))} ${h(money(m.commission.min, m.currency || 'USD'))})</small>` : ''}</td><td>${h(taxes.join('、') || '—')}</td><td class="num">${h(rateText(m.withholding || 0))}</td></tr>`;
-  });
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>${h(t('market'))}</th><th>${h(t('currency'))}</th><th>${h(t('commission'))}</th><th>${h(t('taxesFees'))}</th><th>${h(t('divWithholding'))}</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
-}
-
-function fxTable() {
-  const rows = Object.entries(CURRENCIES)
-    .filter(([c]) => c !== BASE)
-    .map(([c, info]) => `<tr><td>${info.flag} ${h(c)} · ${h(L(info))}</td><td class="num">${h(rateText(info.spread))}</td><td class="num">${h(rateText(info.spread * CLOSED_FX_MULTIPLIER))}</td><td class="num">${h(rateText(info.loanRate))}</td></tr>`);
-  rows.unshift(`<tr><td>${CURRENCIES.TWD.flag} TWD · ${h(L(CURRENCIES.TWD))}</td><td class="num">—</td><td class="num">—</td><td class="num">${h(rateText(CURRENCIES.TWD.loanRate))}</td></tr>`);
-  return `<div class="table-wrap"><table class="table"><thead><tr><th>${h(t('currency'))}</th><th>${h(t('spread'))}</th><th>${h(t('spreadClosed'))}</th><th>${h(t('loanRateCol'))}</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
-}
-
-// ---- Learn: lessons with live examples, quizzes, missions, glossary -------------------------
-
-// Live numbers for the lessons' {placeholders}.
-function lessonContext() {
-  const q = sym => state.quotes.get(sym);
-  const tsmc = q('2330.TW')?.price;
-  const lot = tsmc ? tsmc * 1000 : null;
-  const buy = lot ? tradeCostsFor('TW', 'buy', 'stock', lot) : null;
-  const sell = lot ? tradeCostsFor('TW', 'sell', 'stock', lot) : null;
-  const fv = (monthly, rate, years) => (rate ? monthly * (((1 + rate / 12) ** (years * 12) - 1) / (rate / 12)) : monthly * years * 12);
-  return {
-    tsmc: tsmc ? money(tsmc, BASE) : '—',
-    tsmcLot: lot ? money(lot, BASE) : '—',
-    tsmcFee: buy ? money(buy, BASE) : '—',
-    tsmcSellCost: sell ? money(sell, BASE) : '—',
-    roundTrip: lot ? (locale === 'zh' ? `${money(buy + sell, BASE)}（${pct((buy + sell) / lot, { sign: false })}）` : `${money(buy + sell, BASE)} (${pct((buy + sell) / lot, { sign: false })})`) : '—',
-    tsmcStop: tsmc ? money(tsmc * 0.9, BASE) : '—',
-    etf: q('0050.TW') ? money(q('0050.TW').price, BASE, { digits: 2 }) : '—',
-    usd: state.rates.USD ? num(state.rates.USD, 2) : '—',
-    us10y: q('^TNX') ? `${num(q('^TNX').price, 2)}%` : '—',
-    btc: q('BTC-USD') ? money(q('BTC-USD').price, 'USD', { digits: 0 }) : '—',
-    saved: money(fv(10_000, 0, 30), BASE),
-    compound6: money(Math.round(fv(10_000, 0.06, 30) / 10_000) * 10_000, BASE)
-  };
-}
-function tradeCostsFor(market, side, kind, gross) {
-  return estimate({ market, kind, currency: BASE, side, qty: 1, price: gross }).costs;
-}
-const fillText = (text, ctx) => text.replace(/\{(\w+)\}/g, (m, k) => ctx[k] ?? m);
-
-function lessonHtml(lesson, ctx) {
-  const answered = state.learn.answers[lesson.id];
-  const done = state.learn.done[lesson.id];
-  const quiz = lesson.quiz;
-  const tries = lesson.try
-    .map(([kind, target]) =>
-      kind === 'open'
-        ? `<button class="ghost-button" type="button" data-action="open" data-symbol="${h(target)}">${h(t('tryOpen', { name: nameOf(target) }))}</button>`
-        : `<button class="ghost-button" type="button" data-action="goto" data-tab="${h(target)}">${h(t('tryGoto', { tab: t(`tab_${target}`) }))}</button>`
-    )
-    .join('');
-  const options = quiz.options
-    .map((o, i) => {
-      const cls = answered == null ? '' : i === quiz.answer ? ' right' : i === answered ? ' wrong' : '';
-      return `<button class="quiz-option${cls}" type="button" data-action="quiz" data-lesson="${h(lesson.id)}" data-i="${i}" ${answered != null && done ? 'disabled' : ''}>${h(L(o))}</button>`;
-    })
-    .join('');
-  const feedback = answered == null ? '' : `<p class="${answered === quiz.answer ? 'ok-msg' : 'warn'}">${h(answered === quiz.answer ? t('quizRight') : t('quizWrong'))} ${h(L(quiz.why))}</p>`;
-  return `<details class="card fold lesson${done ? ' done' : ''}" data-fold="lesson:${h(lesson.id)}"${state.openFolds.has(`lesson:${lesson.id}`) ? ' open' : ''}>
-    <summary><span class="fold-icon">${lesson.icon}</span><h2>${h(L(lesson.title))}</h2>${done ? '<span class="lesson-check" aria-label="done">✓</span>' : ''}</summary>
-    <div class="guide-text">
-      ${lesson.body[locale === 'zh' ? 'zh' : 'en'].map(p => `<p>${h(fillText(p, ctx))}</p>`).join('')}
-      <div class="button-row">${tries}</div>
-      <div class="quiz"><p class="quiz-q">🤔 ${h(L(quiz.q))}</p><div class="quiz-options">${options}</div>${feedback}</div>
-    </div>
-  </details>`;
-}
-
-function learnHtml() {
-  const ctx = lessonContext();
-  const doneCount = LESSONS.filter(l => state.learn.done[l.id]).length;
-  const missions = MISSIONS.map(m => ({ ...m, ok: m.done(state.account) }));
-  const missionCount = missions.filter(m => m.ok).length;
-  const next = LESSONS.find(l => !state.learn.done[l.id]);
-  return `
-    <div class="card learn-hero">
-      <h2>${h(t('learnTitle'))}</h2>
-      <p>${h(t('learnIntro'))}</p>
-      <div class="learn-progress">
-        <div><span>${h(t('lessonsDone'))}</span><strong class="num">${doneCount} / ${LESSONS.length}</strong><div class="gauge"><span class="gauge-fill ok" style="width:${(doneCount / LESSONS.length) * 100}%"></span></div></div>
-        <div><span>${h(t('missionsDone'))}</span><strong class="num">${missionCount} / ${MISSIONS.length}</strong><div class="gauge"><span class="gauge-fill ok" style="width:${(missionCount / MISSIONS.length) * 100}%"></span></div></div>
-      </div>
-      ${next ? `<button class="hero-button" type="button" data-action="lesson" data-lesson="${h(next.id)}">${h(doneCount ? t('continueLesson', { title: L(next.title) }) : t('startLesson'))}</button>` : `<p>${h(t('allLessonsDone'))}</p>`}
-    </div>
-    ${tmHtml()}
-    <h2 class="section-heading">${h(t('lessonsTitle'))}</h2>
-    ${LESSONS.map(l => lessonHtml(l, ctx)).join('')}
-    <h2 class="section-heading">${h(t('missionsTitle'))}</h2>
-    <div class="card"><p class="lede">${h(t('missionsIntro'))}</p><ul class="missions">${missions
-      .map(m => `<li class="${m.ok ? 'done' : ''}"><span class="mission-box">${m.ok ? '✓' : ''}</span>${h(L(m))}</li>`)
-      .join('')}</ul></div>
-    ${fold('📖', t('glossaryTitle'), `<dl class="glossary">${GLOSSARY.map(([term, zh, en]) => `<div><dt>${h(term)}</dt><dd>${h(locale === 'zh' ? zh : en)}</dd></div>`).join('')}</dl>`, false, 'glossary')}
-    <h2 class="section-heading">${h(t('referenceTitle'))}</h2>`;
 }
 
 // ---- Time machine -------------------------------------------------------------------
@@ -2373,7 +2325,7 @@ async function runTimeMachine() {
   if (!(amount >= 100)) return toast(t('err_amount'), 'bad');
   tm.loading = true;
   tm.error = false;
-  renderGuide();
+  if (state.tab === 'history') renderHistory();
   try {
     const symbol = tm.symbol;
     const chart = await fetchChart(symbol, 'max');
@@ -2404,281 +2356,100 @@ async function runTimeMachine() {
     tm.result = null;
   }
   tm.loading = false;
-  if (state.tab === 'guide') {
-    renderGuide();
+  if (state.tab === 'history') {
+    renderHistory();
     $('tm-result')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 }
 
-function answerQuiz(id, i) {
-  const lesson = LESSONS.find(l => l.id === id);
-  if (!lesson) return;
-  state.learn.answers[id] = i;
-  if (i === lesson.quiz.answer) {
-    state.learn.done[id] = true;
-    toast(t('lessonDoneToast', { title: L(lesson.title) }), 'good');
-  }
-  saveLearn();
-  renderGuide();
-}
-
-// ---- Mini games (小遊戲) -------------------------------------------------------------
+// ---- The Quadra Pass: the account lives with it ------------------------------------------
 //
-// Drawn in their own box (#games-body), apart from the guide, so a price
-// refresh redrawing the guide never interrupts a round.
+// Signing in is required (quadra.mjs shows the sign-in screen). The account
+// is this app's data on the pass; the pass's wallet is the one Quadra money
+// pool, which this account's NT$ cash shows: the other apps' money (Play's
+// bets and winnings, Rewards' earnings, Quadra's own pay, transfers)
+// arrives as pool deposits, and this account's own NT$ goes back to the
+// wallet as its figure.
 
-function renderGames() {
-  const box = $('games-body');
-  if (!box) return;
-  const g = state.game;
-  const earned = state.account ? gameEarned(state.account) : 0;
-  const cap = GAMES.dailyCap;
-  if (g?.live) return renderGameRound();
-  const last = g?.done ? `<p class="note">${h(t('sgRoundDone', { n: g.right, v: money(g.paid, BASE) }))}</p>` : '';
-  box.innerHTML = `<div class="card games-card">
-    <h3 class="card-title">🎮 ${h(t('sgTitle'))}</h3>
-    <p class="lede">${h(t('sgIntro', { cap: money(cap, BASE) }))}</p>
-    <div class="games-cap"><div class="games-cap-bar"><span style="width:${Math.min(100, (earned / cap) * 100)}%"></span></div><small>${h(earned >= cap ? t('sgCapped') : t('sgEarned', { v: money(earned, BASE), cap: money(cap, BASE) }))}</small></div>
-    ${last}
-    <div class="games-tiles">${GAMES.list
-      .map(game => `<button class="games-tile" type="button" data-action="game-start" data-game="${game}" ${state.account && earned < cap ? '' : 'disabled'}><span class="games-icon" aria-hidden="true">${{ ticker: '🔤', fee: '🧾', fx: '💱' }[game]}</span><strong>${h(t(`sg_${game}`))}</strong><small>${h(t(`sgHow_${game}`))}</small></button>`)
-      .join('')}</div>
-    ${state.account ? '' : `<p class="muted">${h(t('needAccount'))}</p>`}
-  </div>`;
-}
+const q = quadraSession('stock', { lang: locale });
+useSession(q);
 
-function startGame(game) {
-  if (!state.account || gameRoom(state.account) <= 0) return;
-  state.game = { live: true, game, round: quadraId(), score: scorer(game), right: 0, wrong: 0, paid: 0, ends: Date.now() + GAMES.roundSeconds * 1000, q: null, feedback: null };
-  nextQuestion();
-  clearInterval(state.gameTimer);
-  state.gameTimer = setInterval(() => {
-    if (!state.game?.live) return clearInterval(state.gameTimer);
-    if (Date.now() >= state.game.ends) endGame();
-    else {
-      const left = $('game-left');
-      if (left) left.textContent = String(Math.ceil((state.game.ends - Date.now()) / 1000));
-    }
-  }, 250);
-  renderGames();
-  $('games-body').scrollIntoView({ block: 'start', behavior: 'smooth' });
-}
-
-function nextQuestion() {
-  const g = state.game;
-  g.q = g.game === 'ticker' ? tickerQuestion() : g.game === 'fx' ? fxQuestion(Math.random, liveMids()) : feeQuestion();
-}
-
-// Today's mid rates (NT$ a unit) for the exchange game, where they're loaded.
-function liveMids() {
-  const out = {};
-  for (const c of Object.keys(CURRENCIES)) {
-    const q = state.quotes.get(fxSymbol(c));
-    if (q?.price > 0) out[c] = q.price;
-  }
-  return out;
-}
-
-function answerGame(choice) {
-  const g = state.game;
-  if (!g?.live || !g.q) return;
-  const right = String(choice) === String(g.q.answer);
-  const change = right ? g.score.right() : g.score.wrong();
-  if (right) g.right++;
-  else g.wrong++;
-  g.feedback = { right, answer: g.q.answer, change };
-  const r = payRound(state.account, g.round, g.game, g.score.total);
-  g.paid = r.paid;
-  if (r.account !== state.account) commit(r.account);
-  if (gameRoom(state.account) <= 0 && !right) return endGame();
-  nextQuestion();
-  renderGameRound();
-  if (gameRoom(state.account) <= 0) endGame();
-}
-
-function endGame() {
-  const g = state.game;
-  if (!g) return;
-  clearInterval(state.gameTimer);
-  state.game = { ...g, live: false, done: true };
-  if (g.paid > 0) toast(t('sgRoundDone', { n: g.right, v: money(g.paid, BASE) }), 'good');
-  renderGames();
-  render();
-}
-
-function renderGameRound() {
-  const g = state.game;
-  const q = g.q;
-  const prompt =
-    g.game === 'ticker'
-      ? `<p class="game-ask">${h(t('sgAsk_ticker'))}</p><p class="game-subject">${h(locale === 'zh' ? q.name[0] : q.name[1])}${q.name[0] !== q.name[1] ? ` <small>${h(locale === 'zh' ? q.name[1] : q.name[0])}</small>` : ''}</p>`
-      : g.game === 'fx'
-        ? `<p class="game-ask">${h(t(q.side === 'buy' ? 'sgAsk_fxBuy' : 'sgAsk_fxSell'))}</p><p class="game-subject">${h(t(q.side === 'buy' ? 'sgFxBuy' : 'sgFxSell', { amount: money(q.amount, q.currency) }))}</p><p class="muted small">${h(t('sgFxQuote', { cur: q.currency, sell: num(q.sell, 4), buy: num(q.buy, 4), mid: num(q.mid, 4) }))}</p>`
-      : `<p class="game-ask">${h(t('sgAsk_fee'))}</p><p class="game-subject">${h(t('sgTrade', { side: t(q.side), qty: num(q.qty, 0), kind: t(`kind_${q.kind}`), price: fmtPrice(q.price, BASE), gross: money(q.gross, BASE) }))}</p>`;
-  const fb = g.feedback;
-  $('games-body').innerHTML = `<div class="card games-card live">
-    <div class="game-head"><strong>${h(t(`sg_${g.game}`))}</strong><span class="game-clock">⏱ <span id="game-left">${Math.ceil((g.ends - Date.now()) / 1000)}</span>s</span><span class="num">${h(money(g.paid, BASE))}</span><button class="ghost-button small" type="button" data-action="game-end">${h(t('sgStop'))}</button></div>
-    ${prompt}
-    <div class="game-options">${q.options.map(o => `<button class="game-option num" type="button" data-action="game-answer" data-choice="${h(String(o))}">${h(g.game === 'ticker' ? String(o) : money(o, BASE))}</button>`).join('')}</div>
-    <p class="game-feedback ${fb ? (fb.right ? 'up-ink' : 'down-ink') : ''}">${fb ? h(fb.right ? t('sgRight', { v: money(fb.change, BASE, { digits: Number.isInteger(fb.change) ? 0 : 1 }) }) : t('sgWrong', { a: g.game === 'ticker' ? fb.answer : money(fb.answer, BASE) })) : '&nbsp;'}</p>
-    <p class="muted small">${h(t('sgStreak', { n: g.score.streak }))}</p>
-  </div>`;
-}
-
-function renderGuide() {
-  renderGames();
-  const collateral = Object.entries(COLLATERAL).map(([k, x]) => `${kindLabel(k)} ${pct(x, { digits: 0, sign: false })}`).join('、');
-  $('guide-body').innerHTML = [
-    learnHtml(),
-    fold('🚀', t('g_start'), ['g_start1', 'g_start2', 'g_start3', 'g_start4'].map(para).join('')),
-    fold('💸', t('g_fees'), `${para('g_fees1')}${feeTable()}${para('g_fees2')}`),
-    fold('💱', t('g_fx'), `${para('g_fx1')}${fxTable()}${para('g_fx2')}`),
-    fold('💵', t('g_payday'), ['g_payday1', 'g_payday2'].map(para).join('')),
-    fold('🏛️', t('g_real'), ['g_real1', 'g_real2', 'g_real3', 'g_real4', 'g_real5'].map(para).join('')),
-    fold('📝', t('g_orders'), ['g_orders1', 'g_orders2', 'g_orders3', 'g_orders4'].map(para).join('')),
-    fold('💹', t('g_forex'), ['g_forex1', 'g_forex2', 'g_forex3'].map(para).join('')),
-    fold('🕘', t('g_hours'), ['g_hours1', 'g_hours2'].map(para).join('')),
-    fold('🏛️', t('g_bonds'), ['g_bonds1', 'g_bonds2', 'g_bonds3'].map(para).join('')),
-    fold('📉', t('g_short'), ['g_short1', 'g_short2'].map(para).join('')),
-    fold('🏦', t('g_loans'), `${para('g_loans1')}<p>${h(t('g_loans2', { list: collateral }))}</p><p>${h(t('g_loans3', { call: pct(MARGIN_CALL, { digits: 0, sign: false }), sell: pct(MARGIN_LIQUIDATE, { digits: 0, sign: false }) }))}</p>${para('g_loans4')}`),
-    fold('💰', t('g_div'), `${para('g_div1')}<p>${h(t('g_div2', { rate: pct(NHI_RATE, { sign: false }), min: money(NHI_THRESHOLD, BASE) }))}</p>${para('g_div3')}`),
-    fold('🥇', t('g_metal'), ['g_metal1', 'g_metal2'].map(para).join('')),
-    fold('🪙', t('g_crypto'), ['g_crypto1', 'g_crypto2'].map(para).join('')),
-    fold('📊', t('g_numbers'), ['g_numbers1', 'g_numbers2', 'g_numbers3'].map(para).join('')),
-    fold('🛰️', t('g_data'), ['g_data1', 'g_data2', 'g_data3'].map(para).join('')),
-    fold('⚙️', t('g_settings'), `<div class="setting"><span>${h(t('updownLabel'))}</span><div class="segmented" role="group"><button type="button" data-action="updown" data-v="tw" aria-pressed="${state.settings.updown === 'tw'}">${h(t('updownTw'))}</button><button type="button" data-action="updown" data-v="us" aria-pressed="${state.settings.updown === 'us'}">${h(t('updownUs'))}</button></div></div>
-      ${appSettingsHtml()}`),
-    `<p class="disclaimer">${h(t('disclaimer'))}</p>`
-  ].join('');
-  renderTmChart();
-}
-
-// Installing the page as an app, and notifications for price alerts.
-const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
-function appSettingsHtml() {
-  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
-  const install = standalone()
-    ? `<p class="muted">${h(t('installed'))}</p>`
-    : state.installPrompt
-      ? `<button class="ghost-button" type="button" data-action="install">${h(t('installApp'))}</button>`
-      : `<p class="muted">${h(ios ? t('installIos') : t('installOther'))}</p>`;
-  const perm = 'Notification' in window ? Notification.permission : 'unsupported';
-  const notifyCtl =
-    perm === 'granted'
-      ? `<p class="muted">${h(t('notifyOn'))}</p>`
-      : perm === 'default'
-        ? `<button class="ghost-button" type="button" data-action="notify-on">${h(t('notifyEnable'))}</button>`
-        : `<p class="muted">${h(perm === 'denied' ? t('alertNoNotify') : t('notifyUnsupported'))}</p>`;
-  return `<div class="setting"><span>${h(t('installLabel'))}</span>${install}</div><div class="setting"><span>${h(t('notifyLabel'))}</span>${notifyCtl}</div>`;
-}
-async function installApp() {
-  const p = state.installPrompt;
-  if (!p) return;
-  state.installPrompt = null;
-  try {
-    await p.prompt();
-    await p.userChoice;
-  } catch {}
-  renderGuide();
-}
-
-// ---- Account setup ------------------------------------------------------------------------
-
-function setupCardHtml() {
-  return `<div class="card setup-card">
-    <h3 class="card-title">${h(t('setupTitle'))}</h3>
-    <p class="lede">${h(t('setupIntroFixed', { amount: money(START_AMOUNT, BASE) }))}</p>
-    <div class="start-offer">
-      <strong class="num">${h(money(START_AMOUNT, BASE))}</strong>
-      <small>${h(t('paydayPreset', { amount: money(incomeAmount(), BASE) }))}</small>
-    </div>
-    <p class="note">💵 ${h(t('paydayFixed', { amount: money(incomeAmount(), BASE) }))}</p>
-    <div class="button-row"><button class="primary-button" type="button" data-action="start">${h(t('openAccount'))}</button></div>
-    <hr />
-    <p class="muted">${h(t('haveCode'))}</p>
-    <form class="custom-start" data-form="link">
-      <label class="field grow"><span>${h(t('passOrCode'))}</span><input id="link-code" autocomplete="off" autocapitalize="characters" placeholder="XXXXX-XXXXX" /></label>
-      <button class="ghost-button" type="submit">${h(t('linkDevice'))}</button>
-    </form>
-  </div>`;
-}
-
-function openAccount() {
-  const amount = START_AMOUNT;
-  commit(newAccount(amount));
+// The first time this pass opens Securities: an account of its own, funded
+// by the pool (a pass from before Quadra paid the opening money gets
+// Securities' own NT$100,000, as it always did).
+function ensureAccount(wallet) {
+  if (state.account) return;
+  const fundedByQuadra = (wallet?.entries || []).some(e => e.id === 'eco:start');
+  commit(newAccount(fundedByQuadra ? 0 : START_AMOUNT), { sync: false });
   state.bench = null;
-  if ($('setup').open) $('setup').close();
-  toast(t('opened', { amount: money(amount, BASE) }), 'good');
-  afterPrices();
-  render();
-  if (state.detail) renderDetail();
-  // With a Quadra Pass already on this browser, the new account joins its pool.
-  if (state.sync.code) syncNow();
 }
 
-function showSetup() {
-  $('setup-body').innerHTML = `<button class="icon-button sheet-close" type="button" data-action="close-setup" aria-label="${h(t('close'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>${setupCardHtml()}`;
-  if (!$('setup').open) $('setup').showModal();
-}
-
-// ---- Sync -----------------------------------------------------------------------------
-
-function loadSyncCode() {
+// Merges this device's account with the pass's copy both ways.
+async function syncNow({ pull = false } = {}) {
+  if (!q.pass || state.sync.busy || !q.active) return;
+  state.sync.busy = true;
   try {
-    // A Quadra Pass entered in another Quadra app on this browser counts here too.
-    return localStorage.getItem(STORE.sync) || storedPass() || null;
-  } catch {
-    return null;
+    await mergeRemote(await q.read({ data: true, inbox: true }), { pull });
+  } catch (error) {
+    if (error.code !== 'ECO_SESSION_MOVED') state.sync.error = error.code === 'TOO_BIG' ? t('syncTooBig') : error.message;
+  } finally {
+    state.sync.busy = false;
+    render();
   }
 }
-function saveSyncCode(code) {
-  try {
-    if (code) localStorage.setItem(STORE.sync, code);
-    else localStorage.removeItem(STORE.sync);
-  } catch {}
-  if (isPassCode(code)) storePass(code);
-}
-const onPass = () => isPassCode(state.sync.code);
 
-// The Quadra Pass (the same panel as in the other Quadra apps, mounted into
-// .pass-slot after each draw).
-function syncCardHtml() {
-  return `<div class="card sync-card">
-    <div class="pass-slot"></div>
-  </div>`;
-}
-function mountPassPanel() {
-  const slot = document.querySelector('.pass-slot');
-  if (!slot) return;
-  if (!state.passPanel || state.passPanel.lang !== locale) {
-    state.passPanel = passPanel({ app: 'stock', lang: locale, create: createSyncCode, enter: linkDevice, sync: () => syncNow({ pull: true }), signOut: syncOff });
-    state.passPanel.lang = locale;
+async function mergeRemote(remote, { pull = false } = {}) {
+  if (!remote) return;
+  const theirs = remote.payload ? await unpack(remote.payload).catch(() => null) : null;
+  let account = state.account;
+  const their = isAccount(theirs) ? theirs : null;
+  if (account && their && account.id !== their.id) account = mergeDistinct(their, account);
+  else account = mergeAccounts(account, their);
+  for (const item of remote.inbox || []) {
+    const other = await unpack(item.payload).catch(() => null);
+    if (isAccount(other)) account = mergeDistinct(account, other);
   }
-  const sy = state.sync;
-  state.passPanel.update({ pass: onPass() ? sy.code : '', busy: Boolean(sy.busy), error: sy.error || '', note: sy.note || '', syncedAt: sy.at || 0 });
-  slot.replaceChildren(state.passPanel.el);
+  let wallet = remote.wallet || q.wallet;
+  if (!account) {
+    ensureAccount(wallet);
+    account = state.account;
+  }
+  account = applyPool(account, wallet).account;
+  const figure = ownCash(account, replay(account));
+  const snapPatch = wallet?.snap?.stock?.cash === figure ? undefined : { stock: { cash: figure, t: Date.now() } };
+  const changed = !their || JSON.stringify(account) !== JSON.stringify(their);
+  if (account !== state.account) commit(account, { sync: false });
+  if (changed || snapPatch || (remote.inbox || []).length) {
+    const payload = changed ? await pack(account) : undefined;
+    if (payload && payload.length > 1_000_000) throw Object.assign(new Error('too big'), { code: 'TOO_BIG' });
+    const patch = { snap: snapPatch, settings: { ...affinityPatch('stock').settings } };
+    const res = await q.write({ payload, wallet: patch });
+    wallet = res.wallet || wallet;
+  }
+  for (const item of remote.inbox || []) await q.dropInbox(item.id).catch(() => {});
+  state.wallet = wallet;
+  state.sync.error = null;
+  state.sync.at = Date.now();
 }
 
-// The shared pool, what went in and out from the other apps, and sending
-// money to another pass. Shown on the portfolio with a pass.
+// What the person does here, for Rewards' missions and every app's
+// recommendations (quadra.mjs).
+function track(action, keys = [], weight = 1) {
+  if (keys.length) recordAffinity('stock', keys, weight);
+  if (!action || !q.active) return;
+  q.write({ wallet: activityPatch(q.wallet, 'stock', action) }).catch(() => {});
+}
+const symbolKeys = symbol => {
+  const info = catalogInfo(symbol);
+  const quote = state.quotes.get(symbol);
+  return [`sym:${symbol}`, info?.category ? `cat:${info.category}` : null, quote?.kind ? `kind:${quote.kind}` : null, quote?.market ? `mkt:${quote.market}` : null];
+};
+
+// The one money pool at a glance, and sending money to another pass.
 function poolCardHtml() {
-  if (!onPass() || !state.account) return '';
-  const w = state.wallet;
-  if (!w) return '';
-  // The pool at a glance: its total and each app's part (each one's own
-  // records are in its history tab, so none are repeated here).
-  const parts = poolParts(w);
-  const plus = parts.filter(p => p.amount > 0).reduce((sum, p) => sum + p.amount, 0);
-  const color = app => APPS[app]?.color || 'var(--q-muted)';
-  const openBets = w.snap?.odds?.open || 0;
-  const part = p => {
-    const inner = `<span class="qpool-dot" style="background:${color(p.app)}"></span><span class="qpool-name">${h(poolPartName(p.app, locale))}${p.app === 'odds' && openBets > 0 ? `<small>${h(t('poolRiding', { v: money(openBets, BASE) }))}</small>` : ''}</span><strong class="qpool-amt${p.amount < 0 ? ' neg' : ''}">${h(money(p.amount, BASE))}</strong>`;
-    return APPS[p.app] && p.app !== 'stock' ? `<li><a class="qpool-part" href="${h(appUrl(p.app))}">${inner}</a></li>` : `<li><div class="qpool-part">${inner}</div></li>`;
-  };
+  if (!state.account || !state.wallet) return '';
   return `<div class="card pool-card">
-    <div class="qpool-top"><span>${h(t('poolTitle'))}</span><strong>${h(money(poolBalance(w), BASE))}</strong></div>
-    ${plus > 0 ? `<div class="qpool-bar" aria-hidden="true">${parts.filter(p => p.amount > 0).map(p => `<i style="flex:${p.amount / plus};background:${color(p.app)}"></i>`).join('')}</div>` : ''}
-    <ul class="qpool-parts">${parts.map(part).join('')}</ul>
+    <div class="qpool-top"><span>${h(t('poolTitle'))}</span><strong class="num">${h(money(poolBalance(state.wallet), BASE))}</strong></div>
     <p class="qpool-note">${h(t('poolNote'))}</p>
     <details class="fold-lite">
       <summary>${h(t('transferTitle'))}</summary>
@@ -2692,13 +2463,11 @@ function poolCardHtml() {
   </div>`;
 }
 
-// Where the money came from: the opening amount, paydays, mini games, the
-// other Quadra apps, transfers.
-// Each source opens where it comes from: Sportsbook, Words, the mini games.
+// Where the money came from: the opening amount, pay, the other Quadra
+// apps, transfers. Each source opens where it comes from.
 function sourceLine(key, inner) {
-  const app = { srcOdds: 'odds', srcVocab: 'vocab' }[key];
-  if (app) return `<a class="pool-line pool-line-link" href="${h(appUrl(app))}">${inner}</a>`;
-  if (key === 'srcGame') return `<button class="pool-line pool-line-link" type="button" data-action="goto" data-tab="guide">${inner}</button>`;
+  const app = { srcOdds: 'odds', srcVocab: 'vocab', srcGame: 'vocab' }[key];
+  if (app) return `<a class="pool-line pool-line-link" href="${h(appUrl(app))}" data-go="${app}">${inner}</a>`;
   return `<div class="pool-line">${inner}</div>`;
 }
 
@@ -2716,145 +2485,6 @@ function sourcesCardHtml() {
   </div>`;
 }
 
-// Merges this device's account with the synced copy both ways. With no
-// account here (just cleared, or a fresh browser) it only pulls when asked
-// to: right after a reset the old copy mustn't come back.
-async function syncNow({ pull = false } = {}) {
-  const code = state.sync.code;
-  if (!code || state.sync.busy || (!state.account && !pull)) return;
-  if (isPassCode(code)) return syncPass({ pull });
-  state.sync.busy = true;
-  try {
-    const remote = await readSync(code);
-    if (!remote) {
-      state.sync.error = t('legacyGone');
-      return;
-    }
-    const merged = mergeAccounts(state.account, isAccount(remote) ? remote : null);
-    if (merged && merged !== state.account) commit(merged, { sync: false });
-    if (merged && JSON.stringify(merged) !== JSON.stringify(remote)) await writeSync(code, merged);
-    state.sync.error = null;
-    state.sync.at = Date.now();
-  } catch (error) {
-    state.sync.error = error.code === 'TOO_BIG' ? t('syncTooBig') : error.message;
-  } finally {
-    state.sync.busy = false;
-    if (state.tab === 'portfolio') renderPortfolio();
-  }
-}
-
-// With a Quadra Pass: the account and the shared wallet together. Accounts
-// a merge brought in (the inbox) are folded in, the other apps' money
-// arrives as pool deposits, and this account's own NT$ cash goes back to
-// the wallet as its figure.
-async function syncPass({ pull = false } = {}) {
-  const code = state.sync.code;
-  state.sync.busy = true;
-  try {
-    const remote = await readPass(code);
-    if (!remote) {
-      state.sync.error = t('codeNotFound');
-      return;
-    }
-    let account = state.account;
-    const theirs = isAccount(remote.account) ? remote.account : null;
-    if (account && theirs && account.id !== theirs.id) {
-      // Two different accounts on one pass: the synced one wins, this
-      // device's is folded into it (both kept, nothing lost).
-      account = mergeDistinct(theirs, account);
-    } else account = mergeAccounts(account, theirs);
-    if (!account && !pull) return;
-    for (const item of remote.inbox) if (isAccount(item.account)) account = mergeDistinct(account, item.account);
-    let wallet = remote.wallet;
-    if (account) {
-      account = applyPool(account, wallet).account;
-      const figure = ownCash(account, replay(account));
-      const snapPatch = wallet?.snap?.stock?.cash === figure ? undefined : { stock: { cash: figure, t: Date.now() } };
-      const changed = !theirs || JSON.stringify(account) !== JSON.stringify(theirs);
-      if (changed || snapPatch) wallet = await writePass(code, changed ? account : null, { snap: snapPatch });
-      if (account !== state.account) commit(account, { sync: false });
-    }
-    for (const item of remote.inbox) await dropInbox(code, item.id).catch(() => {});
-    state.wallet = wallet;
-    cacheWallet(code, wallet);
-    state.sync.error = null;
-    state.sync.at = Date.now();
-  } catch (error) {
-    state.sync.error = error.code === 'TOO_BIG' ? t('syncTooBig') : error.message;
-  } finally {
-    state.sync.busy = false;
-    render();
-  }
-}
-
-// New syncs are Quadra Passes only (they work in every Quadra app).
-async function createSyncCode() {
-  state.sync.busy = true;
-  render();
-  try {
-    const { code, wallet } = await createPass(state.account, { snap: state.account ? { stock: { cash: ownCash(state.account, replay(state.account)), t: Date.now() } } : undefined });
-    state.sync = { code, busy: false, error: null, at: Date.now() };
-    state.wallet = wallet;
-    saveSyncCode(code);
-    toast(t('passCreated', { code: formatPass(code) }), 'good');
-  } catch (error) {
-    state.sync.busy = false;
-    state.sync.error = t('syncFailed', { why: error.message });
-  }
-  render();
-}
-
-async function linkDevice(text) {
-  const code = cleanPasscode(text);
-  if (!PASS_PATTERN.test(code)) return toast(t('badPass'), 'bad');
-  state.sync.error = null;
-  try {
-    const remote = await readPass(code);
-    if (!remote) {
-      state.sync.error = t('codeNotFound');
-      toast(t('codeNotFound'), 'bad');
-      return render();
-    }
-    const theirs = isAccount(remote.account) ? remote.account : null;
-    if (theirs && state.account && state.account.id !== theirs.id && state.account.events.length > 1 && !confirm(t('linkReplace'))) return;
-    if (theirs) commit(state.account?.id === theirs.id ? mergeAccounts(state.account, theirs) : theirs, { sync: false });
-    state.sync = { code, busy: false, error: null, at: Date.now() };
-    state.wallet = remote.wallet;
-    saveSyncCode(code);
-    state.bench = null;
-    if ($('setup').open) $('setup').close();
-    toast(t('linked'), 'good');
-    refresh();
-    await syncNow({ pull: true });
-    if (!state.account) showSetup();
-  } catch (error) {
-    toast(t('syncFailed', { why: error.message }), 'bad');
-  }
-  render();
-}
-
-// An old one-app code → a Quadra Pass: the Worker moves the account to a new
-// pass and deletes the old code.
-async function moveToPass() {
-  const code = state.sync.code;
-  const sources = code && !isPassCode(code) ? [{ app: 'stock', passcode: code }] : [];
-  if (!sources.length) return;
-  if (code && !isPassCode(code)) await syncNow();
-  state.sync.busy = true;
-  render();
-  try {
-    const res = await ecoMerge(sources, isPassCode(code) ? code : undefined);
-    state.sync = { code: res.passcode, busy: false, error: null, at: 0, note: t('legacyUpgraded', { code: formatPass(res.passcode) }) };
-    state.wallet = res.wallet;
-    saveSyncCode(res.passcode);
-    await syncNow({ pull: true });
-  } catch (error) {
-    state.sync.busy = false;
-    state.sync.error = t('linkFailed', { msg: error.message });
-  }
-  render();
-}
-
 async function sendTransfer(form) {
   const amount = Math.round(Number(cleanNumber(form.querySelector('#xfer-amount').value)));
   const to = form.querySelector('#xfer-to').value;
@@ -2862,8 +2492,7 @@ async function sendTransfer(form) {
   if (!(amount > 0)) return toast(t('badAmount'), 'bad');
   if (amount > (available(state.account, snap()).cash[BASE] || 0)) return toast(t('notEnoughCur', { cur: BASE, have: money(available(state.account, snap()).cash[BASE] || 0, BASE) }), 'bad');
   try {
-    const res = await ecoTransfer(state.sync.code, to, amount, note || undefined, quadraId());
-    state.wallet = res.wallet;
+    await q.transfer(to, amount, note || undefined, quadraId());
     toast(t('transferDone', { v: money(amount, BASE) }), 'good');
     await syncNow();
   } catch (error) {
@@ -2872,16 +2501,30 @@ async function sendTransfer(form) {
   render();
 }
 
-function syncOff() {
-  if (onPass()) {
-    storePass('');
-    // The other apps' money stays with the pass.
-    if (state.account) commit(stripPool(state.account), { sync: false });
-  }
-  state.sync = { code: null, busy: false, error: null, at: 0 };
-  state.wallet = null;
-  saveSyncCode(null);
-  render();
+// This app's own settings, in the account sheet.
+function settingsEl() {
+  const box = document.createElement('div');
+  const paint = () => {
+    const perm = 'Notification' in window ? Notification.permission : 'unsupported';
+    box.innerHTML = `<h3 class="q-sheet-h">${h(t('g_settings'))}</h3>
+      <div class="q-rows settings-rows">
+        <div class="setting-row"><span>${h(t('updownLabel'))}</span><div class="segmented small" role="group"><button type="button" data-set="updown" data-v="tw" aria-pressed="${state.settings.updown === 'tw'}">${h(t('updownTw'))}</button><button type="button" data-set="updown" data-v="us" aria-pressed="${state.settings.updown === 'us'}">${h(t('updownUs'))}</button></div></div>
+        <div class="setting-row"><span>${h(t('notifyLabel'))}</span>${perm === 'granted' ? `<small>${h(t('notifyOn'))}</small>` : perm === 'default' ? `<button class="q-btn small" type="button" data-set="notify">${h(t('notifyEnable'))}</button>` : `<small>${h(t('notifyUnsupported'))}</small>`}</div>
+      </div>`;
+  };
+  box.addEventListener('click', async e => {
+    const b = e.target.closest('[data-set]');
+    if (!b) return;
+    if (b.dataset.set === 'updown') {
+      state.settings.updown = b.dataset.v;
+      saveSettings();
+      render();
+    }
+    if (b.dataset.set === 'notify') await askNotifications();
+    paint();
+  });
+  paint();
+  return box;
 }
 
 // ---- Page frame: tabs, status, rendering -----------------------------------------------------
@@ -2922,7 +2565,6 @@ function render() {
   else if (state.tab === 'portfolio') renderPortfolio();
   else if (state.tab === 'fx') renderFx();
   else if (state.tab === 'history') renderHistory();
-  else if (state.tab === 'guide') renderGuide();
   if (state.detail && $('detail').open) refreshDetailLive();
 }
 
@@ -2962,11 +2604,17 @@ function renderStatic() {
   for (const el of document.querySelectorAll('[data-t]')) el.textContent = t(el.dataset.t);
   $('search').placeholder = t('searchPlaceholder');
   $('refresh').setAttribute('aria-label', t('refresh'));
-  $('footer').textContent = t('footer');
-  renderGuide();
 }
 
 // ---- Events ---------------------------------------------------------------------------------
+
+// Links to the other Quadra apps arrive signed in (quadra.mjs's go).
+document.addEventListener('click', event => {
+  const link = event.target.closest('[data-go]');
+  if (!link) return;
+  event.preventDefault();
+  q.go(link.dataset.go, link.dataset.hash || '');
+});
 
 document.addEventListener('click', event => {
   const el = event.target.closest('[data-action]');
@@ -2993,8 +2641,9 @@ document.addEventListener('click', event => {
       loadChart();
       break;
     case 'star':
-      if (!state.account) return showSetup();
+      if (!state.account) return;
       commit(toggleWatch(state.account, d.symbol));
+      track('watch', symbolKeys(d.symbol), 2);
       renderDetail();
       if (state.tab === 'markets') renderMarkets();
       break;
@@ -3020,6 +2669,19 @@ document.addEventListener('click', event => {
     case 'place':
       placeFromTicket();
       break;
+    case 'place-fx': {
+      const cur = state.quotes.get(d.symbol)?.currency;
+      const r = exchange(state.account, { from: BASE, to: cur, amount: Number(el.dataset.need) }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
+      if (r.error) {
+        d.msg = { kind: 'bad', text: errorText(r) };
+        renderTicket();
+        break;
+      }
+      commit(r.account);
+      toast(t('autoFxDone', { pay: money(r.event.amount, BASE), get: money(r.event.received, r.event.to) }), 'good');
+      placeFromTicket();
+      break;
+    }
     case 'topup': {
       const r = exchange(state.account, { from: BASE, to: el.dataset.cur, amount: Number(el.dataset.need) }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
       if (r.error) toast(errorText(r), 'bad');
@@ -3108,30 +2770,6 @@ document.addEventListener('click', event => {
       state.activityShown += 100;
       renderHistory();
       break;
-    case 'start':
-      openAccount();
-      break;
-    case 'setup':
-      showSetup();
-      break;
-    case 'close-setup':
-      $('setup').close();
-      break;
-    case 'quiz':
-      answerQuiz(el.dataset.lesson, Number(el.dataset.i));
-      break;
-    case 'lesson': {
-      const id = `lesson:${el.dataset.lesson}`;
-      state.openFolds.add(id);
-      renderGuide();
-      document.querySelector(`[data-fold="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      break;
-    }
-    case 'updown':
-      state.settings.updown = el.dataset.v;
-      saveSettings();
-      renderGuide();
-      break;
     case 'chart-style':
       state.settings.chart = el.dataset.v;
       saveSettings();
@@ -3173,7 +2811,8 @@ document.addEventListener('click', event => {
       state.tm.symbol = el.dataset.symbol;
       state.tm.result = null;
       closeDetail();
-      showTab('guide');
+      state.historyView = 'tm';
+      showTab('history');
       document.getElementById('time-machine')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       runTimeMachine();
       break;
@@ -3182,28 +2821,10 @@ document.addEventListener('click', event => {
       if (el.dataset.v === 'monthly' && Number(state.tm.amount) > 50_000) state.tm.amount = '5000';
       if (el.dataset.v === 'lump' && Number(state.tm.amount) < 10_000) state.tm.amount = '100000';
       state.tm.result = null;
-      renderGuide();
+      renderHistory();
       break;
     case 'tm-go':
       runTimeMachine();
-      break;
-    case 'install':
-      installApp();
-      break;
-    case 'notify-on':
-      askNotifications().then(renderGuide);
-      break;
-    case 'game-start':
-      startGame(el.dataset.game);
-      break;
-    case 'game-answer':
-      answerGame(el.dataset.choice);
-      break;
-    case 'game-end':
-      endGame();
-      break;
-    case 'sync-create':
-      createSyncCode();
       break;
   }
 });
@@ -3229,8 +2850,6 @@ document.addEventListener('submit', event => {
   const form = event.target.closest('[data-form]');
   if (!form) return;
   event.preventDefault();
-  if (form.dataset.form === 'start') openAccount();
-  if (form.dataset.form === 'link') linkDevice(form.querySelector('#link-code').value);
   if (form.dataset.form === 'transfer') sendTransfer(form);
 });
 
@@ -3317,9 +2936,6 @@ $('detail').addEventListener('close', () => (state.detail = null));
 $('detail').addEventListener('click', event => {
   if (event.target === $('detail')) closeDetail();
 });
-$('setup').addEventListener('click', event => {
-  if (event.target === $('setup')) $('setup').close();
-});
 
 for (const button of document.querySelectorAll('#tabs .tab')) button.addEventListener('click', () => showTab(button.dataset.tab));
 $('refresh').addEventListener('click', () => refresh({ list: true }));
@@ -3333,10 +2949,10 @@ $('refresh').addEventListener('click', () => refresh({ list: true }));
 {
   const phone = matchMedia('(max-width: 720px)');
   const place = () => {
-    if (phone.matches) $('mobile-bar').append($('status'), $('refresh'));
+    if (phone.matches) $('mobile-bar').append($('status'), $('account-slot'), $('refresh'));
     else {
       document.querySelector('.brand-text').append($('status'));
-      document.querySelector('.appbar-inner').append($('refresh'));
+      document.querySelector('.appbar-inner').append($('account-slot'), $('refresh'));
     }
   };
   place();
@@ -3383,21 +2999,42 @@ window.addEventListener('resize', () => {
 
 window.__stockStarted = true;
 // Phones and tablets: from the home screen only. Always the newest deploy.
-installGate('stock', locale);
-watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.content, key: 'stockStudy', cachePrefix: 'stock-study-', busy: () => Boolean(state.game?.live) });
+const gated = installGate('stock', locale);
+watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.content, key: 'stockStudy', cachePrefix: 'stock-study-' });
 applySettings();
-state.sync.code = loadSyncCode();
-if (onPass()) state.wallet = cachedWallet(state.sync.code);
 loadQuotes();
 renderStatic();
-render();
-loadAccount().then(account => {
-  state.account = account;
+$('account-slot').append(accountButton(q, { extra: settingsEl }));
+q.on('wallet', wallet => {
+  state.wallet = wallet;
+  // Money the other apps moved arrives in this account's NT$ cash.
+  if (state.account) {
+    const pooled = applyPool(state.account, wallet);
+    if (pooled.added.length) {
+      commit(pooled.account);
+      for (const e of pooled.added.filter(x => x.kind !== 'stake' && x.kind !== 'payout')) toast(`${describeEntry(e, locale)} ${money(e.amount, BASE, { sign: true })}`, e.amount >= 0 ? 'good' : '');
+    }
+  }
+  renderStatus();
+  if (state.tab === 'portfolio') renderPortfolio();
+});
+q.on('active', live => {
+  if (live) {
+    syncNow();
+    refresh();
+  }
+});
+
+async function boot() {
+  const first = await q.start();
+  state.wallet = q.wallet;
+  state.account = await loadAccount();
+  // The pass's own copy, merged in (and the account made, the first time).
+  if (first && !first.offline) await mergeRemote(first).catch(error => (state.sync.error = error.message));
+  if (!state.account) ensureAccount(q.wallet);
   state.accountReady = true;
-  // Saved prices: the page is usable at once (and offline).
   if (state.fromCache) $('loading').hidden = true;
   checkIncome();
-  if (!account && !state.sync.code) showSetup();
   render();
   backfillOrders()
     .catch(() => {})
@@ -3412,27 +3049,22 @@ loadAccount().then(account => {
         checkAlertHistory();
       });
     });
-  if (state.sync.code)
-    syncNow({ pull: !account }).then(() => {
-      if (!state.account) showSetup();
-      // An old one-app code becomes a Quadra Pass by itself (one kind of code, everywhere).
-      if (state.sync.code && !onPass()) moveToPass();
-      render();
-    });
-});
+}
+if (!gated) boot();
 // Hide the loading screen after at most 8 seconds whatever happens.
 setTimeout(() => ($('loading').hidden = true), 8000);
 
 setInterval(() => {
-  if (document.visibilityState === 'visible') refresh().then(checkBonds);
+  if (document.visibilityState === 'visible' && q.active) refresh().then(checkBonds);
 }, QUOTE_REFRESH_MS);
-// With a Quadra Pass, what the other apps did (bets, rewards) arrives every few minutes.
+// What the other apps did (bets, rewards, pay) arrives with the wallet
+// (quadra.mjs checks it every minute); the account itself every few.
 setInterval(() => {
-  if (document.visibilityState === 'visible' && onPass() && state.account) syncNow();
+  if (document.visibilityState === 'visible' && q.active && state.account) syncNow();
 }, 3 * 60_000);
 // Monthly plans due today wait for their market's first price.
 setInterval(() => {
-  if (document.visibilityState !== 'visible') return;
+  if (document.visibilityState !== 'visible' || !q.active) return;
   checkIncome();
   checkPlans();
 }, 10 * 60_000);
@@ -3447,11 +3079,6 @@ window.addEventListener('offline', () => {
   state.online = false;
   renderStatus();
 });
-window.addEventListener('beforeinstallprompt', event => {
-  event.preventDefault();
-  state.installPrompt = event;
-  if (state.tab === 'guide') renderGuide();
-});
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker
     .register('./sw.js')
@@ -3463,7 +3090,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     .catch(() => {});
 }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
+  if (document.visibilityState !== 'visible' || !state.accountReady) return;
   // Back after a while: settle what happened meanwhile from the history first.
   state.backfilled = false;
   backfillOrders()

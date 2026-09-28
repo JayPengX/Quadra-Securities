@@ -1,7 +1,7 @@
 {
-  "name": "四方證券 Quadra Securities",
-  "short_name": "四方證券",
-  "description": "用虛擬的新台幣，買全世界的股票、ETF、債券、加密貨幣和黃金。教學用途。",
+  "name": "Quadra Securities",
+  "short_name": "Securities",
+  "description": "用虛擬的新台幣投資全世界的股票、ETF、債券、加密貨幣和黃金。",
   "lang": "zh-Hant-TW",
   "start_url": "./",
   "scope": "./",

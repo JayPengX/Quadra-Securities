@@ -23,7 +23,23 @@ const TW = [
   ['3045.TW', '台灣大', 'Taiwan Mobile'], ['1590.TW', '亞德客-KY', 'Airtac'], ['2301.TW', '光寶科', 'Lite-On'],
   ['9910.TW', '豐泰', 'Feng Tay'], ['8046.TW', '南電', 'Nan Ya PCB'], ['2356.TW', '英業達', 'Inventec'],
   ['6488.TWO', '環球晶', 'GlobalWafers'], ['5347.TWO', '世界', 'Vanguard International Semiconductor'], ['3293.TWO', '鈊象', 'IGS'],
-  ['8299.TWO', '群聯', 'Phison'], ['5274.TWO', '信驊', 'ASPEED']
+  ['8299.TWO', '群聯', 'Phison'], ['5274.TWO', '信驊', 'ASPEED'],
+  ['2880.TW', '華南金', 'Hua Nan Financial'], ['2885.TW', '元大金', 'Yuanta Financial'], ['2887.TW', '台新金', 'Taishin Financial'],
+  ['2890.TW', '永豐金', 'SinoPac Financial'], ['2883.TW', '凱基金', 'KGI Financial'], ['2801.TW', '彰銀', 'Chang Hwa Bank'],
+  ['2360.TW', '致茂', 'Chroma ATE'], ['2383.TW', '台光電', 'Elite Material'], ['2368.TW', '金像電', 'Gold Circuit'],
+  ['3017.TW', '奇鋐', 'Asia Vital Components'], ['3653.TW', '健策', 'Jentech'], ['2449.TW', '京元電子', 'King Yuan Electronics'],
+  ['6415.TW', '矽力*-KY', 'Silergy'], ['2059.TW', '川湖', 'King Slide'], ['3533.TW', '嘉澤', 'Lotes'],
+  ['4938.TW', '和碩', 'Pegatron'], ['2353.TW', '宏碁', 'Acer'], ['2324.TW', '仁寶', 'Compal'],
+  ['2409.TW', '友達', 'AUO'], ['3481.TW', '群創', 'Innolux'], ['1101.TW', '台泥', 'Taiwan Cement'],
+  ['1102.TW', '亞泥', 'Asia Cement'], ['1326.TW', '台化', 'Formosa Chemicals'], ['1402.TW', '遠東新', 'Far Eastern New Century'],
+  ['2105.TW', '正新', 'Cheng Shin Rubber'], ['2201.TW', '裕隆', 'Yulon Motor'], ['2633.TW', '台灣高鐵', 'Taiwan High Speed Rail'],
+  ['2606.TW', '裕民', 'U-Ming Marine'], ['2637.TW', '慧洋-KY', 'Wisdom Marine'], ['2915.TW', '潤泰全', 'Ruentex'],
+  ['9904.TW', '寶成', 'Pou Chen'], ['9921.TW', '巨大', 'Giant Manufacturing'], ['9914.TW', '美利達', 'Merida'],
+  ['1476.TW', '儒鴻', 'Eclat Textile'], ['1504.TW', '東元', 'TECO Electric'], ['1519.TW', '華城', 'Fortune Electric'],
+  ['1513.TW', '中興電', 'Chung-Hsin Electric'], ['1503.TW', '士電', 'Shihlin Electric'], ['4904.TW', '遠傳', 'Far EasTone'],
+  ['6446.TW', '藥華藥', 'PharmaEssentia'], ['4743.TWO', '合一', 'Oneness Biotech'], ['6547.TWO', '高端疫苗', 'Medigen Vaccine'],
+  ['3529.TWO', '力旺', 'eMemory'], ['6147.TWO', '頎邦', 'Chipbond'], ['8069.TWO', '元太', 'E Ink'],
+  ['3105.TWO', '穩懋', 'WIN Semiconductors'], ['5483.TWO', '中美晶', 'Sino-American Silicon'], ['3324.TWO', '雙鴻', 'Auras']
 ];
 
 const TW_ETF = [
@@ -34,7 +50,13 @@ const TW_ETF = [
   ['00881.TW', '國泰台灣5G+', 'Cathay Taiwan 5G+'], ['00631L.TW', '元大台灣50正2', 'Yuanta Taiwan 50 2x', 'etf'],
   ['00632R.TW', '元大台灣50反1', 'Yuanta Taiwan 50 -1x', 'etf'], ['00646.TW', '元大S&P500', 'Yuanta S&P 500'],
   ['00662.TW', '富邦NASDAQ', 'Fubon NASDAQ-100'], ['00757.TW', '統一FANG+', 'Uni-President FANG+'], ['00830.TW', '國泰費城半導體', 'Cathay Philadelphia Semiconductor'],
-  ['00635U.TW', '元大S&P黃金', 'Yuanta S&P Gold'], ['00642U.TW', '元大S&P石油', 'Yuanta S&P Oil']
+  ['00635U.TW', '元大S&P黃金', 'Yuanta S&P Gold'], ['00642U.TW', '元大S&P石油', 'Yuanta S&P Oil'],
+  ['00915.TW', '凱基優選高股息30', 'KGI Top 30 High Dividend'], ['00918.TW', '大華優利高填息30', 'Dah Hwa High Dividend Refill 30'],
+  ['00934.TW', '中信成長高股息', 'CTBC Growth High Dividend'], ['00939.TW', '統一台灣高息動能', 'Uni-President Taiwan High Dividend Momentum'],
+  ['00891.TW', '中信關鍵半導體', 'CTBC Key Semiconductor'], ['00892.TW', '富邦台灣半導體', 'Fubon Taiwan Semiconductor'],
+  ['00927.TW', '群益半導體收益', 'Capital Semiconductor Income'], ['00850.TW', '元大臺灣ESG永續', 'Yuanta Taiwan ESG'],
+  ['00690.TW', '兆豐藍籌30', 'Mega Blue Chip 30'], ['00733.TW', '富邦臺灣中小', 'Fubon Taiwan Mid-Small'],
+  ['00905.TW', 'FT臺灣Smart', 'FT Taiwan Smart'], ['00888.TW', '永豐台灣ESG', 'SinoPac Taiwan ESG']
 ];
 
 const US = [
@@ -48,7 +70,18 @@ const US = [
   ['QCOM', '高通', 'Qualcomm'], ['MU', '美光', 'Micron'], ['ORCL', '甲骨文', 'Oracle'], ['CRM', 'Salesforce', 'Salesforce'],
   ['ADBE', 'Adobe', 'Adobe'], ['PLTR', 'Palantir', 'Palantir'], ['UBER', 'Uber', 'Uber'], ['SBUX', '星巴克', 'Starbucks'],
   ['BA', '波音', 'Boeing'], ['COIN', 'Coinbase', 'Coinbase'], ['MSTR', 'Strategy (MicroStrategy)', 'Strategy (MicroStrategy)'],
-  ['BABA', '阿里巴巴 ADR', 'Alibaba ADR'], ['ASML', '艾司摩爾 ADR', 'ASML ADR'], ['ARM', '安謀', 'Arm Holdings']
+  ['BABA', '阿里巴巴 ADR', 'Alibaba ADR'], ['ASML', '艾司摩爾 ADR', 'ASML ADR'], ['ARM', '安謀', 'Arm Holdings'],
+  ['BAC', '美國銀行', 'Bank of America'], ['WFC', '富國銀行', 'Wells Fargo'], ['GS', '高盛', 'Goldman Sachs'], ['MS', '摩根士丹利', 'Morgan Stanley'],
+  ['AXP', '美國運通', 'American Express'], ['PYPL', 'PayPal', 'PayPal'], ['HD', '家得寶', 'Home Depot'], ['LOW', '勞氏', "Lowe's"],
+  ['TGT', '目標百貨', 'Target'], ['ABBV', '艾伯維', 'AbbVie'], ['MRK', '默克', 'Merck'], ['PFE', '輝瑞', 'Pfizer'],
+  ['TMO', '賽默飛世爾', 'Thermo Fisher'], ['ABT', '亞培', 'Abbott'], ['CVX', '雪佛龍', 'Chevron'], ['CAT', '開拓重工', 'Caterpillar'],
+  ['GE', '奇異航太', 'GE Aerospace'], ['LMT', '洛克希德馬丁', 'Lockheed Martin'], ['RTX', 'RTX', 'RTX'], ['HON', '漢威聯合', 'Honeywell'],
+  ['UPS', '優比速', 'UPS'], ['T', 'AT&T', 'AT&T'], ['VZ', '威訊', 'Verizon'], ['IBM', 'IBM', 'IBM'], ['CSCO', '思科', 'Cisco'],
+  ['TXN', '德州儀器', 'Texas Instruments'], ['AMAT', '應用材料', 'Applied Materials'], ['LRCX', '科林研發', 'Lam Research'],
+  ['KLAC', '科磊', 'KLA'], ['MRVL', '邁威爾', 'Marvell'], ['SMCI', '美超微', 'Super Micro Computer'], ['DELL', '戴爾', 'Dell'],
+  ['NOW', 'ServiceNow', 'ServiceNow'], ['SNOW', 'Snowflake', 'Snowflake'], ['SHOP', 'Shopify', 'Shopify'], ['ABNB', 'Airbnb', 'Airbnb'],
+  ['SPOT', 'Spotify', 'Spotify'], ['RBLX', 'Roblox', 'Roblox'], ['HOOD', 'Robinhood', 'Robinhood'], ['RIVN', 'Rivian', 'Rivian'],
+  ['NIO', '蔚來 ADR', 'NIO ADR'], ['PDD', '拼多多 ADR', 'PDD ADR'], ['SONY', '索尼 ADR', 'Sony ADR'], ['TM', '豐田 ADR', 'Toyota ADR']
 ];
 
 const US_ETF = [
@@ -59,7 +92,14 @@ const US_ETF = [
   ['SMH', 'VanEck 半導體', 'VanEck Semiconductor'], ['XLK', '科技類股', 'Technology Select Sector'], ['XLF', '金融類股', 'Financial Select Sector'],
   ['XLE', '能源類股', 'Energy Select Sector'], ['VNQ', '美國房地產', 'Vanguard Real Estate'], ['ARKK', '方舟創新', 'ARK Innovation'],
   ['EWT', '台灣 (iShares)', 'iShares MSCI Taiwan'], ['EWJ', '日本 (iShares)', 'iShares MSCI Japan'], ['EEM', '新興市場', 'iShares MSCI Emerging Markets'],
-  ['IBIT', '比特幣現貨 ETF', 'iShares Bitcoin Trust'], ['TQQQ', '那斯達克100 三倍', 'ProShares UltraPro QQQ (3x)'], ['SQQQ', '那斯達克100 反三倍', 'ProShares UltraPro Short QQQ (-3x)']
+  ['IBIT', '比特幣現貨 ETF', 'iShares Bitcoin Trust'], ['TQQQ', '那斯達克100 三倍', 'ProShares UltraPro QQQ (3x)'], ['SQQQ', '那斯達克100 反三倍', 'ProShares UltraPro Short QQQ (-3x)'],
+  ['QQQM', '那斯達克100 (小額)', 'Invesco NASDAQ 100 (QQQM)'], ['SPLG', 'SPDR 標普500 (小額)', 'SPDR Portfolio S&P 500'], ['VUG', 'Vanguard 成長股', 'Vanguard Growth'],
+  ['VTV', 'Vanguard 價值股', 'Vanguard Value'], ['VIG', 'Vanguard 股利成長', 'Vanguard Dividend Appreciation'], ['JEPI', 'JPMorgan 股票溢價收益', 'JPMorgan Equity Premium Income'],
+  ['JEPQ', 'JPMorgan 那斯達克溢價收益', 'JPMorgan Nasdaq Equity Premium Income'], ['XLV', '醫療保健類股', 'Health Care Select Sector'], ['XLY', '非必需消費類股', 'Consumer Discretionary Select Sector'],
+  ['XLP', '必需消費類股', 'Consumer Staples Select Sector'], ['XLI', '工業類股', 'Industrial Select Sector'], ['XLU', '公用事業類股', 'Utilities Select Sector'],
+  ['ICLN', '全球潔淨能源', 'iShares Global Clean Energy'], ['BOTZ', '機器人與人工智慧', 'Global X Robotics & AI'], ['INDA', '印度 (iShares)', 'iShares MSCI India'],
+  ['MCHI', '中國 (iShares)', 'iShares MSCI China'], ['EWY', '南韓 (iShares)', 'iShares MSCI South Korea'], ['VGK', '歐洲股票', 'Vanguard FTSE Europe'],
+  ['VWO', '新興市場 (Vanguard)', 'Vanguard FTSE Emerging Markets'], ['ETHA', '以太幣現貨 ETF', 'iShares Ethereum Trust']
 ];
 
 const BOND_ETFS = [
@@ -108,7 +148,10 @@ const EU = [
 const OTHER = [
   ['SHOP.TO', 'Shopify', 'Shopify'], ['RY.TO', '加拿大皇家銀行', 'Royal Bank of Canada'], ['BHP.AX', '必和必拓', 'BHP'],
   ['CBA.AX', '澳洲聯邦銀行', 'Commonwealth Bank'], ['D05.SI', '星展銀行', 'DBS'], ['RELIANCE.NS', '信實工業', 'Reliance Industries'],
-  ['INFY.NS', '印孚瑟斯', 'Infosys'], ['TCS.NS', '塔塔諮詢', 'Tata Consultancy Services']
+  ['INFY.NS', '印孚瑟斯', 'Infosys'], ['TCS.NS', '塔塔諮詢', 'Tata Consultancy Services'],
+  ['HDFCBANK.NS', 'HDFC 銀行', 'HDFC Bank'], ['TD.TO', '道明銀行', 'TD Bank'], ['ENB.TO', 'Enbridge', 'Enbridge'],
+  ['CSL.AX', 'CSL', 'CSL'], ['O39.SI', '華僑銀行', 'OCBC'], ['U11.SI', '大華銀行', 'UOB'], ['C38U.SI', '凱德綜合商業信託', 'CapitaLand Integrated Commercial Trust'],
+  ['VALE', '淡水河谷 ADR', 'Vale ADR'], ['MELI', 'MercadoLibre', 'MercadoLibre'], ['NU', 'Nu Holdings', 'Nu Holdings']
 ];
 
 const FUNDS = [

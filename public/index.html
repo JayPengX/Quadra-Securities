@@ -30,19 +30,19 @@
     document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') check(); });
   })();
 </script>
-<title>四方證券</title>
-<meta name="description" content="用虛擬的新台幣，買全世界的股票、ETF、債券、加密貨幣和黃金：真實報價、真實手續費、換匯與融資。教學用途。" />
+<title>Quadra Securities</title>
+<meta name="description" content="用虛擬的新台幣投資全世界的股票、ETF、債券、加密貨幣和黃金：真實報價、真實手續費、換匯與融資。" />
 <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
-<meta name="apple-mobile-web-app-title" content="四方證券" />
+<meta name="apple-mobile-web-app-title" content="Securities" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-<meta name="application-name" content="四方證券" />
+<meta name="application-name" content="Quadra Securities" />
 <link rel="manifest" href="./manifest.webmanifest" />
 <meta property="og:type" content="website" />
-<meta property="og:site_name" content="四方證券 Quadra Securities" />
-<meta property="og:title" content="四方證券 Quadra Securities｜全球股市模擬交易" />
+<meta property="og:site_name" content="Quadra Securities" />
+<meta property="og:title" content="Quadra Securities" />
 <meta property="og:description" content="用虛擬的新台幣，買全世界的股票、ETF、債券、加密貨幣和黃金：真實報價、真實手續費、換匯與融資。" />
 <meta property="og:url" content="https://jaypengx.github.io/Quadra-Securities/" />
 <meta property="og:image" content="https://jaypengx.github.io/Quadra-Securities/og-image.png" />
@@ -60,8 +60,8 @@
 <div id="loading" class="loading" role="status" aria-live="polite">
   <div class="loading-box">
     <img class="loading-logo" src="./favicon.svg" alt="" width="76" height="76" />
-    <p class="loading-brand">四方 QUADRA</p>
-    <p class="loading-title" data-t="loadingTitle">四方證券</p>
+    <p class="loading-brand">QUADRA</p>
+    <p class="loading-title">Quadra Securities</p>
     <div id="loading-spinner" class="spinner" aria-hidden="true"></div>
     <div id="loading-error" class="loading-error" hidden>
       <p id="loading-error-text"></p>
@@ -95,7 +95,7 @@
     <div class="brand">
       <img class="brand-logo" src="./favicon.svg" alt="" width="36" height="36" />
       <div class="brand-text">
-        <h1 id="title">四方證券</h1>
+        <h1 id="title">Quadra Securities</h1>
         <p id="status" class="status" aria-live="polite"></p>
       </div>
     </div>
@@ -104,8 +104,8 @@
       <button id="tab-portfolio" class="tab q-tab" role="tab" type="button" data-tab="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 12h18"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
       <button id="tab-fx" class="tab q-tab" role="tab" type="button" data-tab="fx"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
       <button id="tab-history" class="tab q-tab" role="tab" type="button" data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
-      <button id="tab-guide" class="tab q-tab" role="tab" type="button" data-tab="guide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/><path d="M9 8h7M9 12h5"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
     </nav>
+    <div id="account-slot" class="account-slot"></div>
     <button id="refresh" class="icon-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
   </div>
 </header>
@@ -123,6 +123,7 @@
       <h2 id="overview-title" class="section-heading" data-t="overviewTitle"></h2>
       <div id="overview" class="tiles"></div>
     </section>
+    <div id="home-rows"></div>
     <nav id="categories" class="chips" aria-label="categories"></nav>
     <section aria-labelledby="list-title">
       <h2 id="list-title" class="section-heading"></h2>
@@ -143,16 +144,10 @@
     <div id="history-body"></div>
   </div>
 
-  <div id="panel-guide" class="tab-panel" role="tabpanel" aria-labelledby="tab-guide" hidden>
-    <div id="games-body" class="guide games-body"></div>
-    <div id="guide-body" class="guide"></div>
-  </div>
-
   <footer><p id="footer" class="muted"></p></footer>
 </main>
 
 <dialog id="detail" class="sheet"><div id="detail-body"></div></dialog>
-<dialog id="setup" class="sheet small-sheet"><div id="setup-body"></div></dialog>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <script type="module" src="./app.js" onerror="window.__stockFail()"></script>
 </body>

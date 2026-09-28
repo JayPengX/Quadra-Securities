@@ -46,7 +46,8 @@ import { ECONOMY } from './quadra.mjs';
 export const ACCOUNT_VERSION = 1;
 // Every new account opens with the same NT$100,000 (Quadra's base amount);
 // the range below is only what an older, chosen start can be.
-export const START_AMOUNT = ECONOMY.stockStart;
+// What Securities itself gave a new account before Quadra paid the opening money.
+export const START_AMOUNT = 100_000;
 export const MIN_START = 10_000;
 export const MAX_START = 1_000_000_000;
 const YEAR_MS = 365 * 86_400_000;
@@ -65,14 +66,16 @@ export function taipeiDay(t) {
   return new Date(t + 8 * 3_600_000).toISOString().slice(0, 10);
 }
 
+// start 0: an account funded by the Quadra pool alone (a pass that got its
+// opening money from Quadra itself).
 export function newAccount(start = START_AMOUNT, now = Date.now(), id = randomId()) {
   const amount = Math.round(Number(start));
-  if (!(amount >= MIN_START && amount <= MAX_START)) throw new Error('start amount out of range');
+  if (!(amount === 0 || (amount >= MIN_START && amount <= MAX_START))) throw new Error('start amount out of range');
   return {
     v: ACCOUNT_VERSION,
     id,
     created: now,
-    events: [{ id: 'deposit:start', type: 'deposit', t: now, currency: BASE, amount }],
+    events: amount ? [{ id: 'deposit:start', type: 'deposit', t: now, currency: BASE, amount }] : [],
     orders: [],
     snapshots: {},
     watch: {},
@@ -376,11 +379,7 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     // The most it can cost: a limit order at its limit, a stop order at its
     // stop or the price, a market order at the price (plus a margin while it
     // waits for the market to open).
-    const last = type === 'stop' ? Math.max(order.stop, quote.price) : quote.price;
-    const ref = type === 'limit' ? order.limit : marketFill(quote.market, quote.kind, 'buy', last);
-    const est = estimate({ ...quote, side, qty, price: ref });
-    const fillsNow = triggerPrice(order, quote, now) !== null;
-    const reserve = roundCash(fillsNow || type === 'limit' ? est.total : est.total * (1 + RESERVE_BUFFER), quote.currency);
+    const { reserve } = requiredCash(order, quote, now);
     const have = avail.cash[quote.currency] || 0;
     if (reserve > have + EPS) return { error: 'funds', need: reserve, have: Math.max(0, have), currency: quote.currency };
     order.reserve = reserve;
@@ -390,6 +389,21 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (price === null) return { account: next, order, fill: null };
   const filled = fillOrder(next, order, price, rates, now);
   return { account: filled.account, order: filled.order, fill: filled.fill, error: filled.error, need: filled.need, have: filled.have };
+}
+
+// What a buy order needs in its currency, the very figure placeOrder checks:
+// { est (the all-in estimate), reserve (what's held until it fills),
+// buffer (the part of reserve above the estimate, returned when it fills) }.
+// A limit order holds its limit's cost; an order that fills right away its
+// cost; one that waits for its market (a market or stop order while it's
+// shut) holds 3% more, since it can open higher.
+export function requiredCash(order, quote, now = Date.now()) {
+  const last = order.type === 'stop' ? Math.max(Number(order.stop), quote.price) : quote.price;
+  const ref = order.type === 'limit' ? Number(order.limit) : marketFill(quote.market, quote.kind, 'buy', last);
+  const est = estimate({ market: quote.market, kind: quote.kind, currency: quote.currency, side: 'buy', qty: order.qty, price: ref });
+  const fillsNow = triggerPrice({ ...order, side: 'buy', t: now }, quote, now) !== null;
+  const reserve = roundCash(fillsNow || order.type === 'limit' ? est.total : est.total * (1 + RESERVE_BUFFER), quote.currency);
+  return { est, reserve, buffer: Math.max(0, reserve - est.total), fillsNow, ref };
 }
 
 function updateOrder(account, order) {
@@ -1232,7 +1246,7 @@ export function applyCashInterest(account, now = Date.now()) {
 //
 // No adding money by hand: like a salary, new NT$ arrives on its own on the
 // 1st of every month (00:00 Taiwan time), paid when the app is opened: the
-// same ECONOMY.stockMonthly (NT$5,000) for every account (Quadra's economy;
+// same ECONOMY.monthly (NT$5,000) for every account (Quadra's economy;
 // it used to be 3% of a chosen start). Each payday is a deposit with a fixed id (pay:YYYY-MM), paid
 // once however many devices catch up on it. `income.since`: when paydays
 // began (the account's opening, or when an older account first got them).
@@ -1247,7 +1261,7 @@ export const startAmount = account => account?.events.find(e => e.id === 'deposi
 
 // NT$ a month.
 export function incomeAmount() {
-  return ECONOMY.stockMonthly;
+  return ECONOMY.monthly;
 }
 
 // The first payday after `t`: the next 1st, 00:00 Taiwan time.
@@ -1257,6 +1271,10 @@ export function nextPayday(t) {
 }
 
 // Paydays due up to `now` and not yet paid, added as deposits.
+// From this Taiwan month on, pay comes from Quadra itself into the pool
+// (Shared-Proxy's eco.js, PAY_FROM_MONTH), whichever app is opened.
+export const INCOME_UNTIL_MONTH = '2026-10';
+
 export function applyIncome(account, now = Date.now()) {
   const since = account?.income?.since;
   if (since == null) return { account, added: [] };
@@ -1265,6 +1283,7 @@ export function applyIncome(account, now = Date.now()) {
   const added = [];
   for (let t = nextPayday(Math.max(since, account.created)), n = 0; t <= now && n < 1200; t = nextPayday(t), n++) {
     const id = `pay:${taipeiDay(t).slice(0, 7)}`;
+    if (taipeiDay(t).slice(0, 7) >= INCOME_UNTIL_MONTH) break;
     if (have.has(id) || amount <= 0) continue;
     added.push({ id, type: 'deposit', income: true, t, currency: BASE, amount });
   }
@@ -1319,9 +1338,9 @@ export function moneySources(account, now = Date.now()) {
   for (const e of account?.events || []) {
     if (e.type !== 'deposit' || e.t > now) continue;
     const v = e.amount * (e.twd || 1);
-    if (e.id === 'deposit:start' || e.start) out.start += v;
-    else if (e.income) out.pay += v;
-    else if (e.game) out.game += v;
+    if (e.id === 'deposit:start' || e.start || (e.pool && e.app === 'eco' && e.kind === 'start')) out.start += v;
+    else if (e.income || (e.pool && e.app === 'eco' && (e.kind === 'pay' || e.kind === 'grant'))) out.pay += v;
+    else if (e.game || (e.pool && e.app === 'vocab' && e.kind === 'game')) out.game += v;
     else if (e.pool && e.app === 'odds') out.odds += v;
     else if (e.pool && e.app === 'vocab') out.vocab += v;
     else if (e.pool && (e.kind === 'xfer-in' || e.kind === 'xfer-out')) out.transfer += v;

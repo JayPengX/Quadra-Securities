@@ -9,8 +9,13 @@ export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const YAHOO = 'https://query1.finance.yahoo.com';
 const SPARK_BATCH = 20;
 
-export function proxied(url) {
-  return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}`;
+// The proxy answers signed-in apps only: the Quadra session (quadra.mjs)
+// supplies the token.
+let session = null;
+export const useSession = s => (session = s);
+
+export function proxied(url, token = session?.token || '') {
+  return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}${token ? `&qt=${encodeURIComponent(token)}` : ''}`;
 }
 
 // At most this many requests at once, and one retry for a failed one.
@@ -33,7 +38,8 @@ async function getJson(url) {
     let lastError;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await fetch(proxied(url), { signal: AbortSignal.timeout(15_000) });
+        const token = session ? await session.ensureToken().catch(() => session.token) : '';
+        const res = await fetch(proxied(url, token), { signal: AbortSignal.timeout(15_000) });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
       } catch (error) {

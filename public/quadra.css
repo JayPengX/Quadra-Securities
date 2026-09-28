@@ -275,10 +275,27 @@ body {
 .q-signing-in body > *:not(.q-gate):not(dialog) {
   display: none !important;
 }
+/* Quadra's screens are top-layer <dialog>s (quadra.mjs keepOnTop): full
+   screen, above anything an app draws. */
+dialog.q-gate,
+dialog.q-moved {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  border: 0;
+}
+dialog.q-gate::backdrop {
+  background: var(--q-page);
+}
+dialog.q-moved::backdrop {
+  background: transparent;
+}
 .q-gate {
   position: fixed;
   inset: 0;
-  z-index: 2000;
+  z-index: 2147482600;
   overflow-y: auto;
   display: grid;
   place-items: center;
@@ -414,7 +431,7 @@ body {
 .q-moved {
   position: fixed;
   inset: 0;
-  z-index: 1900;
+  z-index: 2147482500;
   display: grid;
   place-items: center;
   padding: 24px;

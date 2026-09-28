@@ -456,12 +456,16 @@ function makeSession(app, { lang, heartbeat }) {
     }
   }
   function signedOut() {
+    const had = Boolean(storedAccount());
     for (const k of [KEY.refresh, KEY.account, KEY.wallet, KEY.oldPass, payloadKey(app)]) writeStore(k, null);
     clearData();
     token = '';
     wallet = null;
     active = false;
     emit('signedout');
+    // Signed out while in use (another device signed everyone out, the
+    // pass changed): straight back to the sign-in screen, like a new device.
+    if (started && had && typeof location !== 'undefined') setTimeout(() => location.reload(), 60);
     return { signedOut: true };
   }
   // Every call with the session token: a fresh one on expiry, once.
@@ -863,6 +867,42 @@ export const errorText = (error, lang) => {
   return lang === 'en' ? 'Couldn’t reach Quadra. Check the connection and try again.' : '無法連線到 Quadra，請檢查網路後再試一次。';
 };
 
+// Quadra's own screens (sign-in, install, "in use elsewhere") always sit on
+// top of everything: each is a modal <dialog> on the browser's top layer,
+// where no z-index of an app can reach it, and if an app opens a sheet of
+// its own while one is up, the Quadra screen is put back on top at once.
+// Esc doesn't close them.
+const onTop = new Set();
+let topWatch = null;
+function keepOnTop(dialog) {
+  dialog.addEventListener('cancel', e => e.preventDefault());
+  document.body.append(dialog);
+  try {
+    dialog.showModal();
+  } catch {
+    dialog.setAttribute('open', '');
+  }
+  onTop.add(dialog);
+  topWatch ||= new MutationObserver(records => {
+    if (!records.some(r => r.target !== dialog && r.target.tagName === 'DIALOG' && r.target.open && !onTop.has(r.target))) return;
+    for (const d of onTop) {
+      if (!d.isConnected || !d.open) continue;
+      d.close();
+      try {
+        d.showModal();
+      } catch {}
+    }
+  });
+  topWatch.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['open'] });
+  return dialog;
+}
+function dropFromTop(dialog) {
+  if (!dialog) return;
+  onTop.delete(dialog);
+  if (dialog.open) dialog.close();
+  dialog.remove();
+}
+
 // The sign-in screen: nothing of the app shows until there's a pass.
 function signInGate(s) {
   const en = s.lang === 'en';
@@ -879,7 +919,7 @@ function signInGate(s) {
       error.textContent = '';
       try {
         const res = await task();
-        gate.remove();
+        dropFromTop(gate);
         document.documentElement.classList.remove('q-signing-in');
         resolve(res);
       } catch (e) {
@@ -905,7 +945,7 @@ function signInGate(s) {
       await showNewPass(s, res.passcode);
       return res;
     }));
-    const gate = node('div', { class: 'q-gate', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${a.color}` }, [
+    const gate = node('dialog', { class: 'q-gate', 'aria-modal': 'true', style: `--q-accent:${a.color}` }, [
       node('div', { class: 'q-gate-box' }, [
         node('img', { class: 'q-gate-icon', src: './favicon.svg', alt: '', width: '72', height: '72' }),
         node('p', { class: 'q-gate-brand', text: a.related ? (en ? 'WITH QUADRA' : 'QUADRA 相關服務') : 'QUADRA' }),
@@ -918,7 +958,9 @@ function signInGate(s) {
       ])
     ]);
     document.documentElement.classList.add('q-signing-in');
-    document.body.append(gate);
+    // Alone on screen: any sheet the app had open closes first.
+    for (const d of document.querySelectorAll('dialog[open]')) if (!onTop.has(d)) d.close();
+    keepOnTop(gate);
     setTimeout(() => input.focus(), 50);
   });
 }
@@ -930,7 +972,7 @@ function showMoved(s) {
   const en = s.lang === 'en';
   const where = s.live?.app && APPS[s.live.app] ? APPS[s.live.app].name : en ? 'another app' : '另一個 App';
   const same = s.live?.app === s.app;
-  movedEl = node('div', { class: 'q-moved', role: 'dialog', 'aria-modal': 'true' }, [
+  movedEl = node('dialog', { class: 'q-moved', 'aria-modal': 'true' }, [
     node('div', { class: 'q-moved-box' }, [
       node('p', { class: 'q-moved-title', text: same ? (en ? 'Open on another device' : '已在其他裝置使用') : en ? `In use in ${where}` : `正在 ${where} 使用中` }),
       node('p', { class: 'q-moved-text', text: en ? 'Quadra runs in one app at a time. This one paused so nothing gets out of step.' : 'Quadra 一次只在一個 App 使用，這裡先暫停，資料才不會互相覆蓋。' }),
@@ -949,10 +991,10 @@ function showMoved(s) {
       })
     ])
   ]);
-  document.body.append(movedEl);
+  keepOnTop(movedEl);
 }
 function hideMoved() {
-  movedEl?.remove();
+  dropFromTop(movedEl);
   movedEl = null;
 }
 
@@ -1230,14 +1272,11 @@ export function showNewPass(s, passcode) {
       ])
     ]);
     // Not closed by Esc or a tap outside: only by the confirmed button.
-    box.addEventListener('cancel', e => e.preventDefault());
     ok.addEventListener('click', () => {
-      box.close();
-      box.remove();
+      dropFromTop(box);
       resolve();
     });
-    document.body.append(box);
-    box.showModal();
+    keepOnTop(box);
   });
 }
 
@@ -1422,7 +1461,7 @@ export function installGate(app, lang = detectLang()) {
       : en
         ? ['Tap ⋮ at the top right of Chrome.', 'Choose “Add to Home screen” (or “Install app”).', `Open ${name} from its new icon.`]
         : ['點 Chrome 右上角的 ⋮。', '選「加入主畫面」或「安裝應用程式」。', `從主畫面的新圖示打開 ${name}。`];
-  const gate = node('div', { class: 'q-gate q-install', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${APPS[app].color}` }, [
+  const gate = node('dialog', { class: 'q-gate q-install', 'aria-modal': 'true', style: `--q-accent:${APPS[app].color}` }, [
     node('div', { class: 'q-gate-box' }, [
       node('img', { class: 'q-gate-icon', src: './favicon.svg', alt: '', width: '72', height: '72' }),
       node('p', { class: 'q-gate-brand', text: 'QUADRA' }),
@@ -1434,7 +1473,7 @@ export function installGate(app, lang = detectLang()) {
       )
     ])
   ]);
-  document.body.append(gate);
+  keepOnTop(gate);
   document.documentElement.classList.add('q-signing-in');
   document.getElementById('loading')?.setAttribute('hidden', '');
   return true;
@@ -1461,7 +1500,7 @@ export function phoneOnlyGate(app, { lang = detectLang(), qr = '' } = {}) {
       } catch {}
     }
   });
-  const gate = node('div', { class: 'q-gate q-phone-only', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${APPS[app].color}` }, [
+  const gate = node('dialog', { class: 'q-gate q-phone-only', 'aria-modal': 'true', style: `--q-accent:${APPS[app].color}` }, [
     node('div', { class: 'q-gate-box' }, [
       node('img', { class: 'q-gate-icon', src: './favicon.svg', alt: '', width: '72', height: '72' }),
       node('p', { class: 'q-gate-brand', text: 'QUADRA' }),
@@ -1480,7 +1519,7 @@ export function phoneOnlyGate(app, { lang = detectLang(), qr = '' } = {}) {
       )
     ])
   ]);
-  document.body.append(gate);
+  keepOnTop(gate);
   document.documentElement.classList.add('q-signing-in');
   document.getElementById('loading')?.setAttribute('hidden', '');
   return true;

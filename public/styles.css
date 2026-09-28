@@ -668,11 +668,6 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .holdings .bar { background: var(--c1); }
 .summary-text summary { cursor: pointer; font-weight: 600; color: var(--accent); }
 .summary-text p { font-size: 0.86rem; line-height: 1.55; color: var(--text-secondary); }
-.news { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.news li { display: grid; gap: 2px; }
-.news a { color: var(--text-primary); font-weight: 600; text-decoration: none; line-height: 1.35; }
-.news a:hover { text-decoration: underline; }
-.news small { color: var(--text-muted); font-size: 0.76rem; }
 .tool-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .tool-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.88rem; padding: 6px 10px; background: var(--surface-raised); border-radius: 10px; }
 .tools-row { margin: 0 0 14px; }
@@ -780,3 +775,51 @@ a.activity-row { color: inherit; text-decoration: none; }
 .settings-rows .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 6px 16px; border-top: 1px solid var(--q-divider); }
 .settings-rows .setting-row:first-child { border-top: 0; }
 .settings-rows .setting-row small { color: var(--q-muted); }
+
+/* ---- 換匯・融資: three views; pay / receive like a bank app ---- */
+.fx-views { display: flex; width: 100%; margin: 4px 0 14px; }
+.fx-views button { flex: 1 1 0; }
+.fx-page { display: grid; gap: 14px; max-width: 640px; margin: 0 auto; }
+.fx-wallets { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -2px; padding: 2px; }
+.fx-wallets::-webkit-scrollbar { display: none; }
+.fx-wallet { flex: none; display: grid; gap: 2px; text-align: left; padding: 9px 13px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font: inherit; }
+.fx-wallet span { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+.fx-wallet strong { font-size: 0.95rem; white-space: nowrap; }
+.fx-wallet.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.fx-card { position: relative; gap: 12px; }
+.fx-side { display: grid; gap: 8px; padding: 14px; border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.fx-side-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 700; color: var(--text-secondary); }
+.fx-side-row { display: flex; align-items: center; gap: 10px; }
+.fx-cur { width: auto; max-width: 62%; min-width: 0; padding: 8px 26px 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font: 700 0.95rem var(--q-font); text-overflow: ellipsis; }
+.fx-input, .fx-result { min-width: 0; width: 100%; text-align: right; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-input { border: 0; background: none; color: var(--text-primary); padding: 4px 0; font-family: var(--q-font); font-size: max(16px, 1.6rem); }
+.fx-input:focus { outline: none; }
+.fx-result { color: var(--text-secondary); }
+.fx-side-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.82rem; }
+.fx-quick { display: flex; gap: 6px; }
+.fx-swap { justify-self: center; width: 40px; height: 40px; margin: -20px 0; z-index: 1; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--accent); font-size: 1.15rem; box-shadow: var(--shadow-sm); cursor: pointer; }
+.fx-preview { margin: 0; }
+.link-button { border: 0; background: none; padding: 0; color: var(--accent); font: 700 0.8rem var(--q-font); cursor: pointer; }
+.primary-button.block { width: 100%; }
+.button-row .grow { flex: 1 1 auto; }
+.loan-hero { display: grid; gap: 12px; }
+.loan-hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.loan-hero-top > div { display: grid; gap: 2px; }
+.loan-hero-top .muted { font-size: 0.8rem; }
+.loan-big { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
+.loan-ratio { text-align: right; }
+.loan-ratio strong { font-size: 1.2rem; }
+.loan-ratio small { font-size: 0.75rem; color: var(--text-muted); }
+.loan-bar { height: 10px; border-radius: 5px; background: var(--surface-sunken); overflow: hidden; }
+.loan-bar i { display: block; height: 100%; border-radius: 5px; background: var(--accent); }
+.loan-legend { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); }
+.loan-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.loan-facts > div { display: grid; gap: 2px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-sunken); min-width: 0; }
+.loan-facts .muted { font-size: 0.78rem; }
+.loan-facts strong { font-size: 1rem; white-space: nowrap; }
+.loan-facts small { font-size: 0.72rem; color: var(--text-muted); }
+.loan-card { display: grid; gap: 12px; }
+.loan-card .segmented { display: flex; }
+.loan-card .segmented button { flex: 1 1 0; }
+.fx-side-row .fx-cur { flex: 0 1 auto; }
+.fx-side-row .fx-input, .fx-side-row .fx-result { flex: 1 1 0; }

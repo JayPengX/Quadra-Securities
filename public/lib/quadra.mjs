@@ -287,6 +287,21 @@ async function flush() {
   }
 }
 
+// A text in another language (English company descriptions for a Chinese
+// reader…), through the proxy's translate route, kept a month everywhere.
+// to: 'zh-TW' | 'en' | …; resolves to the original text if it can't.
+export async function translate(text, to = 'zh-TW', from = 'auto') {
+  const q = String(text || '').slice(0, 4500);
+  if (!q.trim()) return q;
+  try {
+    const got = await proxyJson(`https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${from}&tl=${to}&q=${encodeURIComponent(q)}`, { ttl: 30 * 86_400_000 });
+    const out = Array.isArray(got) ? (Array.isArray(got[0]) ? got[0][0] : got[0]) : null;
+    return typeof out === 'string' && out.trim() ? out : q;
+  } catch {
+    return q;
+  }
+}
+
 export function proxyJson(url, { ttl = 60_000, trim = '', persist: keep = true, timeout = 20_000 } = {}) {
   const key = dataKey(url, trim);
   const hit = memory.get(key);
@@ -1031,13 +1046,12 @@ function detailsCard(s) {
     ]),
     node('div', { class: 'q-month' }, [
       node('div', {}, [node('small', { text: T('本月收入', 'In this month') }), node('strong', { class: 'num up', text: money(d.in, { sign: true }) })]),
-      node('div', {}, [node('small', { text: T('本月支出', 'Out this month') }), node('strong', { class: 'num down', text: money(d.out) })]),
-      node('div', {}, [node('small', { text: T('本月筆數', 'Entries') }), node('strong', { class: 'num', text: String(d.count) })])
+      node('div', {}, [node('small', { text: T('本月支出', 'Out this month') }), node('strong', { class: 'num down', text: money(d.out) })])
     ]),
     node('p', { class: 'q-payday', text: paydayText(s.lang) }),
     d.recent.length
       ? node('details', { class: 'q-recent' }, [
-          node('summary', { text: T('最近明細', 'Latest entries') }),
+          node('summary', { text: T(`最近明細（本月 ${d.count} 筆）`, `Latest entries (${d.count} this month)`) }),
           node(
             'ul',
             {},

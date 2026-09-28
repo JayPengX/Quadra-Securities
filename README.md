@@ -58,7 +58,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 - **Price alert** (🔔): tell me when it rises or falls to a price. Checked on every refresh and, for the time the page was closed, against the price bars since (reported with when it happened). With notifications turned on in the account sheet (the kit's notices, once per device), it notifies when the app is in the background; filled orders do too.
 - **Monthly plan** (📅 定期定額): buy NT$X on day N of every month. Each month buys at the first price after 00:00 Taiwan time on its day, as many units as the money covers after costs (a foreign one exchanges only the NT$ it needs, at that moment's rate). Missed months are bought from the price history when the page opens again; a month without enough NT$ is skipped and recorded.
 - **Time machine** link: what buying this years ago would be worth now.
-- **About the company / fund:** a quick read first (is the price cheap or pricey, profitability, growth, dividends, balance sheet, swings; for funds fees, size, how spread out, dividends), rough rules of thumb shown as calm/middling/worth-a-look tags. Then the next earnings and ex-dividend dates, four years (or quarters) of revenue and net income as bars, the analysts' average target price and range against today's price, and the numbers grouped (price and value, profitability, dividends, balance sheet, performance against the S&P 500), each with a line on what it means. Funds show past returns (this year, 3 and 5 years), the sector mix, the stock/bond/cash mix and the top 10 holdings. Then what it does (English) and recent news.
+- **About the company / fund:** a quick read first (is the price cheap or pricey, profitability, growth, dividends, balance sheet, swings; for funds fees, size, how spread out, dividends), rough rules of thumb shown as calm/middling/worth-a-look tags. Then the next earnings and ex-dividend dates, four years (or quarters) of revenue and net income as bars, the analysts' average target price and range against today's price, and the numbers grouped (price and value, profitability, dividends, balance sheet, performance against the S&P 500), each with a line on what it means. Funds show past returns (this year, 3 and 5 years), the sector mix, the stock/bond/cash mix and the top 10 holdings. Then what it does, translated into Chinese for a Chinese reader (the English original a tap away; Google's translate endpoint through the proxy, kept a month). There's no news.
 - **How fresh the price is:** "live" or "delayed N minutes", per market, from Yahoo's own figures.
 - Indexes and futures are watch-only and point to what tracks them (TAIEX → 0050, S&P 500 → VOO/SPY/00646, gold → the gold passbook/GLD/00635U …).
 
@@ -93,9 +93,17 @@ Currency pairs trade like stocks (market, limit and stop orders, shorting, alert
 - **Income:** dividends, bond coupons and cash interest over the last 12 months (month by month) and this year, the yield on holdings, the top payers, and dividends on the way.
 - Monthly plans (next buy, last result, stop) and price alerts (distance from the price, remove).
 - **Monthly payday** (no manual adding): on the 1st of every month (00:00 Taiwan time) NT$3,000 arrives on its own when the app is opened, like a salary, the same for every account. It counts as money put in, not as return. Missed months are paid when the page opens again; each payday has a fixed id (`pay:YYYY-MM`), so synced devices never pay twice. Accounts opened before paydays existed get them from their next 1st. The next payday shows under net worth.
-- Sync and backups.
+- Sync and backups. (Where the money came from moved to the Quadra Pass sheet's account details, the same in every app.)
 
 ### 換匯・融資 FX & loans
+
+Three views, one at a time: **換匯** (the wallets with money in them as chips
+to pay from; "you pay" and "you get" boxes, type either side; ¼, ½, all;
+your rate, the spread and its cost; one confirm button that says what
+happens), **匯率** (the rates board; a row opens the exchange with it) and
+**融資** (what's borrowed, the maintenance ratio, how much of the limit is
+used as a bar, collateral and interest so far; borrow or repay in one
+form).
 
 - **Exchange** between any two currencies, typing either what you pay or what you want to receive: the mid-market rate less a bank's spread (US$ 0.2%, JPY/EUR/HKD 0.3% … INR 1%, and the wider of the two between foreign currencies). The spread doubles while the FX market is shut (weekends), as a bank's does. The receiving side is rounded down to its smallest unit.
 - **A rates board**: NT$ per unit (per 100 for yen and won), the bank's buy and sell rates, and today's line.
@@ -162,7 +170,7 @@ Two devices' copies merge by uniting their logs:
 
 - `/v7/finance/spark`: up to 20 quotes per request, with today's line.
 - `/v8/finance/chart`: charts, dividends and splits.
-- `/v1/finance/search`: search, and news.
+- `/v1/finance/search`: search.
 - `/v10/finance/quoteSummary`: company and fund numbers (the Worker adds Yahoo's session cookie and crumb).
 
 **Rules that make it behave like a real broker:**

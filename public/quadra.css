@@ -532,7 +532,7 @@ body {
 }
 .q-month {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 .q-month > div {
@@ -562,6 +562,9 @@ body {
 }
 .q-details .q-payday {
   margin: 0;
+  font-weight: 500;
+  font-size: 12.5px;
+  color: var(--q-muted);
 }
 .q-recent {
   border: 1px solid var(--q-border);
@@ -802,6 +805,7 @@ body {
 }
 .q-app span {
   max-width: 100%;
+  letter-spacing: -0.02em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

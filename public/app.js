@@ -6,7 +6,7 @@ import {
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
-  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, moneySources, mergeDistinct, requiredCash, incomeSummary
+  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
@@ -14,7 +14,7 @@ import {
 } from './lib/markets.mjs';
 import { BONDS, ISSUERS } from './lib/bonds.mjs';
 import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs';
-import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol, useSession } from './lib/quotes.mjs';
+import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, searchSymbols, fxSymbol, useSession } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, SERIES } from './lib/chart.mjs';
@@ -24,7 +24,7 @@ import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
   APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, notify, notifyOn, ask, randomId as quadraId
+  affinity, helpUrl, notify, notifyOn, ask, translate, randomId as quadraId
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -63,8 +63,8 @@ const state = {
   search: { query: '', results: [], loading: false },
   detail: null,
   // mode 'pay': the amount is what you give; 'get': what you want to receive.
-  fx: { from: BASE, to: 'USD', amount: '', mode: 'pay' },
-  loan: { currency: BASE, amount: '' },
+  fx: { from: BASE, to: 'USD', amount: '', mode: 'pay', view: 'exchange' },
+  loan: { currency: BASE, amount: '', mode: 'borrow' },
   alloc: 'kind',
   historyView: 'activity',
   activityFilter: 'all',
@@ -828,7 +828,7 @@ async function openDetail(symbol) {
   loadAbout(symbol);
 }
 
-// Kinds with a company or fund behind them (P/E, holdings, news).
+// Kinds with a company or fund behind them (P/E, holdings).
 const ABOUT_KINDS = new Set(['stock', 'etf', 'bond', 'fund']);
 async function loadAbout(symbol) {
   const q = state.quotes.get(symbol);
@@ -836,13 +836,17 @@ async function loadAbout(symbol) {
   const have = state.about.get(symbol);
   if (have && (have.loading || Date.now() - have.at < 30 * 60_000)) return;
   state.about.set(symbol, { loading: true, at: Date.now() });
-  const info = catalogInfo(symbol);
-  const [facts, news] = await Promise.all([
-    fetchFundamentals(symbol).catch(() => null),
-    fetchNews(/\.(TW|TWO)$/.test(symbol) ? info?.en || q.name : bareSymbol(symbol)).catch(() => [])
-  ]);
-  state.about.set(symbol, { loading: false, at: Date.now(), facts, news });
+  const facts = await fetchFundamentals(symbol).catch(() => null);
+  state.about.set(symbol, { loading: false, at: Date.now(), facts });
   if (state.detail?.symbol === symbol) refreshDetailLive();
+  // What it does, in the reader's language (Yahoo writes it in English).
+  if (facts?.summary && locale !== 'en') {
+    const text = await translate(facts.summary, 'zh-TW', 'en');
+    if (text !== facts.summary) {
+      state.about.set(symbol, { ...state.about.get(symbol), summaryLocal: text });
+      if (state.detail?.symbol === symbol) refreshDetailLive();
+    }
+  }
 }
 
 async function loadChart() {
@@ -1176,16 +1180,12 @@ function aboutHtml(symbol, q) {
   if (!a || a.loading) return fold(icon, title, `<p class="muted">${h(t('aboutLoading'))}</p>`, true, 'about');
   const f = a.facts;
   const body = !f ? `<p class="muted">${h(t('aboutNone'))}</p>` : fund ? fundAboutHtml(f, q) : stockAboutHtml(f, q);
+  // In the reader's language once translated; the English original a tap away.
+  const local = a.summaryLocal && locale !== 'en';
   const summary = f?.summary
-    ? `<details class="summary-text"><summary>${h(t('whatItDoes'))}</summary><p lang="en">${h(f.summary)}</p>${f.website ? `<p><a href="${h(f.website)}" target="_blank" rel="noopener">${h(f.website.replace(/^https?:\/\//, ''))}</a></p>` : ''}</details>`
+    ? `<details class="summary-text"><summary>${h(t('whatItDoes'))}</summary>${local ? `<p>${h(a.summaryLocal)}</p><details class="summary-orig"><summary>${h(t('originalText'))}</summary><p lang="en">${h(f.summary)}</p></details>` : `<p lang="en">${h(f.summary)}</p>`}${f.website ? `<p><a href="${h(f.website)}" target="_blank" rel="noopener">${h(f.website.replace(/^https?:\/\//, ''))}</a></p>` : ''}</details>`
     : '';
-  const news = a.news?.length
-    ? `<h3 class="about-h">📰 ${h(t('newsTitle'))}</h3><ul class="news">${a.news
-        .slice(0, 5)
-        .map(n => `<li><a href="${h(n.link)}" target="_blank" rel="noopener">${h(n.title)}</a><small>${h(n.publisher)} · ${h(dateTime(n.t))}</small></li>`)
-        .join('')}</ul>`
-    : '';
-  return fold(icon, title, `${body}${summary}${news}<p class="note">${h(t('aboutSource'))}</p>`, true, 'about');
+  return fold(icon, title, `${body}${summary}<p class="note">${h(t('aboutSource'))}</p>`, true, 'about');
 }
 
 // One quick read: a label, a verdict and the number behind it.
@@ -1626,7 +1626,6 @@ function renderPortfolio() {
     ${incomeCardHtml(v)}
     ${plansListHtml()}
     ${alertsListHtml()}
-    ${sourcesCardHtml()}
   `;
   renderNetWorthChart(v, s);
 }
@@ -1734,7 +1733,7 @@ function walletRow(c, reserved = 0, settling = 0) {
 
 function loanWalletRow(l) {
   const info = currencyInfo(l.currency);
-  return `<button class="wallet debt" type="button" data-action="goto" data-tab="fx">
+  return `<button class="wallet debt" type="button" data-action="fx-view-go" data-view="loans">
     <span class="wallet-flag">${info.flag}</span>
     <span class="wallet-main"><strong>${h(t('loanIn', { cur: l.currency }))}</strong><small>${h(t('loanRate', { rate: pct(l.rate, { digits: 2, sign: false }) }))}</small></span>
     <span class="wallet-amt"><strong class="num down-ink">−${h(money(l.balance, l.currency))}</strong>${l.currency !== BASE ? `<small class="num">≈ −${h(money(l.twd, BASE))}</small>` : ''}</span>
@@ -1875,59 +1874,83 @@ function currencyOptions(selected, list = [BASE, ...Object.keys(CURRENCIES).filt
   return all.map(c => `<option value="${h(c)}" ${c === selected ? 'selected' : ''}>${currencyInfo(c).flag} ${h(c)} · ${h(L(currencyInfo(c)))}</option>`).join('');
 }
 
+// 換匯・融資: three views, one at a time (exchange, the rates board, loans),
+// so the page is never one long scroll.
 function renderFx() {
   const box = $('fx-body');
   const f = state.fx;
+  const view = f.view || 'exchange';
+  const tabs = `<div class="segmented fx-views" role="tablist">${[
+    ['exchange', t('fxViewExchange')],
+    ['rates', t('fxViewRates')],
+    ['loans', t('fxViewLoans')]
+  ]
+    .map(([k, label]) => `<button type="button" data-action="fx-view" data-view="${k}" aria-pressed="${view === k}">${h(label)}</button>`)
+    .join('')}</div>`;
+  box.innerHTML = `${tabs}${view === 'rates' ? ratesHtml() : view === 'loans' ? loansHtml() : exchangeHtml()}`;
+}
+
+function exchangeHtml() {
+  const f = state.fx;
   const s = snap();
-  const avail = s ? available(state.account, s) : { cash: {} };
+  if (!state.account || !s) return `<div class="card"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
   const amount = fxPayAmount();
   const q = amount > 0 ? quoteExchange(f.from, f.to, amount, state.rates, state.fxOpen) : null;
   // Unsettled sale proceeds can't be exchanged yet.
-  const have = s ? Math.max(0, withdrawable(state.account, s)[f.from] || 0) : 0;
-  const waiting = state.account ? unsettled(state.account)[f.from] || 0 : 0;
+  const have = Math.max(0, withdrawable(state.account, s)[f.from] || 0);
+  const haveTo = Math.max(0, withdrawable(state.account, s)[f.to] || 0);
+  const waiting = unsettled(state.account)[f.from] || 0;
   const mid = state.rates[f.from] && state.rates[f.to] ? state.rates[f.from] / state.rates[f.to] : null;
   const spread = Math.max(currencyInfo(f.from).spread, currencyInfo(f.to).spread) * (state.fxOpen ? 1 : CLOSED_FX_MULTIPLIER);
   const tooMuch = amount > have + 1e-9;
   const usd = state.quotes.get(fxSymbol('USD'));
-  box.innerHTML = `
-    <div class="two-col">
-      <div class="card fx-card">
-        <h3 class="card-title">${h(t('exchangeTitle'))}</h3>
-        ${!state.account ? `<p>${h(t('needAccount'))}</p><div class="spinner"></div>` : `
-        <label class="field"><span>${h(t('fxFrom'))}</span><select id="fx-from">${currencyOptions(f.from)}</select></label>
-        <div class="segmented fx-mode" role="group" aria-label="${h(t('fxModeLabel'))}">
-          <button type="button" data-action="fx-mode" data-mode="pay" aria-pressed="${f.mode !== 'get'}">${h(t('fxModePay', { cur: f.from }))}</button>
-          <button type="button" data-action="fx-mode" data-mode="get" aria-pressed="${f.mode === 'get'}">${h(t('fxModeGet', { cur: f.to }))}</button>
+  const pay = f.mode === 'get';
+  // The side you type in is an input; the other shows the result.
+  const payBox = pay
+    ? `<strong class="fx-result num">${q ? h(money(amount, f.from)) : '—'}</strong>`
+    : `<input id="fx-amount" class="fx-input num" inputmode="decimal" autocomplete="off" value="${h(f.amount)}" placeholder="0" aria-label="${h(t('amount'))}" />`;
+  const getBox = pay
+    ? `<input id="fx-amount" class="fx-input num" inputmode="decimal" autocomplete="off" value="${h(f.amount)}" placeholder="0" aria-label="${h(t('fxWantAmount'))}" />`
+    : `<strong class="fx-result num">${q ? h(money(q.received, f.to)) : '—'}</strong>`;
+  const wallets = Object.entries(withdrawable(state.account, s))
+    .filter(([, v]) => v > 0.005)
+    .sort(([a], [b]) => (a === BASE ? -1 : b === BASE ? 1 : 0));
+  return `<div class="fx-page">
+    ${wallets.length ? `<div class="fx-wallets">${wallets.map(([c, v]) => `<button type="button" class="fx-wallet${c === f.from ? ' on' : ''}" data-action="fx-from" data-cur="${h(c)}"><span>${currencyInfo(c).flag} ${h(c)}</span><strong class="num">${h(money(v, c))}</strong></button>`).join('')}</div>` : ''}
+    <div class="card fx-card">
+      <div class="fx-side">
+        <div class="fx-side-top"><span>${h(t('fxYouPayLabel'))}</span><button class="link-button" type="button" data-action="fx-mode" data-mode="${pay ? 'pay' : 'get'}">${h(pay ? t('fxTypePay') : t('fxTypeGet'))}</button></div>
+        <div class="fx-side-row"><select id="fx-from" class="fx-cur">${currencyOptions(f.from)}</select>${payBox}</div>
+        <div class="fx-side-foot"><span class="muted">${h(t('fxAvailable', { amount: money(have, f.from) }))}</span>
+          ${pay ? '' : `<span class="fx-quick">${[0.25, 0.5, 1].map(x => `<button class="chip small" type="button" data-action="fx-pct" data-pct="${x}">${x === 1 ? h(t('all')) : `${x * 100}%`}</button>`).join('')}</span>`}
         </div>
-        <div class="fx-amount">
-          <label class="field grow"><span>${h(f.mode === 'get' ? t('fxWantAmount') : t('amount'))} (${h(f.mode === 'get' ? f.to : f.from)})</span><input id="fx-amount" inputmode="decimal" autocomplete="off" value="${h(f.amount)}" placeholder="0" /></label>
-          ${f.mode === 'get' ? '' : `<button class="chip small" type="button" data-action="fx-max">${h(t('all'))} <small>${h(money(have, f.from))}</small></button>`}
-        </div>
-        ${f.mode === 'get' && q ? `<p class="muted">${h(t('fxYouPay', { amount: money(amount, f.from) }))}</p>` : ''}
-        <button class="swap" type="button" data-action="fx-swap" aria-label="${h(t('swap'))}">⇅</button>
-        <label class="field"><span>${h(t('fxTo'))}</span><select id="fx-to">${currencyOptions(f.to)}</select></label>
-        <dl class="preview">
-          <div><dt>${h(t('midRate'))}</dt><dd class="num">${mid ? h(rateLine(f.from, f.to, mid)) : '—'}</dd></div>
-          <div><dt>${h(t('spread'))}</dt><dd class="num">${h(pct(spread, { digits: 2, sign: false }))}${state.fxOpen ? '' : ` <small>${h(t('closedDouble'))}</small>`}</dd></div>
-          ${q ? `<div><dt>${h(t('yourRate'))}</dt><dd class="num">${h(rateLine(f.from, f.to, q.rate))}</dd></div>
-          <div><dt>${h(t('fxCost'))}</dt><dd class="num">${h(money(q.spreadTWD, BASE, { digits: q.spreadTWD < 10 ? 2 : 0 }))}</dd></div>
-          <div class="preview-total"><dt>${h(t('youGet'))}</dt><dd class="num"><strong>${h(money(q.received, f.to))}</strong></dd></div>` : ''}
-        </dl>
-        ${tooMuch ? `<p class="warn">${h(t('notEnoughCur', { cur: f.from, have: money(have, f.from) }))}</p>` : ''}
-        ${waiting > 0 ? `<p class="note">${h(t('unsettledNote', { amount: money(waiting, f.from) }))}</p>` : ''}
-        <p class="note">${h(state.fxOpen ? t('fxOpenNote') : t('fxClosedNote'))}${usd?.marketTime ? ` ${h(t('asOf', { time: dateTime(usd.marketTime) }))}` : ''}</p>
-        ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
-        <button class="primary-button" type="button" data-action="fx-go" ${q && q.received > 0 && !tooMuch && f.from !== f.to && pricesLive() ? '' : 'disabled'}>${h(t('doExchange'))}</button>`}
       </div>
-      <div class="card">
-        <h3 class="card-title">${h(t('ratesTitle'))}</h3>
-        <p class="lede">${h(t('ratesIntro'))}</p>
-        <div class="button-row"><button class="ghost-button" type="button" data-action="fx-trade">💱 ${h(t('fxTradeButton'))}</button></div>
-        <div class="rates">${Object.keys(CURRENCIES).filter(c => c !== BASE).map(rateRow).join('')}</div>
+      <button class="fx-swap" type="button" data-action="fx-swap" aria-label="${h(t('swap'))}">⇅</button>
+      <div class="fx-side">
+        <div class="fx-side-top"><span>${h(t('fxYouGetLabel'))}</span></div>
+        <div class="fx-side-row"><select id="fx-to" class="fx-cur">${currencyOptions(f.to)}</select>${getBox}</div>
+        <div class="fx-side-foot"><span class="muted">${h(t('fxYouHave', { amount: money(haveTo, f.to) }))}</span></div>
       </div>
+      <dl class="preview fx-preview">
+        <div><dt>${h(t('yourRate'))}</dt><dd class="num">${q ? h(rateLine(f.from, f.to, q.rate)) : mid ? h(rateLine(f.from, f.to, mid)) : '—'}</dd></div>
+        <div><dt>${h(t('spread'))}</dt><dd class="num">${h(pct(spread, { digits: 2, sign: false }))}${state.fxOpen ? '' : ` <small>${h(t('closedDouble'))}</small>`}</dd></div>
+        ${q ? `<div><dt>${h(t('fxCost'))}</dt><dd class="num">${h(money(q.spreadTWD, BASE, { digits: q.spreadTWD < 10 ? 2 : 0 }))}</dd></div>` : ''}
+      </dl>
+      ${tooMuch ? `<p class="warn">${h(t('notEnoughCur', { cur: f.from, have: money(have, f.from) }))}</p>` : ''}
+      ${waiting > 0 ? `<p class="note">${h(t('unsettledNote', { amount: money(waiting, f.from) }))}</p>` : ''}
+      ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
+      <button class="primary-button block" type="button" data-action="fx-go" ${q && q.received > 0 && !tooMuch && f.from !== f.to && pricesLive() ? '' : 'disabled'}>${h(q && !tooMuch ? t('fxConfirm', { from: money(amount, f.from), to: money(q.received, f.to) }) : t('doExchange'))}</button>
+      <p class="note">${h(state.fxOpen ? t('fxOpenNote') : t('fxClosedNote'))}${usd?.marketTime ? ` ${h(t('asOf', { time: dateTime(usd.marketTime) }))}` : ''}</p>
     </div>
-    ${loansHtml()}
-  `;
+  </div>`;
+}
+
+function ratesHtml() {
+  return `<div class="card">
+    <p class="lede">${h(t('ratesIntro'))}</p>
+    <div class="rates">${Object.keys(CURRENCIES).filter(c => c !== BASE).map(rateRow).join('')}</div>
+    <div class="button-row"><button class="ghost-button" type="button" data-action="fx-trade">💱 ${h(t('fxTradeButton'))}</button></div>
+  </div>`;
 }
 
 // What leaves the `from` wallet: the typed amount, or (typing what you want
@@ -1956,7 +1979,7 @@ function rateRow(c) {
 }
 
 function loansHtml() {
-  if (!state.account) return '';
+  if (!state.account) return `<div class="card"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
   const v = valuation();
   const l = state.loan;
   const s = snap();
@@ -1965,28 +1988,41 @@ function loansHtml() {
   const rate = currencyInfo(l.currency).loanRate;
   const amount = Number(l.amount);
   const capacityCur = state.rates[l.currency] ? v.capacity / state.rates[l.currency] : 0;
-  return `<div class="card loans-card">
-    <h3 class="card-title">${h(t('loansTitle'))}</h3>
-    <p class="lede">${h(t('loansIntro'))}</p>
-    <div class="kpis">
-      ${kpi(t('collateral'), money(v.collateral, BASE), t('collateralSub'))}
-      ${kpi(t('borrowed'), money(v.debtTWD, BASE), v.interestTWD > 0 ? t('interestSoFar', { amount: money(v.interestTWD, BASE, { digits: v.interestTWD < 10 ? 2 : 0 }) }) : '')}
-      ${kpi(t('canBorrow'), money(v.capacity, BASE))}
-      ${kpi(t('maintenance'), v.debtTWD > 0 ? pct(v.ratio, { digits: 0, sign: false }) : '—', v.debtTWD > 0 ? t(`margin_${v.margin}`) : t('noLoans'), v.margin === 'ok' ? '' : 'down-ink')}
+  const limit = v.debtTWD + v.capacity;
+  const used = limit > 0 ? Math.min(1, v.debtTWD / limit) : 0;
+  const repaying = l.mode === 'repay';
+  const canBorrow = amount > 0 && v.margin === 'ok' && amount <= capacityCur + 1e-9;
+  const canRepay = loan?.balance > 0 && amount > 0;
+  return `<div class="fx-page">
+    <div class="card loan-hero">
+      <div class="loan-hero-top">
+        <div><span class="muted">${h(t('borrowed'))}</span><strong class="num loan-big">${h(money(v.debtTWD, BASE))}</strong></div>
+        <div class="loan-ratio ${v.margin === 'ok' ? '' : 'down-ink'}"><span class="muted">${h(t('maintenance'))}</span><strong class="num">${v.debtTWD > 0 ? h(pct(v.ratio, { digits: 0, sign: false })) : '—'}</strong><small>${h(v.debtTWD > 0 ? t(`margin_${v.margin}`) : t('noLoans'))}</small></div>
+      </div>
+      <div class="loan-bar" role="img" aria-label="${h(t('loanUsed', { pct: pct(used, { digits: 0, sign: false }) }))}"><i style="width:${(used * 100).toFixed(1)}%"></i></div>
+      <div class="loan-legend"><span>${h(t('loanUsed', { pct: pct(used, { digits: 0, sign: false }) }))}</span><span>${h(t('canBorrow'))} <strong class="num">${h(money(v.capacity, BASE))}</strong></span></div>
+      <div class="loan-facts">
+        <div><span class="muted">${h(t('collateral'))}</span><strong class="num">${h(money(v.collateral, BASE))}</strong><small>${h(t('collateralSub'))}</small></div>
+        <div><span class="muted">${h(t('interestAccrued'))}</span><strong class="num">${h(money(v.interestTWD || 0, BASE, { digits: (v.interestTWD || 0) < 10 ? 2 : 0 }))}</strong></div>
+      </div>
+      ${v.debtTWD > 0 ? gauge(v.ratio) : ''}
     </div>
-    ${v.debtTWD > 0 ? gauge(v.ratio) : ''}
-    <div class="loan-form">
-      <label class="field"><span>${h(t('currency'))}</span><select id="loan-cur">${currencyOptions(l.currency)}</select></label>
-      <label class="field grow"><span>${h(t('amount'))}</span><input id="loan-amount" inputmode="decimal" autocomplete="off" value="${h(l.amount)}" placeholder="0" /></label>
+    <div class="card loan-card">
+      <div class="segmented" role="group">
+        <button type="button" data-action="loan-mode" data-mode="borrow" aria-pressed="${!repaying}">${h(t('borrow'))}</button>
+        <button type="button" data-action="loan-mode" data-mode="repay" aria-pressed="${repaying}">${h(t('repay'))}</button>
+      </div>
+      <div class="fx-side">
+        <div class="fx-side-row"><select id="loan-cur" class="fx-cur">${currencyOptions(l.currency)}</select><input id="loan-amount" class="fx-input num" inputmode="decimal" autocomplete="off" value="${h(l.amount)}" placeholder="0" aria-label="${h(t('amount'))}" /></div>
+        <div class="fx-side-foot"><span class="muted">${h(repaying ? (loan?.balance > 0 ? t('owed', { amount: money(loan.balance, l.currency) }) : t('noLoanCur', { cur: l.currency })) : t('loanTerms', { rate: pct(rate, { digits: 2, sign: false }), cap: money(capacityCur, l.currency) }))}</span></div>
+      </div>
+      ${!repaying && amount > 0 ? `<p class="muted">${h(t('interestPerDay', { amount: money((amount * rate) / 365, l.currency, { digits: 2 }) }))}</p>` : ''}
+      ${repaying
+        ? `<div class="button-row"><button class="primary-button grow" type="button" data-action="repay" ${canRepay ? '' : 'disabled'}>${h(t('repay'))}</button>${loan?.balance > 0 ? `<button class="ghost-button" type="button" data-action="repay-all" ${(avail.cash[l.currency] || 0) > 0 ? '' : 'disabled'}>${h(t('repayAll'))}</button>` : ''}</div>`
+        : `<button class="primary-button block" type="button" data-action="borrow" ${canBorrow ? '' : 'disabled'}>${h(t('borrow'))}</button>`}
+      <p class="note">${h(t('loansIntro'))}</p>
     </div>
-    <p class="muted">${h(t('loanTerms', { rate: pct(rate, { digits: 2, sign: false }), cap: money(capacityCur, l.currency) }))}${loan?.balance > 0 ? ` · ${h(t('owed', { amount: money(loan.balance, l.currency) }))}` : ''}</p>
-    ${amount > 0 ? `<p class="muted">${h(t('interestPerDay', { amount: money((amount * rate) / 365, l.currency, { digits: 2 }) }))}</p>` : ''}
-    <div class="button-row">
-      <button class="primary-button" type="button" data-action="borrow" ${amount > 0 && v.margin === 'ok' && amount <= capacityCur + 1e-9 ? '' : 'disabled'}>${h(t('borrow'))}</button>
-      <button class="ghost-button" type="button" data-action="repay" ${loan?.balance > 0 && amount > 0 ? '' : 'disabled'}>${h(t('repay'))}</button>
-      ${loan?.balance > 0 ? `<button class="ghost-button" type="button" data-action="repay-all" ${(avail.cash[l.currency] || 0) > 0 ? '' : 'disabled'}>${h(t('repayAll'))}</button>` : ''}
-    </div>
-    ${v.loans.length ? `<div class="wallets">${v.loans.map(x => `<div class="wallet debt"><span class="wallet-flag">${currencyInfo(x.currency).flag}</span><span class="wallet-main"><strong>${h(x.currency)}</strong><small>${h(t('loanRate', { rate: pct(x.rate, { digits: 2, sign: false }) }))} · ${h(t('interestSoFar', { amount: money(x.interest, x.currency, { digits: 2 }) }))}</small></span><span class="wallet-amt"><strong class="num down-ink">−${h(money(x.balance, x.currency))}</strong>${x.currency !== BASE ? `<small class="num">≈ −${h(money(x.twd, BASE))}</small>` : ''}</span></div>`).join('')}</div>` : ''}
+    ${v.loans.length ? `<div class="card"><h3 class="card-title">${h(t('yourLoans'))}</h3><div class="wallets">${v.loans.map(x => `<div class="wallet debt"><span class="wallet-flag">${currencyInfo(x.currency).flag}</span><span class="wallet-main"><strong>${h(x.currency)}</strong><small>${h(t('loanRate', { rate: pct(x.rate, { digits: 2, sign: false }) }))} · ${h(t('interestSoFar', { amount: money(x.interest, x.currency, { digits: 2 }) }))}</small></span><span class="wallet-amt"><strong class="num down-ink">−${h(money(x.balance, x.currency))}</strong>${x.currency !== BASE ? `<small class="num">≈ −${h(money(x.twd, BASE))}</small>` : ''}</span></div>`).join('')}</div></div>` : ''}
   </div>`;
 }
 
@@ -2098,7 +2134,7 @@ function activityTarget(e) {
   const button = attrs => ['button', `type="button" ${attrs}`];
   if (e.symbol && e.type !== 'deposit') return button(`data-action="open" data-symbol="${h(e.symbol)}"`);
   if (e.type === 'fx') return button(`data-action="fx-pair" data-from="${h(e.from)}" data-to="${h(e.to)}"`);
-  if (e.type === 'interest' || e.type === 'borrow' || e.type === 'repay') return button('data-action="goto" data-tab="fx"');
+  if (e.type === 'interest' || e.type === 'borrow' || e.type === 'repay') return button('data-action="fx-view-go" data-view="loans"');
   if (e.type === 'deposit' && e.pool && APPS[e.app]) return ['a', `href="${h(appUrl(e.app))}"`];
   if (e.type === 'deposit' && e.game) return button('data-action="goto" data-tab="guide"');
   if (e.type === 'deposit') return button('data-action="goto" data-tab="portfolio"');
@@ -2526,28 +2562,6 @@ const symbolKeys = symbol => {
   return [`sym:${symbol}`, info?.category ? `cat:${info.category}` : null, quote?.kind ? `kind:${quote.kind}` : null, quote?.market ? `mkt:${quote.market}` : null];
 };
 
-// Where the money came from: the opening amount, pay, the other Quadra
-// apps, transfers. Each source opens where it comes from.
-function sourceLine(key, inner) {
-  const app = { srcOdds: 'odds', srcVocab: 'vocab', srcGame: 'vocab' }[key];
-  if (app) return `<a class="pool-line pool-line-link" href="${h(appUrl(app))}" data-go="${app}">${inner}</a>`;
-  return `<div class="pool-line">${inner}</div>`;
-}
-
-function sourcesCardHtml() {
-  if (!state.account) return '';
-  const m = moneySources(state.account);
-  const rows = [
-    ['srcStart', m.start], ['srcPay', m.pay], ['srcGame', m.game], ['srcOdds', m.odds], ['srcVocab', m.vocab], ['srcTransfer', m.transfer], ['srcMerge', m.merge]
-  ].filter(([, v], i) => i < 2 || Math.abs(v) >= 0.5);
-  const days = Math.max(1, Math.round((Date.now() - state.account.created) / 86_400_000));
-  return `<div class="card">
-    <h3 class="card-title">${h(t('srcTitle'))}</h3>
-    ${rows.map(([k, v]) => sourceLine(k, `<span class="pool-label">${h(t(k))}</span><strong class="pool-value num ${v < 0 ? 'down-ink' : ''}">${h(money(v, BASE))}</strong>`)).join('')}
-    <p class="muted">${h(t('srcAge', { days: num(days, 0), date: fmtDate(state.account.created) }))}</p>
-  </div>`;
-}
-
 // This app's own settings, in the account sheet.
 function settingsEl() {
   const box = document.createElement('div');
@@ -2754,16 +2768,40 @@ document.addEventListener('click', event => {
     case 'fx-from':
       state.fx.from = el.dataset.cur;
       if (state.fx.to === state.fx.from) state.fx.to = state.fx.from === BASE ? 'USD' : BASE;
+      state.fx.view = 'exchange';
       showTab('fx');
       break;
     case 'fx-pair':
       state.fx.from = el.dataset.from;
       state.fx.to = el.dataset.to;
+      state.fx.view = 'exchange';
       showTab('fx');
       break;
     case 'fx-to':
       state.fx.to = el.dataset.cur;
       if (state.fx.from === state.fx.to) state.fx.from = BASE;
+      state.fx.view = 'exchange';
+      renderFx();
+      break;
+    case 'fx-view':
+      state.fx.view = el.dataset.view;
+      renderFx();
+      break;
+    case 'fx-view-go':
+      state.fx.view = el.dataset.view;
+      showTab('fx');
+      break;
+    case 'fx-pct': {
+      const have = Math.max(0, withdrawable(state.account, snap())[state.fx.from] || 0);
+      const digits = currencyInfo(state.fx.from).digits ?? 2;
+      state.fx.mode = 'pay';
+      state.fx.amount = String(Math.floor(have * Number(el.dataset.pct) * 10 ** digits) / 10 ** digits);
+      renderFx();
+      break;
+    }
+    case 'loan-mode':
+      state.loan.mode = el.dataset.mode;
+      state.loan.amount = '';
       renderFx();
       break;
     case 'fx-swap':

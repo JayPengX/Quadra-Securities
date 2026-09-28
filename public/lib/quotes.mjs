@@ -4,6 +4,7 @@
 // splits from /v8/finance/chart, and symbol search from /v1/finance/search.
 import { BASE, METALS, GRAMS_PER_OUNCE, kindOf, marketOf, normalizeCurrency } from './markets.mjs';
 import { BONDS, ISSUERS, CURVE_SYMBOLS, bondQuote, bondLine, curveOf } from './bonds.mjs';
+import { proxyJson } from './quadra.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const YAHOO = 'https://query1.finance.yahoo.com';
@@ -18,37 +19,18 @@ export function proxied(url, token = session?.token || '') {
   return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}${token ? `&qt=${encodeURIComponent(token)}` : ''}`;
 }
 
-// At most this many requests at once, and one retry for a failed one.
-const MAX_CONCURRENT = 4;
-let running = 0;
-const waiting = [];
-async function slot(task) {
-  if (running >= MAX_CONCURRENT) await new Promise(resolve => waiting.push(resolve));
-  running++;
-  try {
-    return await task();
-  } finally {
-    running--;
-    waiting.shift()?.();
-  }
+// Through the kit's proxyJson: requests made together go as one batch
+// (one Worker request), and each answer is remembered (in memory and on the
+// device) for as long as that kind of data stays useful: today's quotes 25
+// seconds (orders fill at a price under a minute old), longer charts half an
+// hour, company numbers an hour, searches a day.
+function ttlFor(url) {
+  if (url.includes('/v1/finance/search')) return 24 * 3_600_000;
+  if (url.includes('/v10/finance/quoteSummary')) return 3_600_000;
+  const range = /[?&]range=([^&]+)/.exec(url)?.[1] || '1d';
+  return range === '1d' || range === '5d' ? 25_000 : 30 * 60_000;
 }
-
-async function getJson(url) {
-  return slot(async () => {
-    let lastError;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const token = session ? await session.ensureToken().catch(() => session.token) : '';
-        const res = await fetch(proxied(url, token), { signal: AbortSignal.timeout(15_000) });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return await res.json();
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw lastError;
-  });
-}
+const getJson = url => proxyJson(url, { ttl: ttlFor(url), persist: ttlFor(url) > 60_000, timeout: 15_000 });
 
 // The FX symbol for a currency's price in NT$ (USDTWD=X: NT$ per US$).
 export const fxSymbol = currency => `${currency}${BASE}=X`;
@@ -411,15 +393,3 @@ export async function fetchFundamentals(symbol) {
   return parseFundamentals(await getJson(`${YAHOO}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${modules}`));
 }
 
-// Recent news headlines about a symbol (Yahoo's search; English sources).
-export function parseNews(json) {
-  return (json?.news || [])
-    .filter(n => n.title && /^https:\/\//.test(n.link || ''))
-    .map(n => ({ title: n.title, publisher: n.publisher || '', link: n.link, t: (n.providerPublishTime || 0) * 1000 }))
-    .sort((a, b) => b.t - a.t);
-}
-export async function fetchNews(query) {
-  const q = String(query || '').trim();
-  if (!q || /[^\x20-\x7e]/.test(q)) return [];
-  return parseNews(await getJson(`${YAHOO}/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=0&newsCount=6&listsCount=0`));
-}

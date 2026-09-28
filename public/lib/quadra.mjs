@@ -643,8 +643,10 @@ const node = (tag, props = {}, children = []) => {
 export { node as el };
 
 const typedPass = text => cleanCode(text).replace(/[^2-9A-HJ-NP-Z]/g, '').slice(0, 10);
+// No maxlength: a pass is copied as ABCDE-23456 (11 characters), and a
+// maxlength of 10 cut its last character off before the dash was taken out.
 function passInput(label) {
-  const input = node('input', { class: 'q-pass-input', type: 'text', inputmode: 'text', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', maxlength: '10', placeholder: 'ABCDE23456', 'aria-label': label });
+  const input = node('input', { class: 'q-pass-input', type: 'text', inputmode: 'text', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', placeholder: 'ABCDE23456', 'aria-label': label });
   input.addEventListener('input', () => {
     input.value = typedPass(input.value);
   });

@@ -831,8 +831,8 @@ export function nextPayday(now = Date.now()) {
 export function paydayText(lang, now = Date.now()) {
   const d = new Date(nextPayday(now) + TPE);
   return lang === 'en'
-    ? `Payday: ${money(ECONOMY.monthly)} on the 1st of every month (next ${d.getUTCMonth() + 1}/1)`
-    : `發薪日：每月 1 日 ${money(ECONOMY.monthly)}（下次 ${d.getUTCMonth() + 1}/1）`;
+    ? `Payday: ${money(ECONOMY.monthly)} on the 1st of every month (next ${d.getUTCMonth() + 1}/1; a missed month is paid when you're back)`
+    : `發薪日：每月 1 日 ${money(ECONOMY.monthly)}（下次 ${d.getUTCMonth() + 1}/1；沒打開的月份下次補發）`;
 }
 export function accountSheet(s, { extra = null } = {}) {
   const en = s.lang === 'en';

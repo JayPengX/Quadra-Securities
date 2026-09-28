@@ -116,6 +116,19 @@ async function loadAccount() {
     return null;
   }
 }
+// The copy Quadra Securities kept on the device before accounts moved onto
+// the pass (left in place as a backup): folded in when it is the same
+// account, or when the pass's account has nothing in it yet.
+async function oldDeviceAccount(account) {
+  try {
+    const old = await unpack(localStorage.getItem(STORE.account));
+    if (!isAccount(old) || !(old.events || []).length) return account;
+    if (!account) return old;
+    if (old.id === account.id) return mergeAccounts(account, old);
+    if (!(account.events || []).length) return mergeDistinct(account, old);
+  } catch {}
+  return account;
+}
 
 let saveTimer;
 let syncTimer;
@@ -2410,6 +2423,8 @@ function syncNow({ pull = false } = {}) {
 async function mergeRemote(remote, { pull = false } = {}) {
   if (!remote) return;
   const theirs = remote.payload ? await unpack(remote.payload).catch(() => null) : null;
+  // A copy on the pass that can't be read is never saved over.
+  if (remote.payload && !isAccount(theirs)) throw new Error('unreadable account');
   let account = state.account;
   const their = isAccount(theirs) ? theirs : null;
   if (account && their && account.id !== their.id) account = mergeDistinct(their, account);
@@ -3036,10 +3051,15 @@ q.on('active', live => {
 
 async function boot() {
   const first = await q.start();
-  state.wallet = q.wallet;
+  state.wallet = first.wallet || q.wallet;
   state.account = await loadAccount();
   // The pass's own copy, merged in (and the account made, the first time).
   if (first && !first.offline) await (syncChain = syncChain.then(() => mergeRemote(first)).catch(error => (state.sync.error = error.message)));
+  const recovered = await oldDeviceAccount(state.account);
+  if (recovered && recovered !== state.account) {
+    commit(recovered, { sync: false });
+    syncNow();
+  }
   if (!state.account) ensureAccount(q.wallet);
   state.accountReady = true;
   if (state.fromCache) $('loading').hidden = true;

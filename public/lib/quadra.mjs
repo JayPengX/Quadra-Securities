@@ -332,7 +332,7 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
   // Sign in (the gate, when there's no pass), take any pass handed over by
   // a link, and make this app live.
   s.start = async ({ data = true } = {}) => {
-    if (started) return s;
+    if (started) return s.first || {};
     started = true;
     const handed = await takeHandoff();
     if (handed && handed !== storedPass()) {
@@ -352,7 +352,10 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
     }
     s.first = first;
     loop();
-    return s;
+    // The first reply ({ payload, inbox, wallet } or { offline }): what the
+    // app merges its own copy with. Never the session itself: an app that
+    // took the session for the reply saw "no data" and saved over the pass.
+    return first || {};
   };
   function loop() {
     clearInterval(timer);

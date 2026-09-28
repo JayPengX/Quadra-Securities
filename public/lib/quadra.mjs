@@ -451,6 +451,7 @@ const KIND = {
   pay: ['每月薪資', 'Monthly pay'],
   stake: ['下注', 'Bet'],
   payout: ['彩金', 'Winnings'],
+  refund: ['退款', 'Refund'],
   lottery: ['彩券', 'Lottery ticket'],
   prize: ['彩券獎金', 'Lottery prize'],
   game: ['遊戲', 'Game'],
@@ -884,9 +885,10 @@ export function accountSheet(s, { extra = null } = {}) {
     node('h3', { class: 'q-sheet-h', text: T('裝置', 'Devices') }),
     node('div', { class: 'q-rows' }, [
       act(T('新增裝置（取得裝置代碼）', 'Add a device (get a device code)'), async () => showCode(await s.deviceCode())),
-      device,
-      notifyRow(s, note)
+      device
     ]),
+    node('h3', { class: 'q-sheet-h', text: T('通知', 'Notifications') }),
+    ...notifyRows(s, note),
     node('h3', { class: 'q-sheet-h', text: T('帳戶安全', 'Security') }),
     node('div', { class: 'q-rows' }, [
       act(T('登出其他所有裝置', 'Sign out every other device'), async () => {
@@ -896,8 +898,11 @@ export function accountSheet(s, { extra = null } = {}) {
       }),
       act(T('更換通行碼', 'Change my pass'), async () => {
         if (!(await ask({ lang: s.lang, icon: '🔑', title: T('換一組新的通行碼？', 'Get a new pass?'), body: T('帳戶和所有資料都會移到新通行碼，舊通行碼立即失效，其他裝置也會登出。新通行碼只會顯示一次，請記下來。', 'Everything moves to the new pass, the old one stops working at once and every other device is signed out. The new pass is shown once: write it down.'), ok: T('換新通行碼', 'Get a new pass'), danger: true }))) return;
-        await showNewPass(s, await s.rotate());
-        note.textContent = T('已換成新的通行碼。', 'Your pass has been changed.');
+        const passcode = await s.rotate();
+        // The sheet closes first: a modal sheet stays above everything else,
+        // so the new pass would open behind it.
+        close();
+        await showNewPass(s, passcode);
       }),
       node('a', { class: 'q-row-btn', href: helpUrl(s.app), text: T(`${APPS[s.app].short} 使用說明`, `${APPS[s.app].short} guide`) }),
       act(
@@ -923,38 +928,52 @@ export function accountSheet(s, { extra = null } = {}) {
   return dialog;
 }
 
-// A new pass, shown once: it can't be shown again, so it waits for "saved".
+// A new pass, shown once: it can't be shown again, so it waits until it has
+// been typed back (its last five characters), which also proves it was
+// copied right. A modal <dialog>, so it sits above every other sheet and
+// dialog and nothing behind it can be tapped.
 export function showNewPass(s, passcode) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
+  const shown = formatPass(passcode);
+  const tail = String(passcode).replace(/[^0-9A-Za-z]/g, '').slice(-5).toUpperCase();
   return new Promise(resolve => {
+    for (const d of document.querySelectorAll('dialog[open]')) d.close();
     const ok = node('button', { class: 'q-btn primary block', type: 'button', text: T('我已經記下來了', 'I’ve saved it'), disabled: true });
     const copy = node('button', {
       class: 'q-btn small',
       type: 'button',
       text: T('複製', 'Copy'),
-      onclick: () =>
-        navigator.clipboard?.writeText(formatPass(passcode)).then(() => {
-          copy.textContent = T('已複製', 'Copied');
-          ok.disabled = false;
-        })
+      onclick: () => navigator.clipboard?.writeText(shown).then(() => (copy.textContent = T('已複製', 'Copied')))
     });
-    const check = node('input', { type: 'checkbox', onchange: e => (ok.disabled = !e.target.checked) });
-    const box = node('div', { class: 'q-gate q-newpass', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${APPS[s.app].color}` }, [
+    const hint = node('small', { class: 'q-newpass-hint' });
+    const check = node('input', { class: 'q-pass-input q-newpass-check num', type: 'text', inputmode: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '5', placeholder: '•••••', 'aria-label': T('通行碼最後 5 個字', 'The last 5 characters of your pass') });
+    check.addEventListener('input', () => {
+      const typed = check.value.replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+      ok.disabled = typed !== tail;
+      hint.textContent = typed.length === 5 && typed !== tail ? T('不對：請對照上面的通行碼。', 'That doesn’t match: check the pass above.') : '';
+    });
+    const box = node('dialog', { class: 'q-gate q-newpass', style: `--q-accent:${APPS[s.app].color}` }, [
       node('div', { class: 'q-gate-box' }, [
         node('p', { class: 'q-gate-brand', text: 'QUADRA PASS' }),
-        node('h1', { class: 'q-gate-title', text: T('這是你的通行碼', 'This is your pass') }),
-        node('div', { class: 'q-pass-code' }, [node('strong', { class: 'num', text: formatPass(passcode) }), copy]),
-        node('p', { class: 'q-gate-lede', text: T('它只會顯示這一次，裝置上也不會保存。記在安全的地方：在新裝置登入、找回帳戶都要用到它。', 'It’s shown only this once and isn’t kept on any device. Keep it somewhere safe: you need it to sign in on a new device or get your account back.') }),
-        node('label', { class: 'q-check' }, [check, node('span', { text: T('我已經把通行碼記在安全的地方', 'I’ve written my pass down somewhere safe') })]),
+        node('h1', { class: 'q-gate-title', text: T('這是你的新通行碼', 'This is your new pass') }),
+        node('div', { class: 'q-pass-code' }, [node('strong', { class: 'num', text: shown }), copy]),
+        node('p', { class: 'q-gate-lede', text: T('它只會顯示這一次，裝置上也不會保存，舊的通行碼已經失效。記在安全的地方：在新裝置登入、找回帳戶都要用到它。', 'It’s shown only this once and isn’t kept on any device; the old pass no longer works. Keep it somewhere safe: you need it to sign in on a new device or get your account back.') }),
+        node('label', { class: 'q-newpass-label', text: T('記好以後，輸入通行碼的最後 5 個字確認：', 'Once it’s saved, type its last 5 characters to confirm:') }),
+        check,
+        hint,
         ok
       ])
     ]);
+    // Not closed by Esc or a tap outside: only by the confirmed button.
+    box.addEventListener('cancel', e => e.preventDefault());
     ok.addEventListener('click', () => {
+      box.close();
       box.remove();
       resolve();
     });
     document.body.append(box);
+    box.showModal();
   });
 }
 
@@ -963,34 +982,108 @@ export function showNewPass(s, passcode) {
 // notify(s, { title, body, tag, hash }) shows an in-app banner while the app
 // is on screen, and a system notification when it isn't (once allowed in
 // the account sheet, per device). `tag` keeps one notice per thing (a slip,
-// a match), `hash` is where tapping it goes. There's no push server: a
+// a match), `hash` is where tapping it goes, `kind` is its NOTICE_KINDS entry
+// (a kind turned off in the account sheet is dropped). There's no push server: a
 // notice comes from an app that's open or in the background.
 
 export const notifyOn = () => readStore(KEY.notify) === '1' && globalThis.Notification?.permission === 'granted';
-function notifyRow(s, note) {
+
+// Every kind of notice, by app: what it is and when it comes. Each can be
+// turned off on its own (per device, `quadra.notify.kinds`); a kind that's
+// off shows neither a banner nor a system notice.
+export const NOTICE_KINDS = {
+  match: [
+    ['start', '比賽開打', 'A game starts', '你追蹤的球隊比賽開始時。', 'When a team you follow starts a game.'],
+    ['end', '比賽結束', 'Final score', '你追蹤的球隊比賽結束，附上比分。', 'When a team you follow finishes a game, with the score.']
+  ],
+  odds: [
+    ['slip', '投注單結算', 'Slip settled', '投注單的比賽全部結束、算好派彩時。', 'When every game on a slip is over and it’s paid.'],
+    ['ticket', '彩券中獎', 'Lottery win', '電腦彩券開獎、你的彩券中獎時。', 'When a draw is out and your ticket won.']
+  ],
+  vocab: [
+    ['ready', '獎勵可以領', 'Reward to claim', '每日任務或每週目標完成、可以領錢時。', 'When a mission or weekly goal is done and ready to claim.'],
+    ['streak', '連續紀錄快斷了', 'Streak ending', '今天還沒玩，連續天數今晚就會歸零時。', 'When you haven’t played today and your streak ends tonight.']
+  ],
+  stock: [
+    ['alert', '價格提醒', 'Price alert', '你設定的價格提醒到價時。', 'When a price alert you set is reached.'],
+    ['fill', '委託成交', 'Order filled', '掛單或定期定額成交時。', 'When an order or a monthly plan is filled.']
+  ],
+  orbit: [['class', '上課提醒', 'Class reminder', '每堂課開始前 5 分鐘。', 'Five minutes before each class.']]
+};
+const KINDS_KEY = 'quadra.notify.kinds';
+function kindPrefs() {
+  try {
+    return JSON.parse(readStore(KINDS_KEY) || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+// Whether notices of this kind are wanted (every kind is, until turned off).
+export const kindOn = (app, kind) => !kind || kindPrefs()[`${app}:${kind}`] !== false;
+export function setKind(app, kind, on) {
+  const prefs = kindPrefs();
+  if (on) delete prefs[`${app}:${kind}`];
+  else prefs[`${app}:${kind}`] = false;
+  writeStore(KINDS_KEY, JSON.stringify(prefs));
+}
+
+// A switch: role=switch, aria-checked.
+function toggle(on, label, onchange) {
+  const b = node('button', { class: 'q-switch', type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': label });
+  b.addEventListener('click', async () => {
+    const next = b.getAttribute('aria-checked') !== 'true';
+    const ok = await onchange(next);
+    if (ok !== false) b.setAttribute('aria-checked', String(next));
+  });
+  return b;
+}
+
+// The account sheet's notices: this device's system notices (on, off, or
+// not allowed by the phone), then every kind of notice with what it is and
+// its own switch.
+function notifyRows(s, note) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
-  if (!('Notification' in globalThis)) return null;
-  const label = () => (notifyOn() ? T('通知：開啟（點一下關閉）', 'Notifications: on (tap to turn off)') : T('開啟通知', 'Turn on notifications'));
-  const btn = node('button', {
-    class: 'q-row-btn',
-    type: 'button',
-    text: label(),
-    onclick: async () => {
-      if (notifyOn()) writeStore(KEY.notify, '0');
-      else {
-        const p = await Notification.requestPermission().catch(() => 'denied');
-        if (p === 'granted') writeStore(KEY.notify, '1');
-        else note.textContent = T('瀏覽器沒有允許通知：請到系統設定開啟。', 'Notifications aren’t allowed: turn them on in the system settings.');
-      }
-      btn.textContent = label();
-    }
-  });
-  return btn;
+  const supported = 'Notification' in globalThis;
+  const state = () => (!supported ? T('這個瀏覽器不支援', 'Not supported here') : Notification.permission === 'denied' ? T('被系統封鎖：請到系統設定允許', 'Blocked: allow them in the system settings') : notifyOn() ? T('開啟：App 沒開著時也會通知', 'On: notices arrive while the app is closed too') : T('關閉：只在 App 開著時顯示在畫面上', 'Off: notices show only while the app is open'));
+  const sub = node('small', { class: 'q-notice-sub', text: state() });
+  const master = node('div', { class: 'q-notice-row master' }, [
+    node('span', { class: 'q-notice-icon', 'aria-hidden': 'true', text: '🔔' }),
+    node('div', { class: 'q-notice-text' }, [node('strong', { text: T('系統通知（這台裝置）', 'System notices (this device)') }), sub]),
+    supported
+      ? toggle(notifyOn(), T('系統通知', 'System notices'), async on => {
+          if (!on) {
+            writeStore(KEY.notify, '0');
+            sub.textContent = state();
+            return true;
+          }
+          const p = await Notification.requestPermission().catch(() => 'denied');
+          if (p === 'granted') writeStore(KEY.notify, '1');
+          else note.textContent = T('系統沒有允許通知：請到系統設定開啟。', 'Notifications aren’t allowed: turn them on in the system settings.');
+          sub.textContent = state();
+          return p === 'granted';
+        })
+      : null
+  ]);
+  // This app's kinds first, then the rest.
+  const order = [s.app, ...Object.keys(NOTICE_KINDS).filter(a => a !== s.app)].filter(a => NOTICE_KINDS[a] && APPS[a]);
+  const groups = order.map(app =>
+    node('div', { class: 'q-notice-group' }, [
+      node('p', { class: 'q-notice-app', text: APPS[app].short }),
+      ...NOTICE_KINDS[app].map(([kind, zh, e, dzh, de]) =>
+        node('div', { class: 'q-notice-row' }, [
+          node('div', { class: 'q-notice-text' }, [node('strong', { text: T(zh, e) }), node('small', { class: 'q-notice-sub', text: T(dzh, de) })]),
+          toggle(kindOn(app, kind), T(zh, e), on => setKind(app, kind, on))
+        ])
+      )
+    ])
+  );
+  return [node('div', { class: 'q-rows' }, [master]), node('div', { class: 'q-rows q-notice-kinds' }, groups)];
 }
 
 const shown = new Set();
-export async function notify(s, { title, body = '', tag = '', hash = '' }) {
+export async function notify(s, { title, body = '', tag = '', hash = '', kind = '' }) {
+  if (!kindOn(s.app, kind)) return;
   const key = `${s.app}:${tag || title}`;
   if (tag && shown.has(key)) return;
   if (tag) shown.add(key);

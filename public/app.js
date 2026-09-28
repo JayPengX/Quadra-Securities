@@ -377,12 +377,12 @@ function alertText(a) {
 // system notice when it isn't (once turned on in the account sheet).
 function alertFired(a, { late = false } = {}) {
   const text = alertText(a) + (late ? ` · ${dateTime(a.hit.t)}` : '');
-  notify(q, { title: `🔔 ${t('alertTitle')}`, body: text, tag: `alert:${a.id}:${a.hit?.t || ''}`, hash: 'portfolio' });
+  notify(q, { title: `🔔 ${t('alertTitle')}`, body: text, tag: `alert:${a.id}:${a.hit?.t || ''}`, hash: 'portfolio', kind: 'alert' });
 }
 // An order filled: a toast on screen, a notice when the app is in the background.
 function filledNotice(text, id) {
   if (document.visibilityState === 'visible') return toast(text, 'good');
-  notify(q, { title: t('noticeFilled'), body: text, tag: `fill:${id}`, hash: 'history' });
+  notify(q, { title: t('noticeFilled'), body: text, tag: `fill:${id}`, hash: 'history', kind: 'fill' });
 }
 
 // Alerts set before the page was closed: checked against the price bars

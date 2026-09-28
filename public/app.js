@@ -109,12 +109,14 @@ function applySettings() {
 // copy under the pass so the app opens at once, and offline.
 const accountKey = () => `${STORE.account}:${q.pass}`;
 async function loadAccount() {
-  try {
-    const saved = await unpack(localStorage.getItem(accountKey()));
-    return isAccount(saved) ? saved : null;
-  } catch {
-    return null;
+  // (Also the copy older versions kept under the pass itself.)
+  for (const key of [accountKey(), q.oldPass ? `${STORE.account}:${q.oldPass}` : ''].filter(Boolean)) {
+    try {
+      const saved = await unpack(localStorage.getItem(key));
+      if (isAccount(saved)) return saved;
+    } catch {}
   }
+  return null;
 }
 // The copy Quadra Securities kept on the device before accounts moved onto
 // the pass (left in place as a backup): folded in when it is the same
@@ -2469,21 +2471,12 @@ const symbolKeys = symbol => {
   return [`sym:${symbol}`, info?.category ? `cat:${info.category}` : null, quote?.kind ? `kind:${quote.kind}` : null, quote?.market ? `mkt:${quote.market}` : null];
 };
 
-// The one money pool at a glance, and sending money to another pass.
+// The one money pool at a glance.
 function poolCardHtml() {
   if (!state.account || !state.wallet) return '';
   return `<div class="card pool-card">
     <div class="qpool-top"><span>${h(t('poolTitle'))}</span><strong class="num">${h(money(poolBalance(state.wallet), BASE))}</strong></div>
     <p class="qpool-note">${h(t('poolNote'))}</p>
-    <details class="fold-lite">
-      <summary>${h(t('transferTitle'))}</summary>
-      <form class="transfer-form" data-form="transfer">
-        <input id="xfer-amount" class="field-input" inputmode="numeric" autocomplete="off" placeholder="${h(t('transferAmount'))}" aria-label="${h(t('transferAmount'))}" />
-        <input id="xfer-to" class="field-input" autocomplete="off" autocapitalize="characters" placeholder="${h(t('transferTo'))}" aria-label="${h(t('transferTo'))}" />
-        <input id="xfer-note" class="field-input" maxlength="40" autocomplete="off" placeholder="${h(t('transferNote'))}" aria-label="${h(t('transferNote'))}" />
-        <button class="ghost-button" type="submit">${h(t('transferGo'))}</button>
-      </form>
-    </details>
   </div>`;
 }
 
@@ -2507,22 +2500,6 @@ function sourcesCardHtml() {
     ${rows.map(([k, v]) => sourceLine(k, `<span class="pool-label">${h(t(k))}</span><strong class="pool-value num ${v < 0 ? 'down-ink' : ''}">${h(money(v, BASE))}</strong>`)).join('')}
     <p class="muted">${h(t('srcAge', { days: num(days, 0), date: fmtDate(state.account.created) }))}</p>
   </div>`;
-}
-
-async function sendTransfer(form) {
-  const amount = Math.round(Number(cleanNumber(form.querySelector('#xfer-amount').value)));
-  const to = form.querySelector('#xfer-to').value;
-  const note = form.querySelector('#xfer-note').value.trim();
-  if (!(amount > 0)) return toast(t('badAmount'), 'bad');
-  if (amount > (available(state.account, snap()).cash[BASE] || 0)) return toast(t('notEnoughCur', { cur: BASE, have: money(available(state.account, snap()).cash[BASE] || 0, BASE) }), 'bad');
-  try {
-    await q.transfer(to, amount, note || undefined, quadraId());
-    toast(t('transferDone', { v: money(amount, BASE) }), 'good');
-    await syncNow();
-  } catch (error) {
-    toast(t('transferFailed', { msg: error.message }), 'bad');
-  }
-  render();
 }
 
 // This app's own settings, in the account sheet.
@@ -2874,7 +2851,6 @@ document.addEventListener('submit', event => {
   const form = event.target.closest('[data-form]');
   if (!form) return;
   event.preventDefault();
-  if (form.dataset.form === 'transfer') sendTransfer(form);
 });
 
 // Typing: keep the caret where it was when the ticket redraws.

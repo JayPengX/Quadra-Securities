@@ -10,8 +10,11 @@
 //
 // One account works everywhere: the Quadra Pass, a 10-character code for
 // Shared-Proxy's /eco. It is required: every app opens on a sign-in screen
-// until there's a pass, and the data proxy only answers signed-in apps.
-// Behind the pass is one NT$ money pool (play money only).
+// until the device is signed in, and the data proxy only answers signed-in
+// apps. A device keeps a revocable sign-in, never the pass; another device
+// signs in with the pass or a 10-minute device code. Behind the pass is one
+// NT$ money pool (play money only), and the pass is the only place anything
+// is saved.
 //
 // One app at a time: the app in use is the account's live one. Opening
 // another app (or the same app on another device) makes that one live; the
@@ -47,15 +50,11 @@ export const ECONOMY = {
   start: 110_000,
   monthly: 5_000,
   weekly: 500,
-  // Play's weekly betting limit until you set your own (0: none).
-  oddsDefaultLimit: 2_000,
   // Rewards: word practice, games and missions, with their caps a Taiwan day.
   vocab: { perCorrect: 3, perMastered: 25, dailyCap: 600 },
   gamesPerMinute: 15,
   gamesDailyCap: 400,
-  missionsDailyCap: 300,
-  // Kept for older data: each app's former game cap.
-  legacyGamesDailyCap: { odds: 300, stock: 300 }
+  missionsDailyCap: 300
 };
 
 // ---- Language ------------------------------------------------------------------------
@@ -73,19 +72,22 @@ export const pick = (lang, zh, en) => (lang === 'en' ? en : zh);
 // ---- Codes ---------------------------------------------------------------------------
 
 export const PASS_PATTERN = /^[2-9A-HJ-NP-Z]{10}$/;
-export const LEGACY_PATTERNS = { stock: /^[2-9A-HJ-NP-Z]{8}$/, odds: /^[2-9A-HJ-NP-Z]{8}$/, vocab: /^[2-9A-HJ-NP-Z]{16}$/ };
+export const DEVICE_CODE_PATTERN = /^[2-9A-HJ-NP-Z]{8}$/;
 export function cleanCode(text) {
   return String(text || '')
     .toUpperCase()
     .replace(/[\s-]/g, '');
 }
 export const isPass = code => PASS_PATTERN.test(cleanCode(code));
-export const formatPass = code => (code && code.length === 10 ? `${code.slice(0, 5)}-${code.slice(5)}` : code || '');
-export const maskPass = code => (code && code.length === 10 ? `${code.slice(0, 2)}•••-•••${code.slice(8)}` : '');
+export const formatPass = code => (code && code.length === 10 ? `${code.slice(0, 5)}-${code.slice(5)}` : code && code.length === 8 ? `${code.slice(0, 4)}-${code.slice(4)}` : code || '');
 
 // ---- Storage -------------------------------------------------------------------------
+//
+// A device keeps its refresh token (a revocable sign-in for this device) and
+// the account's id, never the pass itself: the pass is typed to sign in,
+// shown once when it's made, and that's all.
 
-const KEY = { pass: 'quadra.pass', refresh: 'quadra.refresh', wallet: 'quadra.wallet', aff: 'quadra.aff', dismiss: 'quadra.dismiss' };
+const KEY = { refresh: 'quadra.refresh', account: 'quadra.account', wallet: 'quadra.wallet', aff: 'quadra.aff', dismiss: 'quadra.dismiss', notify: 'quadra.notify', oldPass: 'quadra.pass' };
 function readStore(key) {
   try {
     return localStorage.getItem(key);
@@ -107,16 +109,26 @@ const readJson = (key, fallback) => {
   }
 };
 
-export function storedPass() {
-  const code = readStore(KEY.pass) || '';
-  return PASS_PATTERN.test(code) ? code : '';
+// The signed-in account's id on this device (the first 16 characters of
+// the pass's hash, from the refresh token), '' when signed out.
+export function storedAccount() {
+  const id = readStore(KEY.account) || '';
+  return /^[0-9a-f]{16}$/.test(id) && readStore(KEY.refresh) ? id : '';
 }
-export function cachedWallet(code = storedPass()) {
+function accountOf(refresh) {
+  try {
+    const body = String(refresh).split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(body + '==='.slice((body.length + 3) % 4))).d.slice(0, 16);
+  } catch {
+    return '';
+  }
+}
+export function cachedWallet(account = storedAccount()) {
   const saved = readJson(KEY.wallet, null);
-  return saved && saved.code === code ? saved.wallet : null;
+  return saved && account && saved.account === account ? saved.wallet : null;
 }
-function cacheWallet(code, wallet) {
-  if (code && wallet) writeStore(KEY.wallet, JSON.stringify({ code, wallet }));
+function cacheWallet(account, wallet) {
+  if (account && wallet) writeStore(KEY.wallet, JSON.stringify({ account, wallet }));
 }
 
 // ---- The Worker ----------------------------------------------------------------------
@@ -153,7 +165,11 @@ export function randomId() {
 // q.on('wallet', w => ...)      the wallet changed (pool, settings…)
 // q.on('active', live => ...)   true: this app is the live one; false: paused
 // q.on('signedout', () => ...)
-// await q.start()               signs in (the gate) and makes this app live
+// await q.start()               signs in (the gate) and makes this app live;
+//                               resolves to the first reply ({ payload, inbox,
+//                               wallet } or { offline })
+// q.pass                        the account's id on this device ('' signed out)
+// q.oldPass                     a pass older versions kept here (for their keys)
 // q.read({ data, inbox })       { wallet, pool, payload, inbox } (app data when data)
 // q.write({ payload, wallet })  only while live
 // q.proxy(url, extra)           the data proxy's address for `url`, signed in
@@ -168,12 +184,14 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
   let wallet = cachedWallet();
   let timer = 0;
   let started = false;
+  const oldPass = PASS_PATTERN.test(readStore(KEY.oldPass) || '') ? readStore(KEY.oldPass) : '';
 
   const s = {
     app,
     lang,
+    oldPass,
     get pass() {
-      return storedPass();
+      return storedAccount();
     },
     get token() {
       return token;
@@ -199,7 +217,7 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
   function setWallet(w) {
     if (!w) return;
     wallet = w;
-    cacheWallet(storedPass(), w);
+    cacheWallet(storedAccount(), w);
     emit('wallet', w);
   }
   function setActive(next, where = null) {
@@ -211,55 +229,37 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
     else hideMoved();
   }
   function absorb(data) {
+    if (data.refresh) {
+      writeStore(KEY.refresh, data.refresh);
+      writeStore(KEY.account, accountOf(data.refresh));
+      writeStore(KEY.oldPass, null);
+    }
     if (data.token) {
       token = data.token;
       tokenAt = Date.now();
     }
-    if (data.refresh) writeStore(KEY.refresh, data.refresh);
     if (data.wallet) setWallet(data.wallet);
     if (data.active != null) setActive(Boolean(data.active), data.live || null);
     return data;
   }
 
-  async function login(passcode, { data = false } = {}) {
-    const code = cleanCode(passcode);
-    const res = await call('POST', '', { op: 'login', passcode: code, app, inbox: data });
-    writeStore(KEY.pass, code);
-    absorb({ ...res, active: true });
-    return res;
-  }
-  async function create() {
-    const res = await call('POST', qs({ app }), { op: 'create', v2: true });
-    writeStore(KEY.pass, res.passcode);
-    absorb({ ...res, active: true });
-    return res;
-  }
+  // Every way of signing in ends here: a refresh token for this device.
+  const signIn = body => call('POST', '', { ...body, app, inbox: true }).then(res => absorb({ ...res, active: true }));
+  const login = code => signIn(DEVICE_CODE_PATTERN.test(cleanCode(code)) ? { op: 'pair-redeem', code: cleanCode(code) } : { op: 'login', passcode: cleanCode(code) });
+  const create = () => signIn({ op: 'create' });
   // A session from the device's refresh token (claim: make this app live).
-  // Falls back to the pass itself when the refresh token no longer works.
   async function refresh({ claim = false, data = false } = {}) {
     const ref = readStore(KEY.refresh);
-    if (ref) {
-      try {
-        const res = await call('POST', '', { op: 'refresh', refresh: ref, app, claim, data, inbox: data });
-        return absorb(res);
-      } catch (error) {
-        if (error.code === 'ECO_SIGNED_OUT') return signedOut();
-        if (error.code !== 'ECO_TOKEN_INVALID') throw error;
-      }
-    }
-    if (!storedPass()) return signedOut();
-    if (!claim) return { active: false };
+    if (!ref) return signedOut();
     try {
-      return await login(storedPass(), { data });
+      return absorb(await call('POST', '', { op: 'refresh', refresh: ref, app, claim, data, inbox: data }));
     } catch (error) {
-      if (error.code === 'SYNC_PASSCODE_NOT_FOUND') return signedOut();
+      if (error.code === 'ECO_SIGNED_OUT' || error.code === 'ECO_TOKEN_INVALID') return signedOut();
       throw error;
     }
   }
   function signedOut() {
-    writeStore(KEY.pass, null);
-    writeStore(KEY.refresh, null);
-    writeStore(KEY.wallet, null);
+    for (const k of [KEY.refresh, KEY.account, KEY.wallet, KEY.oldPass]) writeStore(k, null);
     token = '';
     wallet = null;
     active = false;
@@ -293,16 +293,16 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
   s.create = create;
   s.claim = () => refresh({ claim: true });
   s.signOut = () => signedOut();
-  s.signOutEverywhere = async () => {
-    await withToken(qt => call('POST', '', { op: 'signout-all', qt }));
-    signedOut();
-  };
-  s.rotate = async () => {
-    const res = await call('POST', '', { op: 'rotate', passcode: storedPass() });
-    writeStore(KEY.refresh, null);
-    await login(res.passcode);
-    return res.passcode;
-  };
+  // Every other device signed out; this one stays signed in.
+  s.signOutEverywhere = () => withToken(qt => call('POST', '', { op: 'signout-all', qt })).then(absorb);
+  // A new pass for the account: shown once, the old one stops working.
+  s.rotate = () =>
+    withToken(qt => call('POST', '', { op: 'rotate', qt })).then(res => {
+      absorb(res);
+      return res.passcode;
+    });
+  // A device code: sign in on another device within 10 minutes, once.
+  s.deviceCode = () => withToken(qt => call('POST', '', { op: 'pair-create', qt }));
   s.read = ({ data = false, inbox = false } = {}) =>
     withToken(qt => call('GET', qs({ qt, app: data ? app : '', inbox: inbox ? '1' : '' }))).then(res => {
       absorb(res);
@@ -319,8 +319,8 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
       return call('PATCH', qs({ qt, app }), { payload, wallet: patch });
     }).then(absorb);
   s.dropInbox = id => withToken(qt => call('DELETE', qs({ qt, app, inbox: id })));
-  s.transfer = (to, amount, note, id = randomId()) => call('POST', '', { op: 'transfer', passcode: storedPass(), to: cleanCode(to), amount, note, id }).then(absorb);
-  s.merge = sources => withToken(qt => call('POST', '', { op: 'merge', qt, sources })).then(absorb);
+  // Other passes into this one (they're deleted after).
+  s.merge = passes => withToken(qt => call('POST', '', { op: 'merge', qt, sources: passes.map(passcode => ({ passcode })) })).then(absorb);
   s.op = (op, body = {}) => withToken(qt => call('POST', '', { op, qt, ...body }));
   // The data proxy, signed in.
   s.proxy = (url, extra = '') => `${PROXY_URL}?url=${encodeURIComponent(url)}${extra}${token ? `&qt=${encodeURIComponent(token)}` : ''}`;
@@ -329,32 +329,33 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
     return token;
   };
 
-  // Sign in (the gate, when there's no pass), take any pass handed over by
-  // a link, and make this app live.
+  // Sign in (the gate, when this device isn't), take a sign-in handed over
+  // by a link, and make this app live.
   s.start = async ({ data = true } = {}) => {
     if (started) return s.first || {};
     started = true;
-    const handed = await takeHandoff();
-    if (handed && handed !== storedPass()) {
-      writeStore(KEY.refresh, null);
-      writeStore(KEY.pass, handed);
-    }
     let first = null;
-    if (!storedPass()) first = await signInGate(s);
-    else {
-      try {
+    try {
+      first = await takeHandoff(app);
+      if (first) absorb({ ...first, active: true });
+      // A pass an older version kept on this device: traded for a device
+      // sign-in, then forgotten.
+      else if (oldPass && !readStore(KEY.refresh)) first = await login(oldPass).catch(() => null);
+      if (!first && storedAccount()) {
         first = await refresh({ claim: true, data });
-        if (first?.signedOut) first = await signInGate(s);
-      } catch (error) {
-        // Offline: the cached wallet stands in until the next try.
-        first = { offline: true, error };
+        if (first?.signedOut) first = null;
       }
+    } catch (error) {
+      // Offline: the cached wallet stands in until the next try.
+      first = { offline: true, error };
     }
+    writeStore(KEY.oldPass, null);
+    if (!first) first = await signInGate(s);
     s.first = first;
     loop();
-    // The first reply ({ payload, inbox, wallet } or { offline }): what the
-    // app merges its own copy with. Never the session itself: an app that
-    // took the session for the reply saw "no data" and saved over the pass.
+    // The first reply: what the app merges its own copy with (never the
+    // session itself: an app that took the session for the reply saw "no
+    // data" and saved over the pass).
     return first || {};
   };
   function loop() {
@@ -367,24 +368,24 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
   // Back on screen: this app becomes the live one again.
   let waking = null;
   function wake() {
-    if (!storedPass() || waking) return;
+    if (!storedAccount() || waking) return;
     waking = refresh({ claim: true })
       .catch(() => {})
       .finally(() => (waking = null));
   }
   function beat() {
-    if (document.visibilityState === 'hidden' || !storedPass() || !active) return;
+    if (document.visibilityState === 'hidden' || !storedAccount() || !active) return;
     s.read().catch(() => {});
   }
 
   s.appUrl = (other, hash = '') => appUrl(other, hash);
-  // A link to another app that arrives signed in (a sealed pass: apps on a
-  // phone's home screen don't share storage).
+  // A link to another app that arrives signed in (apps on a phone's home
+  // screen don't share storage): a sealed sign-in, good for 3 minutes.
   s.go = async (other, hash = '') => {
     let target = appUrl(other, hash);
-    if (isStandalone() && storedPass()) {
+    if (isStandalone() && storedAccount()) {
       try {
-        const { handoff } = await s.op('handoff', { passcode: storedPass() });
+        const { handoff } = await s.op('handoff');
         target = appUrl(other, [String(hash || '').replace(/^#/, ''), `qh=${handoff}`].filter(Boolean).join('&'));
       } catch {}
     }
@@ -398,14 +399,14 @@ export function appUrl(app, hash = '') {
   return `${APPS[app]?.path || '/'}${h ? `#${h}` : ''}`;
 }
 
-// A pass handed over in the address: #qh=<sealed> (or, from older apps,
-// #qp=<pass>). Returns the pass, or ''.
-async function takeHandoff() {
+// A sign-in handed over in the address (#qh=<sealed>): taken out of the
+// address at once and traded for this device's own sign-in. null if none.
+async function takeHandoff(app) {
   const loc = globalThis.location;
-  if (!loc?.hash) return '';
+  if (!loc?.hash) return null;
   const parts = loc.hash.slice(1).split('&');
   const at = parts.findIndex(p => p.startsWith('qh=') || p.startsWith('qp='));
-  if (at < 0) return '';
+  if (at < 0) return null;
   const [k, v] = [parts[at].slice(0, 2), decodeURIComponent(parts[at].slice(3))];
   parts.splice(at, 1);
   try {
@@ -414,12 +415,11 @@ async function takeHandoff() {
   try {
     sessionStorage.setItem('quadra.visit', '1');
   } catch {}
-  if (k === 'qp') return PASS_PATTERN.test(cleanCode(v)) ? cleanCode(v) : '';
+  if (k !== 'qh') return null;
   try {
-    const { passcode } = await call('POST', '', { op: 'redeem', handoff: v });
-    return PASS_PATTERN.test(passcode) ? passcode : '';
+    return await call('POST', '', { op: 'redeem', handoff: v, app, inbox: true });
   } catch {
-    return '';
+    return null;
   }
 }
 
@@ -468,7 +468,6 @@ export function describeEntry(e, lang = 'zh') {
 
 export const setting = (wallet, key, fallback = null) => wallet?.settings?.[key]?.value ?? fallback;
 export const settingPatch = (key, value) => ({ settings: { [key]: { value, t: Date.now() } } });
-export const ODDS_LIMIT_KEY = 'oddsWeeklyLimit';
 export const activePins = wallet =>
   Object.entries(wallet?.pins || {})
     .filter(([, p]) => p.on)
@@ -640,12 +639,9 @@ const node = (tag, props = {}, children = []) => {
 };
 export { node as el };
 
-const typedPass = text => {
-  const code = cleanCode(text).replace(/[^2-9A-HJ-NP-Z]/g, '').slice(0, 10);
-  return code.length > 5 ? `${code.slice(0, 5)}-${code.slice(5)}` : code;
-};
+const typedPass = text => cleanCode(text).replace(/[^2-9A-HJ-NP-Z]/g, '').slice(0, 10);
 function passInput(label) {
-  const input = node('input', { class: 'q-pass-input', type: 'text', inputmode: 'text', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', maxlength: '11', placeholder: 'XXXXX-XXXXX', 'aria-label': label });
+  const input = node('input', { class: 'q-pass-input', type: 'text', inputmode: 'text', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false', maxlength: '10', placeholder: 'ABCDE23456', 'aria-label': label });
   input.addEventListener('input', () => {
     input.value = typedPass(input.value);
   });
@@ -653,8 +649,9 @@ function passInput(label) {
 }
 const ERR = {
   SYNC_PASSCODE_NOT_FOUND: ['找不到這組通行碼。', 'No Quadra Pass has this code.'],
+  ECO_PAIR_NOT_FOUND: ['這組裝置代碼無效或已過期（10 分鐘內、只能用一次）。', 'That device code isn’t valid or has expired (10 minutes, once).'],
   RATE_LIMITED: ['嘗試太多次，請稍後再試。', 'Too many tries. Please wait a little.'],
-  INVALID_PASSCODE: ['通行碼是 10 個英數字，例如 ABCDE-23456。', 'A pass is 10 letters and digits, like ABCDE-23456.']
+  INVALID_PASSCODE: ['請輸入 10 碼通行碼（例如 ABCDE-23456）或 8 碼裝置代碼。', 'Enter your 10-character pass (like ABCDE-23456) or an 8-character device code.']
 };
 export const errorText = (error, lang) => {
   const e = ERR[error?.code];
@@ -693,13 +690,17 @@ function signInGate(s) {
         onsubmit: event => {
           event.preventDefault();
           const code = cleanCode(input.value);
-          if (!PASS_PATTERN.test(code)) return void (error.textContent = errorText({ code: 'INVALID_PASSCODE' }, s.lang));
-          done(() => s.login(code, { data: true }));
+          if (!PASS_PATTERN.test(code) && !DEVICE_CODE_PATTERN.test(code)) return void (error.textContent = errorText({ code: 'INVALID_PASSCODE' }, s.lang));
+          done(() => s.login(code));
         }
       },
-      [node('label', { class: 'q-gate-label', text: en ? 'Your Quadra Pass' : '你的 Quadra Pass' }), input, error, enter]
+      [node('label', { class: 'q-gate-label', text: en ? 'Your Quadra Pass or a device code' : 'Quadra Pass 或裝置代碼' }), input, error, enter]
     );
-    make.addEventListener('click', () => done(() => s.create()));
+    make.addEventListener('click', () => done(async () => {
+      const res = await s.create();
+      await showNewPass(s, res.passcode);
+      return res;
+    }));
     const gate = node('div', { class: 'q-gate', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${a.color}` }, [
       node('div', { class: 'q-gate-box' }, [
         node('img', { class: 'q-gate-icon', src: './favicon.svg', alt: '', width: '72', height: '72' }),
@@ -709,7 +710,7 @@ function signInGate(s) {
         form,
         node('div', { class: 'q-gate-or', text: en ? 'New to Quadra?' : '第一次使用？' }),
         make,
-        node('p', { class: 'q-gate-note', text: en ? 'A new pass is shown once signed in. Keep it safe: it is the key to your account.' : '建立後會顯示通行碼，請妥善保存：它是帳戶的鑰匙。' })
+        node('p', { class: 'q-gate-note', text: en ? 'Signed in on another device? Its Account sheet gives a device code for this one.' : '已在其他裝置登入？在那裡的「帳戶」取得裝置代碼，就能在這裡登入。' })
       ])
     ]);
     document.documentElement.classList.add('q-signing-in');
@@ -793,16 +794,6 @@ export function accountSheet(s, { extra = null } = {}) {
         }
       }
     });
-  const pass = s.pass;
-  const code = node('div', { class: 'q-pass-code' }, [
-    node('strong', { text: formatPass(pass), class: 'num' }),
-    node('button', {
-      class: 'q-btn small',
-      type: 'button',
-      text: T('複製', 'Copy'),
-      onclick: e => navigator.clipboard?.writeText(formatPass(pass)).then(() => (e.target.textContent = T('已複製', 'Copied')))
-    })
-  ]);
   const tiles = node(
     'div',
     { class: 'q-apps' },
@@ -813,52 +804,185 @@ export function accountSheet(s, { extra = null } = {}) {
           class: `q-app${id === s.app ? ' here' : ''}${a.related ? ' related' : ''}`,
           href: appUrl(id),
           onclick: e => {
-            if (id === s.app) return e.preventDefault();
             e.preventDefault();
-            s.go(id);
+            if (id !== s.app) s.go(id);
           }
         },
         [node('img', { src: `${a.path}favicon.svg`, alt: '' }), node('span', { text: a.tile || a.short })]
       )
     )
   );
+  // A device code, shown with its countdown.
+  const device = node('div', { class: 'q-device', hidden: true });
+  let tick = 0;
+  const showCode = ({ code, exp }) => {
+    clearInterval(tick);
+    const left = node('span', { class: 'q-device-left' });
+    const paint = () => {
+      const ms = exp - Date.now();
+      if (ms <= 0) {
+        clearInterval(tick);
+        device.hidden = true;
+        return;
+      }
+      left.textContent = T(`${Math.ceil(ms / 60_000)} 分鐘內有效，只能用一次`, `Valid ${Math.ceil(ms / 60_000)} more min, once`);
+    };
+    device.replaceChildren(node('span', { class: 'q-device-label', text: T('裝置代碼', 'Device code') }), node('strong', { class: 'q-device-code num', text: formatPass(code) }), left, node('span', { class: 'q-device-how', text: T('在另一台裝置打開任一個 Quadra App，輸入這組代碼登入。', 'On the other device, open any Quadra app and enter this code to sign in.') }));
+    device.hidden = false;
+    paint();
+    tick = setInterval(paint, 15_000);
+  };
   dialog.append(
     node('div', { class: 'q-sheet-head' }, [node('h2', { text: BRAND.pass }), node('button', { class: 'q-close', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×', onclick: close })]),
     node('div', { class: 'q-balance' }, [node('span', { text: T('Quadra 餘額', 'Quadra balance') }), node('strong', { class: 'num', text: money(s.pool) })]),
-    code,
-    node('p', { class: 'q-sheet-sub', text: T('這組通行碼是帳戶唯一的鑰匙，請記下來。', 'This pass is the only key to your account: keep it somewhere safe.') }),
     node('h3', { class: 'q-sheet-h', text: T('Quadra 的 App', 'Quadra apps') }),
     tiles,
     ...(extra ? [extra] : []),
+    node('h3', { class: 'q-sheet-h', text: T('裝置', 'Devices') }),
+    node('div', { class: 'q-rows' }, [
+      act(T('新增裝置（取得裝置代碼）', 'Add a device (get a device code)'), async () => showCode(await s.deviceCode())),
+      device,
+      notifyRow(s, note)
+    ]),
     node('h3', { class: 'q-sheet-h', text: T('帳戶安全', 'Security') }),
     node('div', { class: 'q-rows' }, [
-      act(T('在其他所有裝置登出', 'Sign out on every other device'), async () => {
-        if (!confirm(T('其他裝置都會登出（這台也要重新輸入通行碼）。繼續？', 'Every device is signed out (this one too: you sign in again with your pass). Continue?'))) return;
-        const p = s.pass;
+      act(T('登出其他所有裝置', 'Sign out every other device'), async () => {
+        if (!confirm(T('除了這台以外，所有裝置都會登出。繼續？', 'Every device except this one is signed out. Continue?'))) return;
         await s.signOutEverywhere();
-        await s.login(p);
-        note.textContent = T('其他裝置已登出。', 'Every other device is signed out.');
+        note.textContent = T('其他裝置都已登出。', 'Every other device is signed out.');
       }),
       act(T('更換通行碼', 'Change my pass'), async () => {
-        if (!confirm(T('換一組新的通行碼：帳戶和所有資料都會移過去，舊通行碼立即失效。繼續？', 'Get a new pass: the account and everything in it moves to it, and the old pass stops working at once. Continue?'))) return;
-        const next = await s.rotate();
-        code.querySelector('strong').textContent = formatPass(next);
-        note.textContent = T(`新的通行碼：${formatPass(next)}，請記下來。`, `Your new pass: ${formatPass(next)}. Write it down.`);
+        if (!confirm(T('換一組新的通行碼：帳戶和所有資料都會移過去，舊通行碼立即失效，其他裝置也會登出。繼續？', 'Get a new pass: everything moves to it, the old pass stops working at once and every other device is signed out. Continue?'))) return;
+        await showNewPass(s, await s.rotate());
+        note.textContent = T('已換成新的通行碼。', 'Your pass has been changed.');
       }),
       node('a', { class: 'q-row-btn', href: helpUrl(s.app), text: T(`${APPS[s.app].short} 使用說明`, `${APPS[s.app].short} guide`) }),
-      act(T('在這台裝置登出', 'Sign out on this device'), async () => {
-        if (!confirm(T('在這台裝置登出？資料都保留在通行碼裡。', 'Sign out on this device? Everything stays with your pass.'))) return;
-        s.signOut();
-        location.reload();
-      }, 'q-row-btn danger')
+      act(
+        T('在這台裝置登出', 'Sign out on this device'),
+        async () => {
+          if (!confirm(T('在這台裝置登出？資料都保留在 Quadra Pass，之後用通行碼或裝置代碼登入。', 'Sign out on this device? Everything stays on your Quadra Pass; sign in again with the pass or a device code.'))) return;
+          s.signOut();
+          location.reload();
+        },
+        'q-row-btn danger'
+      )
     ]),
+    node('p', { class: 'q-sheet-sub', text: T('通行碼只在建立或更換時顯示一次，裝置上不會保存。忘記了？在已登入的裝置按「更換通行碼」。', 'Your pass is shown only when it’s made or changed, and never kept on a device. Forgot it? Choose “Change my pass” on a signed-in device.') }),
     note
   );
   document.body.append(dialog);
-  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('close', () => {
+    clearInterval(tick);
+    dialog.remove();
+  });
   dialog.addEventListener('click', e => e.target === dialog && close());
   dialog.showModal();
   return dialog;
+}
+
+// A new pass, shown once: it can't be shown again, so it waits for "saved".
+export function showNewPass(s, passcode) {
+  const en = s.lang === 'en';
+  const T = (zh, e) => (en ? e : zh);
+  return new Promise(resolve => {
+    const ok = node('button', { class: 'q-btn primary block', type: 'button', text: T('我已經記下來了', 'I’ve saved it'), disabled: true });
+    const copy = node('button', {
+      class: 'q-btn small',
+      type: 'button',
+      text: T('複製', 'Copy'),
+      onclick: () =>
+        navigator.clipboard?.writeText(formatPass(passcode)).then(() => {
+          copy.textContent = T('已複製', 'Copied');
+          ok.disabled = false;
+        })
+    });
+    const check = node('input', { type: 'checkbox', onchange: e => (ok.disabled = !e.target.checked) });
+    const box = node('div', { class: 'q-gate q-newpass', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${APPS[s.app].color}` }, [
+      node('div', { class: 'q-gate-box' }, [
+        node('p', { class: 'q-gate-brand', text: 'QUADRA PASS' }),
+        node('h1', { class: 'q-gate-title', text: T('這是你的通行碼', 'This is your pass') }),
+        node('div', { class: 'q-pass-code' }, [node('strong', { class: 'num', text: formatPass(passcode) }), copy]),
+        node('p', { class: 'q-gate-lede', text: T('它只會顯示這一次，裝置上也不會保存。記在安全的地方：在新裝置登入、找回帳戶都要用到它。', 'It’s shown only this once and isn’t kept on any device. Keep it somewhere safe: you need it to sign in on a new device or get your account back.') }),
+        node('label', { class: 'q-check' }, [check, node('span', { text: T('我已經把通行碼記在安全的地方', 'I’ve written my pass down somewhere safe') })]),
+        ok
+      ])
+    ]);
+    ok.addEventListener('click', () => {
+      box.remove();
+      resolve();
+    });
+    document.body.append(box);
+  });
+}
+
+// ---- Notifications: the same in every app --------------------------------------------
+//
+// notify(s, { title, body, tag, hash }) shows an in-app banner while the app
+// is on screen, and a system notification when it isn't (once allowed in
+// the account sheet, per device). `tag` keeps one notice per thing (a slip,
+// a match), `hash` is where tapping it goes. There's no push server: a
+// notice comes from an app that's open or in the background.
+
+export const notifyOn = () => readStore(KEY.notify) === '1' && globalThis.Notification?.permission === 'granted';
+function notifyRow(s, note) {
+  const en = s.lang === 'en';
+  const T = (zh, e) => (en ? e : zh);
+  if (!('Notification' in globalThis)) return null;
+  const label = () => (notifyOn() ? T('通知：開啟（點一下關閉）', 'Notifications: on (tap to turn off)') : T('開啟通知', 'Turn on notifications'));
+  const btn = node('button', {
+    class: 'q-row-btn',
+    type: 'button',
+    text: label(),
+    onclick: async () => {
+      if (notifyOn()) writeStore(KEY.notify, '0');
+      else {
+        const p = await Notification.requestPermission().catch(() => 'denied');
+        if (p === 'granted') writeStore(KEY.notify, '1');
+        else note.textContent = T('瀏覽器沒有允許通知：請到系統設定開啟。', 'Notifications aren’t allowed: turn them on in the system settings.');
+      }
+      btn.textContent = label();
+    }
+  });
+  return btn;
+}
+
+const shown = new Set();
+export async function notify(s, { title, body = '', tag = '', hash = '' }) {
+  const key = `${s.app}:${tag || title}`;
+  if (tag && shown.has(key)) return;
+  if (tag) shown.add(key);
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') return banner(s, { title, body, hash });
+  if (!notifyOn()) return;
+  const options = { body, tag: key, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url: `${APPS[s.app].path}${hash ? `#${hash}` : ''}` } };
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration?.();
+    if (reg?.showNotification) return void (await reg.showNotification(title, options));
+    const n = new Notification(title, options);
+    n.onclick = () => {
+      globalThis.focus?.();
+      if (hash) location.hash = hash;
+      n.close();
+    };
+  } catch {}
+}
+let bannerEl = null;
+function banner(s, { title, body, hash }) {
+  bannerEl?.remove();
+  const el = node('div', { class: 'q-banner', role: 'status', style: `--q-accent:${APPS[s.app].color}` }, [
+    node('img', { src: './favicon.svg', alt: '' }),
+    node('div', {}, [node('strong', { text: title }), body ? node('span', { text: body }) : null])
+  ]);
+  const gone = () => {
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 250);
+  };
+  el.addEventListener('click', () => {
+    if (hash) location.hash = hash;
+    gone();
+  });
+  document.body.append(el);
+  bannerEl = el;
+  setTimeout(gone, 5000);
 }
 
 // ---- Shell: installed-only on phones, and always the newest version ------------------------

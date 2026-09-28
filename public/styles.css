@@ -551,6 +551,8 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .rate-row .row-spark .spark { width: 72px; height: 26px; }
 .rate-row .row-price { min-width: 70px; }
 @media (max-width: 520px) { .rate-row .row-spark { display: none; } }
+/* A currency's name never breaks mid-word: its own line on a phone, cut short if it must. */
+@media (max-width: 420px) { .rate-row .row-title small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .rate-row .pill { min-width: 62px; } }
 .loans-card { display: grid; gap: 10px; }
 .loans-card .card-title, .loans-card .lede { margin-bottom: 0; }
 .loan-form { display: flex; gap: 10px; flex-wrap: wrap; }

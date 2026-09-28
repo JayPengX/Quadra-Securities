@@ -163,3 +163,39 @@ test('net worth history from daily closes', () => {
   assert.equal(series[0][2], 100_000);
   void processOrders;
 });
+
+test('income: dividends, coupons and cash interest by month, and what is pending', async () => {
+  const { incomeSummary } = await import('../public/lib/account.mjs');
+  const now = Date.UTC(2026, 8, 20, 4);
+  const a = newAccount(100_000, Date.UTC(2025, 0, 1), 'inc');
+  a.events.push(
+    { id: 'div:A:1', type: 'div', t: Date.UTC(2026, 7, 10), symbol: 'A', net: 100, currency: 'USD', twd: 30 },
+    { id: 'cpn:B:1', type: 'div', coupon: true, t: Date.UTC(2026, 1, 10), symbol: 'B', net: 500, currency: 'TWD', twd: 1 },
+    { id: 'int:2026-09', type: 'interest', t: Date.UTC(2026, 8, 1), net: 40, currency: 'TWD' },
+    { id: 'div:A:0', type: 'div', t: Date.UTC(2025, 3, 10), symbol: 'A', net: 10, currency: 'TWD', twd: 1 },
+    { id: 'div:A:2', type: 'div', t: Date.UTC(2026, 8, 30), symbol: 'A', net: 5, currency: 'USD', twd: 30 }
+  );
+  const s = incomeSummary(a, now);
+  assert.equal(s.months.length, 12);
+  assert.equal(s.months.at(-1)[0], '2026-09');
+  assert.equal(s.months[0][0], '2025-10');
+  assert.equal(s.last12, 3000 + 500 + 40);
+  assert.equal(s.ytd, 3540);
+  assert.equal(s.total, 3550);
+  assert.equal(s.div, 3000);
+  assert.equal(s.coupon, 500);
+  assert.equal(s.interest, 40);
+  assert.equal(s.pending, 150);
+  assert.equal(s.months.at(-1)[1], 40);
+  assert.deepEqual(s.payers, { A: 3000, B: 500 });
+});
+
+test('the allocation ring: one arc a part, the legend, nothing when empty', async () => {
+  const { donut, miniBars } = await import('../public/lib/chart.mjs');
+  const html = donut([{ label: 'A', value: 3, color: 'red' }, { label: 'B', value: 1, color: 'blue' }, { label: 'C', value: 0, color: 'x' }], { center: '4' });
+  assert.equal((html.match(/<circle/g) || []).length, 2);
+  assert.match(html, /75%/);
+  assert.equal(donut([]), '');
+  assert.equal(miniBars([['a', 0]]), '');
+  assert.equal((miniBars([['a', 1], ['b', 2]]).match(/mini-bar[ "]/g) || []).length, 2);
+});

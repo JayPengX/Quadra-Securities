@@ -6,7 +6,7 @@ import {
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
-  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, moneySources, mergeDistinct, requiredCash
+  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, moneySources, mergeDistinct, requiredCash, incomeSummary
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
@@ -17,14 +17,14 @@ import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, fetchNews, searchSymbols, fxSymbol, useSession } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
-import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, stackBar, SERIES } from './lib/chart.mjs';
+import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, SERIES } from './lib/chart.mjs';
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
-  APPS, appUrl, poolBalance, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, randomId as quadraId
+  APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
+  affinity, helpUrl, notify, notifyOn, randomId as quadraId
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -322,7 +322,7 @@ function afterPrices() {
   const now = Date.now();
   const r = processOrders(account, state.quotes, state.rates, now);
   account = r.account;
-  for (const f of r.filled) toast(t('toastFilled', { side: t(f.side), qty: fmtQty(f.qty), name: nameOf(f.symbol), price: fmtPrice(f.price, f.currency) }), 'good');
+  for (const f of r.filled) filledNotice(t('toastFilled', { side: t(f.side), qty: fmtQty(f.qty), name: nameOf(f.symbol), price: fmtPrice(f.price, f.currency) }), f.id);
   for (const o of r.rejected) toast(t('toastRejected', { name: nameOf(o.symbol), why: t(`err_${o.reason}`) }), 'bad');
   if (r.filled.some(f => f.forced)) account = repayAll(account, state.rates, state.fxOpen, now);
   let v = valuate(replay(account, now), state.quotes, state.rates);
@@ -373,23 +373,16 @@ const pricesLive = () => state.loaded && !state.fromCache;
 function alertText(a) {
   return t(a.op === 'above' ? 'alertHitAbove' : 'alertHitBelow', { name: nameOf(a.symbol), price: fmtPrice(a.hit?.price ?? a.price, state.quotes.get(a.symbol)?.currency) });
 }
+// The kit's notices (quadra.mjs): a banner while the app is on screen, a
+// system notice when it isn't (once turned on in the account sheet).
 function alertFired(a, { late = false } = {}) {
   const text = alertText(a) + (late ? ` · ${dateTime(a.hit.t)}` : '');
-  toast(`🔔 ${text}`, 'good');
-  notify(t('alertTitle'), text, a.symbol);
+  notify(q, { title: `🔔 ${t('alertTitle')}`, body: text, tag: `alert:${a.id}:${a.hit?.t || ''}`, hash: 'portfolio' });
 }
-async function notify(title, body, tag) {
-  try {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const reg = await navigator.serviceWorker?.getRegistration?.();
-    if (reg?.showNotification) await reg.showNotification(title, { body, tag, icon: './icons/apple-touch-icon.png', badge: './favicon.svg' });
-    else new Notification(title, { body, tag });
-  } catch {}
-}
-async function askNotifications() {
-  try {
-    if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
-  } catch {}
+// An order filled: a toast on screen, a notice when the app is in the background.
+function filledNotice(text, id) {
+  if (document.visibilityState === 'visible') return toast(text, 'good');
+  notify(q, { title: t('noticeFilled'), body: text, tag: `fill:${id}`, hash: 'history' });
 }
 
 // Alerts set before the page was closed: checked against the price bars
@@ -502,7 +495,7 @@ async function backfillOrders() {
   for (const r of results.filter(Boolean).sort((a, b) => a.hit.t - b.hit.t)) {
     const f = fillFromHistory(state.account, r.o.id, r.hit, r.twd, Date.now());
     if (f.account !== state.account) commit(f.account);
-    if (f.fill) toast(t('toastFilledAt', { side: t(f.fill.side), name: nameOf(f.fill.symbol), qty: fmtQty(f.fill.qty), price: fmtPrice(f.fill.price, f.fill.currency), time: dateTime(f.fill.t) }), 'good');
+    if (f.fill) filledNotice(t('toastFilledAt', { side: t(f.fill.side), name: nameOf(f.fill.symbol), qty: fmtQty(f.fill.qty), price: fmtPrice(f.fill.price, f.fill.currency), time: dateTime(f.fill.t) }), f.fill.id);
     else if (f.order?.status === 'rejected') toast(t('toastRejected', { name: nameOf(f.order.symbol), why: t(`err_${f.order.reason}`) }), 'bad');
   }
   if (state.account?.orders.some(o => o.forced && o.status === 'filled')) commit(repayAll(state.account, state.rates, state.fxOpen, Date.now()));
@@ -1083,7 +1076,7 @@ function alertCardHtml(symbol, q) {
     <div class="fx-amount"><label class="field grow"><span>${h(t('alertPriceLabel'))} (${h(q.currency)})</span><input id="alert-price" inputmode="decimal" autocomplete="off" value="${h(state.alertPrice)}" placeholder="${h(fmtPrice(q.price, q.currency))}" /></label></div>
     <div class="qty-presets">${presets.map(([label, v]) => `<button class="chip small" type="button" data-action="alert-preset" data-v="${v}">${h(label)}</button>`).join('')}</div>
     <button class="primary-button" type="button" data-action="alert-add" ${price > 0 && Math.abs(price / q.price - 1) > 1e-6 ? '' : 'disabled'}>${h(price > 0 ? t(op === 'above' ? 'alertAddAbove' : 'alertAddBelow', { price: fmtPrice(price, q.currency) }) : t('alertAdd'))}</button>
-    ${'Notification' in window && Notification.permission !== 'granted' ? `<p class="note">${h(Notification.permission === 'denied' ? t('alertNoNotify') : t('alertNotifyNote'))}</p>` : ''}`,
+    ${'Notification' in window && !notifyOn() ? `<p class="note">${h(t('alertNotifyNote'))}</p>` : ''}`,
     list.some(a => a.on),
     'tool:alert'
   );
@@ -1142,7 +1135,6 @@ function addAlert() {
   commit(r.account);
   state.alertPrice = '';
   toast(t('alertSet'), 'good');
-  askNotifications().then(() => refreshDetailLive());
   refreshDetailLive();
 }
 
@@ -1630,26 +1622,57 @@ function renderPortfolio() {
       ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><a class="ghost-button" href="${h(helpUrl('stock'))}" data-go="vocab" data-hash="help=stock">${h(t('newHere'))}</a></div></div>`}
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
-    ${pendingDivHtml()}
+    ${cashCardHtml(v, heldTWD, unsettledNow, heldFor)}
+    ${incomeCardHtml(v)}
     ${plansListHtml()}
     ${alertsListHtml()}
-    <div class="card">
-      <h3 class="card-title">${h(t('wallets'))}</h3>
-      <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
-      <p class="note">${h(t('walletsNote'))}</p>
-    </div>
-    ${poolCardHtml()}
     ${sourcesCardHtml()}
   `;
   renderNetWorthChart(v, s);
 }
 
-function pendingDivHtml() {
+// Cash: what's spendable now, what's held for orders or still settling, and
+// each currency's wallet. The NT$ wallet is the Quadra balance itself.
+function cashCardHtml(v, heldTWD, unsettledNow, heldFor) {
+  const settlingTWD = Object.entries(unsettledNow).reduce((sum, [c, x]) => sum + x * (state.rates[c] ?? 0), 0);
+  const free = v.cashTWD - heldTWD;
+  return `<div class="card cash-card">
+    <div class="card-head"><h3 class="card-title">💵 ${h(t('wallets'))}</h3><strong class="num cash-total">${h(money(free, BASE))}</strong></div>
+    <div class="cash-chips">
+      ${heldTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashHeld'))}</small><strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
+      ${settlingTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashSettling'))}</small><strong class="num">${h(money(settlingTWD, BASE))}</strong></span>` : ''}
+      <span class="cash-chip"><small>${h(t('cashInterestRate'))}</small><strong class="num">${h(pct(CASH_RATE, { digits: 2, sign: false }))}</strong></span>
+    </div>
+    <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
+    <p class="note">${h(t('walletsNote'))} ${h(t('poolNote'))}</p>
+  </div>`;
+}
+
+// Income: dividends, coupons and cash interest over the last year, month by
+// month, and what's on the way.
+function incomeCardHtml(v) {
+  const inc = incomeSummary(state.account);
   const list = pendingDividends(state.account);
-  if (!list.length) return '';
-  return `<div class="card"><h3 class="card-title">💰 ${h(t('pendingDivTitle'))} <span class="count">${list.length}</span></h3>${list
-    .map(e => `<div class="order-row"><span class="side-tag div">💰</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(e.symbol)}">${h(nameOf(e.symbol))}</button></span><span class="row-sub">${h(t('pendingDivLine', { ex: fmtDate(e.ex), pay: fmtDate(e.t), qty: fmtQty(e.shares) }))}</span></span><strong class="num up-ink">+${h(money(e.net, e.currency))}</strong></div>`)
-    .join('')}<p class="note">${h(t('pendingDivNote'))}</p></div>`;
+  if (!inc.total && !list.length) return '';
+  const yieldPct = v.longTWD > 0 ? inc.last12 / v.longTWD : 0;
+  const top = Object.entries(inc.payers).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const parts = [['incomeDiv', inc.div], ['incomeCoupon', inc.coupon], ['incomeInterest', inc.interest]].filter(([, x]) => x >= 0.5);
+  return `<div class="card income-card">
+    <div class="card-head"><h3 class="card-title">💰 ${h(t('incomeTitle'))}</h3></div>
+    <div class="kpis">
+      ${kpi(t('income12'), money(inc.last12, BASE), yieldPct ? t('incomeYield', { pct: pct(yieldPct, { digits: 2, sign: false }) }) : '')}
+      ${kpi(t('incomeYtd'), money(inc.ytd, BASE))}
+      ${inc.pending >= 0.5 ? kpi(t('pendingDivTitle'), money(inc.pending, BASE), '', 'up') : ''}
+    </div>
+    ${miniBars(inc.months, { format: x => money(x, BASE) })}
+    ${inc.last12 ? `<div class="mini-bars-scale"><span>${h(monthYear(Date.parse(`${inc.months[0][0]}-15`)))}</span><span>${h(monthYear(Date.now()))}</span></div>` : ''}
+    ${parts.length ? `<p class="income-split">${parts.map(([k, x]) => `<span>${h(t(k))} <strong class="num">${h(money(x, BASE))}</strong></span>`).join('')}</p>` : ''}
+    ${top.length ? `<p class="muted">${h(t('incomeTop'))} ${top.map(([sym, x]) => `<button class="link" type="button" data-action="open" data-symbol="${h(sym)}">${h(nameOf(sym))}</button> <span class="num">${h(money(x, BASE))}</span>`).join('、')}</p>` : ''}
+    ${list
+      .map(e => `<div class="order-row"><span class="side-tag div">💰</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(e.symbol)}">${h(nameOf(e.symbol))}</button></span><span class="row-sub">${h(t('pendingDivLine', { ex: fmtDate(e.ex), pay: fmtDate(e.t), qty: fmtQty(e.shares) }))}</span></span><strong class="num up-ink">+${h(money(e.net, e.currency))}</strong></div>`)
+      .join('')}
+    ${list.length ? `<p class="note">${h(t('pendingDivNote'))}</p>` : ''}
+  </div>`;
 }
 
 function plansListHtml() {
@@ -1691,7 +1714,9 @@ function positionRow(p) {
   return `<button class="row position-row" type="button" data-action="open" data-symbol="${h(p.symbol)}">
     ${symbolBadge(p.symbol, p)}
     <span class="row-main"><span class="row-title">${h(nameOf(p.symbol, q))}${p.short ? `<span class="held-tag short">${h(t('shortTag'))}</span>` : ''}</span>
-      <span class="row-sub">${flagOf(p.symbol, p)} ${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)}</span></span>
+      <span class="row-sub">${flagOf(p.symbol, p)} ${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)}</span>
+      <span class="weight-bar" aria-hidden="true"><i style="width:${Math.min(100, p.weight * 100).toFixed(1)}%"></i></span></span>
+    <span class="row-spark">${q?.line?.length > 1 ? sparkline(q.line, q.kind === 'crypto' ? null : q.prev) : ''}</span>
     <span class="row-value"><strong class="num">${h(money(p.valueTWD, BASE))}</strong><small class="num">${h(t('weight', { w: pct(p.weight, { digits: 1, sign: false }) }))}</small></span>
     <span class="row-pl"><strong class="num ${dirClass(p.pl)}">${h(money(p.pl, BASE, { sign: true }))}</strong><small class="num ${dirClass(p.pl)}">${h(pct(p.plPct))}</small><small class="num ${dirClass(p.dayTWD)}">${h(t('todayShort'))} ${h(money(p.dayTWD, BASE, { sign: true }))}</small></span>
   </button>`;
@@ -1748,7 +1773,8 @@ function allocationHtml(v) {
   // Past eight, the rest fold into one.
   if (groups.length > 8) groups = [...groups.slice(0, 7), [t('others'), groups.slice(7).reduce((s, g) => s + g[1], 0)]];
   const parts = groups.map(([label, value], i) => ({ label, value, color: SERIES[i] }));
-  return stackBar(parts, { format: x => money(x, BASE) }) || `<p class="empty">${h(t('nothingYet'))}</p>`;
+  const total = parts.reduce((sum, p) => sum + Math.max(0, p.value), 0);
+  return donut(parts, { format: x => money(x, BASE), center: compactMoney(total, BASE), sub: t('allocTotal') }) || `<p class="empty">${h(t('nothingYet'))}</p>`;
 }
 
 // Net worth at the end of every day since the account opened, rebuilt from
@@ -2471,15 +2497,6 @@ const symbolKeys = symbol => {
   return [`sym:${symbol}`, info?.category ? `cat:${info.category}` : null, quote?.kind ? `kind:${quote.kind}` : null, quote?.market ? `mkt:${quote.market}` : null];
 };
 
-// The one money pool at a glance.
-function poolCardHtml() {
-  if (!state.account || !state.wallet) return '';
-  return `<div class="card pool-card">
-    <div class="qpool-top"><span>${h(t('poolTitle'))}</span><strong class="num">${h(money(poolBalance(state.wallet), BASE))}</strong></div>
-    <p class="qpool-note">${h(t('poolNote'))}</p>
-  </div>`;
-}
-
 // Where the money came from: the opening amount, pay, the other Quadra
 // apps, transfers. Each source opens where it comes from.
 function sourceLine(key, inner) {
@@ -2506,11 +2523,10 @@ function sourcesCardHtml() {
 function settingsEl() {
   const box = document.createElement('div');
   const paint = () => {
-    const perm = 'Notification' in window ? Notification.permission : 'unsupported';
     box.innerHTML = `<h3 class="q-sheet-h">${h(t('g_settings'))}</h3>
       <div class="q-rows settings-rows">
         <div class="setting-row"><span>${h(t('updownLabel'))}</span><div class="segmented small" role="group"><button type="button" data-set="updown" data-v="tw" aria-pressed="${state.settings.updown === 'tw'}">${h(t('updownTw'))}</button><button type="button" data-set="updown" data-v="us" aria-pressed="${state.settings.updown === 'us'}">${h(t('updownUs'))}</button></div></div>
-        <div class="setting-row"><span>${h(t('notifyLabel'))}</span>${perm === 'granted' ? `<small>${h(t('notifyOn'))}</small>` : perm === 'default' ? `<button class="q-btn small" type="button" data-set="notify">${h(t('notifyEnable'))}</button>` : `<small>${h(t('notifyUnsupported'))}</small>`}</div>
+        <p class="note">${h(t('notifyNote'))}</p>
       </div>`;
   };
   box.addEventListener('click', async e => {
@@ -2521,7 +2537,6 @@ function settingsEl() {
       saveSettings();
       render();
     }
-    if (b.dataset.set === 'notify') await askNotifications();
     paint();
   });
   paint();

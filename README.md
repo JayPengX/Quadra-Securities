@@ -55,7 +55,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
   - quick sizes: max affordable, 1/100 shares, 1 lot (1,000 shares in Taiwan), or ¼, ½ and all of a holding;
   - a preview of the price, amount, commission, taxes, exchange fees and total, in NT$ too.
   - **Short of a currency?** One tap exchanges exactly the NT$ needed.
-- **Price alert** (🔔): tell me when it rises or falls to a price. Checked on every refresh and, for the time the page was closed, against the price bars since (reported with when it happened). With notifications allowed, it notifies through the service worker.
+- **Price alert** (🔔): tell me when it rises or falls to a price. Checked on every refresh and, for the time the page was closed, against the price bars since (reported with when it happened). With notifications turned on in the account sheet (the kit's notices, once per device), it notifies when the app is in the background; filled orders do too.
 - **Monthly plan** (📅 定期定額): buy NT$X on day N of every month. Each month buys at the first price after 00:00 Taiwan time on its day, as many units as the money covers after costs (a foreign one exchanges only the NT$ it needs, at that moment's rate). Missed months are bought from the price history when the page opens again; a month without enough NT$ is skipped and recorded.
 - **Time machine** link: what buying this years ago would be worth now.
 - **About the company / fund:** a quick read first (is the price cheap or pricey, profitability, growth, dividends, balance sheet, swings; for funds fees, size, how spread out, dividends), rough rules of thumb shown as calm/middling/worth-a-look tags. Then the next earnings and ex-dividend dates, four years (or quarters) of revenue and net income as bars, the analysts' average target price and range against today's price, and the numbers grouped (price and value, profitability, dividends, balance sheet, performance against the S&P 500), each with a line on what it means. Funds show past returns (this year, 3 and 5 years), the sector mix, the stock/bond/cash mix and the top 10 holdings. Then what it does (English) and recent news.
@@ -87,8 +87,10 @@ Currency pairs trade like stocks (market, limit and stop orders, shorting, alert
 
 - Net worth in NT$, today's change, total return against the money put in.
 - Net worth over time: rebuilt for every day since the account opened from the log and each day's closing prices and exchange rates, so there's no need to open the app daily. The money put in is a dashed line.
-- Allocation by kind, currency or market.
-- Positions (value, P/L, today, weight), open orders, and a wallet for every currency (cash held for open orders shown). Loans show here too, and the maintenance ratio when there are any.
+- Allocation by kind, currency or market: a ring with the total inside and each part's share and value.
+- Positions (value, P/L, today, today's price line, a bar for each one's weight), open orders.
+- **Cash:** the spendable NT$ total up top, what's held for open orders or still settling, the cash interest rate, and a wallet for every currency. Loans show here too, and the maintenance ratio when there are any.
+- **Income:** dividends, bond coupons and cash interest over the last 12 months (month by month) and this year, the yield on holdings, the top payers, and dividends on the way.
 - Monthly plans (next buy, last result, stop) and price alerts (distance from the price, remove).
 - **Monthly payday** (no manual adding): on the 1st of every month (00:00 Taiwan time) NT$3,000 arrives on its own when the app is opened, like a salary, the same for every account. It counts as money put in, not as return. Missed months are paid when the page opens again; each payday has a fixed id (`pay:YYYY-MM`), so synced devices never pay twice. Accounts opened before paydays existed get them from their next 1st. The next payday shows under net worth.
 - Sync and backups.

@@ -1257,6 +1257,41 @@ const TPE = 8 * 3_600_000;
 // Dividends owed (past their ex-date) but not paid yet.
 export const pendingDividends = (account, now = Date.now()) => account.events.filter(e => e.type === 'div' && !e.coupon && e.t > now).sort((a, b) => a.t - b.t);
 
+// Income: dividends, bond coupons and cash interest paid in, in NT$ (at the
+// rate of the day each was paid). `months`: the last 12 Taiwan months, oldest
+// first, as [YYYY-MM, NT$]; `pending`: dividends owed but not paid yet.
+export function incomeSummary(account, now = Date.now()) {
+  const month = t => taipeiDay(t).slice(0, 7);
+  const thisMonth = month(now);
+  const [y, m] = thisMonth.split('-').map(Number);
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.UTC(y, m - 1 - i, 1));
+    months.push([d.toISOString().slice(0, 7), 0]);
+  }
+  const index = new Map(months.map(([k], i) => [k, i]));
+  const out = { total: 0, ytd: 0, last12: 0, div: 0, coupon: 0, interest: 0, pending: 0, months, payers: {} };
+  for (const e of account?.events || []) {
+    if (e.type !== 'div' && e.type !== 'interest') continue;
+    const twd = e.net * (e.twd || 1);
+    if (e.t > now) {
+      if (e.type === 'div') out.pending += twd;
+      continue;
+    }
+    out.total += twd;
+    const k = month(e.t);
+    if (k.slice(0, 4) === thisMonth.slice(0, 4)) out.ytd += twd;
+    if (!index.has(k)) continue;
+    months[index.get(k)][1] += twd;
+    out.last12 += twd;
+    if (e.type === 'interest') out.interest += twd;
+    else if (e.coupon) out.coupon += twd;
+    else out.div += twd;
+    if (e.type === 'div') out.payers[e.symbol] = (out.payers[e.symbol] || 0) + twd;
+  }
+  return out;
+}
+
 export const startAmount = account => account?.events.find(e => e.id === 'deposit:start')?.amount || 0;
 
 // NT$ a month.

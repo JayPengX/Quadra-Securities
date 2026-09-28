@@ -483,7 +483,39 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .row-value small, .row-pl small { font-size: 0.72rem; color: var(--text-muted); }
 .row-pl small.up { color: var(--up); }
 .row-pl small.down { color: var(--down); }
-@media (max-width: 560px) { .position-row { flex-wrap: wrap; } .position-row .row-main { flex-basis: calc(100% - 52px); } .position-row .row-value { margin-left: 52px; justify-items: start; text-align: left; flex: 1; } }
+/* A holding's share of the assets, under its name. */
+.weight-bar { display: block; height: 4px; margin-top: 5px; max-width: 180px; border-radius: 2px; background: var(--surface-sunken); overflow: hidden; }
+.weight-bar i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
+.position-row .row-spark { width: 80px; }
+.position-row .row-spark .spark { width: 80px; }
+@media (max-width: 560px) {
+  .position-row { flex-wrap: wrap; row-gap: 6px; }
+  .position-row .row-main { flex-basis: calc(100% - 54px); }
+  .position-row .row-value { order: 2; margin-left: 54px; justify-items: start; text-align: left; flex: 1; min-width: 0; }
+  .position-row .row-spark, .position-row .row-spark .spark { order: 3; width: 56px; }
+  .position-row .row-pl { order: 4; min-width: 0; }
+}
+/* Allocation: a ring with the total inside, its legend beside (under, on a phone). */
+.donut-wrap { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.donut-wrap .stack-legend { flex: 1 1 200px; min-width: 0; }
+.donut { position: relative; flex: none; margin: 0 auto; }
+.donut svg { display: block; width: 100%; height: 100%; }
+.donut-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; line-height: 1.2; }
+.donut-center strong { font-size: 1.05rem; font-weight: 800; }
+.donut-center small { font-size: 0.7rem; color: var(--text-muted); }
+/* Cash: the spendable total, what's held or settling, the pool, the rate. */
+.cash-total { font-size: 1.25rem; font-weight: 800; }
+.cash-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.cash-chip { display: grid; gap: 1px; padding: 6px 10px; border-radius: 10px; background: var(--surface-sunken); min-width: 0; }
+.cash-chip small { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; }
+.cash-chip strong { font-size: 0.9rem; }
+/* Income: a year of months as small bars. */
+.mini-bars { display: flex; align-items: flex-end; gap: 4px; margin: 14px 0 4px; }
+.mini-bar { flex: 1 1 0; min-width: 0; border-radius: 3px 3px 1px 1px; background: var(--accent); opacity: 0.45; }
+.mini-bar.now { opacity: 1; }
+.mini-bars-scale { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--text-muted); margin-bottom: 8px; }
+.income-split { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 0.84rem; color: var(--text-secondary); margin: 6px 0; }
+.income-card .order-row:first-of-type { margin-top: 6px; }
 
 .wallets { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 8px; }
 .wallet {
@@ -723,7 +755,10 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .fx-mode button { white-space: normal; }
 
 /* Records and sources that open something: the whole line is the target. */
-.pool-line-link { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.pool-line { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.pool-label { color: var(--text-secondary); }
+.pool-line + .muted { margin-top: 8px; }
+.pool-line-link { width: 100%; border: 0; border-bottom: 1px solid var(--border); display: flex; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
 .pool-line-link .pool-label::after { content: ' ›'; color: var(--text-muted); }
 .order-row[data-action] { cursor: pointer; }
 a.activity-row { color: inherit; text-decoration: none; }

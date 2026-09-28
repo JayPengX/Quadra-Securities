@@ -158,6 +158,41 @@ export function stackBar(parts, { format = v => v } = {}) {
   return `<div class="stack-bar">${segs}</div><ul class="stack-legend">${legend}</ul>`;
 }
 
+// A ring split into parts (2px gaps between), the total in the middle and
+// the same legend as stackBar underneath. parts: [{ label, value, color }].
+export function donut(parts, { format = v => v, center = '', sub = '', size = 148 } = {}) {
+  const shown = parts.filter(p => p.value > 0);
+  const total = shown.reduce((s, p) => s + p.value, 0);
+  if (!total) return '';
+  const r = 42;
+  const c = 2 * Math.PI * r;
+  const gap = shown.length > 1 ? 1.2 : 0;
+  let at = 0;
+  const arcs = shown
+    .map(p => {
+      const len = (p.value / total) * c;
+      const dash = Math.max(0.6, len - gap);
+      const arc = `<circle cx="50" cy="50" r="${r}" fill="none" stroke="${p.color}" stroke-width="12" stroke-dasharray="${f(dash)} ${f(c - dash)}" stroke-dashoffset="${f(-at)}" transform="rotate(-90 50 50)"><title>${escapeHtml(p.label)} ${escapeHtml(format(p.value))}</title></circle>`;
+      at += len;
+      return arc;
+    })
+    .join('');
+  const legend = shown
+    .map(p => `<li><i style="background:${p.color}"></i><span class="legend-label">${escapeHtml(p.label)}</span><strong class="num">${Math.round((p.value / total) * 1000) / 10}%</strong><span class="legend-value num">${escapeHtml(format(p.value))}</span></li>`)
+    .join('');
+  return `<div class="donut-wrap"><div class="donut" style="width:${size}px;height:${size}px"><svg viewBox="0 0 100 100" role="img" aria-label="${escapeHtml(shown.map(p => `${p.label} ${Math.round((p.value / total) * 100)}%`).join(', '))}">${arcs}</svg>${center ? `<div class="donut-center"><strong class="num">${escapeHtml(center)}</strong>${sub ? `<small>${escapeHtml(sub)}</small>` : ''}</div>` : ''}</div><ul class="stack-legend">${legend}</ul></div>`;
+}
+
+// A row of small bars (a year of months), the last one highlighted.
+// bars: [[label, value]].
+export function miniBars(bars, { format = v => v, height = 56 } = {}) {
+  const max = Math.max(...bars.map(b => b[1]), 0);
+  if (!max) return '';
+  return `<div class="mini-bars" style="height:${height}px">${bars
+    .map(([label, v], i) => `<span class="mini-bar${i === bars.length - 1 ? ' now' : ''}" style="height:${Math.max(v > 0 ? 6 : 2, (v / max) * 100)}%" title="${escapeHtml(label)} ${escapeHtml(format(v))}"></span>`)
+    .join('')}</div>`;
+}
+
 // Categorical colours (validated order), light and dark via CSS variables.
 export const SERIES = ['var(--c1)', 'var(--c2)', 'var(--c3)', 'var(--c4)', 'var(--c5)', 'var(--c6)', 'var(--c7)', 'var(--c8)'];
 

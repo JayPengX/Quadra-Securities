@@ -81,12 +81,13 @@
 }
 
 /* Text never cut off or wrapped mid-number; inputs 16px so iOS never zooms.
-   No double-tap zoom (a quick second tap on a button zoomed the page);
-   pinching still zooms. */
+   No zooming at all: no double-tap zoom (a quick second tap on a button
+   zoomed the page) and no two-finger zoom; the apps size their text to be
+   read as they are (quadra.mjs also stops iOS's pinch gesture). */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  touch-action: manipulation;
+  touch-action: pan-x pan-y;
 }
 body,
 button,
@@ -95,7 +96,7 @@ input,
 select,
 label,
 [role='button'] {
-  touch-action: manipulation;
+  touch-action: pan-x pan-y;
 }
 /* While the loading screen is up the page behind it doesn't scroll. */
 html:has(.loading:not([hidden])),

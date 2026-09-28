@@ -338,6 +338,21 @@ export function proxyJson(url, { ttl = 60_000, trim = '', persist: keep = true, 
 // q.write({ payload, wallet })  only while live
 // q.proxy(url, extra)           the data proxy's address for `url`, signed in
 
+// No two-finger zoom in any Quadra app. iOS ignores the viewport's
+// user-scalable=no in Safari and doesn't honour touch-action for pinches
+// everywhere, so the pinch itself is stopped: its gesture events (Safari),
+// a move with two fingers down (every touch browser) and ctrl+wheel (a
+// trackpad pinch). One finger still scrolls and every tap still works.
+function noZoom() {
+  if (typeof document === 'undefined' || document.__quadraNoZoom) return;
+  document.__quadraNoZoom = true;
+  const stop = e => e.cancelable && e.preventDefault();
+  for (const type of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(type, stop, { passive: false });
+  document.addEventListener('touchmove', e => e.touches && e.touches.length > 1 && stop(e), { passive: false });
+  globalThis.addEventListener?.('wheel', e => e.ctrlKey && stop(e), { passive: false });
+}
+noZoom();
+
 // The solid strip under the phone's status bar (see .q-statusbar in quadra.css).
 function statusStrip() {
   if (typeof document === 'undefined' || !document.body || document.querySelector('.q-statusbar')) return;

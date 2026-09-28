@@ -129,6 +129,18 @@ export function cachedWallet(account = storedAccount()) {
 function cacheWallet(account, wallet) {
   if (account && wallet) writeStore(KEY.wallet, JSON.stringify({ account, wallet }));
 }
+// The app's own data as last read or written on this device (under the
+// account), so a cold start paints at once, before the Worker answers.
+// Only small ones (Securities keeps its own compressed copy).
+const payloadKey = app => `quadra.payload.${app}`;
+export function cachedPayload(app, account = storedAccount()) {
+  const saved = readJson(payloadKey(app), null);
+  return saved && account && saved.account === account ? saved.payload : null;
+}
+function cachePayload(app, account, payload) {
+  if (!account || typeof payload !== 'string') return;
+  writeStore(payloadKey(app), payload.length < 200_000 ? JSON.stringify({ account, payload }) : null);
+}
 
 // ---- The Worker ----------------------------------------------------------------------
 
@@ -158,6 +170,144 @@ export function randomId() {
   return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// ---- Data through the proxy: batched, remembered, shared ------------------------------
+//
+// proxyJson(url, { ttl, trim, persist }) is how every app reads outside data
+// (ESPN, Kambi, Yahoo…) through the data proxy:
+//
+//   - the same URL asked twice within `ttl` is answered from memory;
+//   - with `persist` (the default), the answer is also kept on the device
+//     (Cache Storage), so it survives closing the app: a copy younger than
+//     `ttl` is used without asking the proxy at all, and peekJson(url) gives
+//     the last copy of any age for painting at once while a fresh one loads;
+//   - requests made within a few milliseconds of each other go to the proxy
+//     as one batch (`?batch=1&u=…`, up to 12): the Worker plan bills per
+//     request, and a first paint asks for a dozen lists at once. A proxy
+//     that doesn't know batches yet is asked one by one.
+//
+// The session token comes from the app's quadraSession (the last one made).
+let dataSession = null;
+const DATA_CACHE = 'quadra-data-v1';
+const DATA_KEEP_MS = 4 * 86_400_000;
+const memory = new Map();
+const dataKey = (url, trim) => `https://quadra.data/${trim ? `${trim}!` : ''}${encodeURIComponent(url)}`;
+const hasCaches = () => typeof caches !== 'undefined' && typeof Response !== 'undefined';
+async function persisted(key) {
+  if (!hasCaches()) return null;
+  try {
+    const cache = await caches.open(DATA_CACHE);
+    const hit = await cache.match(key);
+    if (!hit) return null;
+    return { at: Number(hit.headers.get('x-at')) || 0, data: await hit.json() };
+  } catch {
+    return null;
+  }
+}
+let prunedAt = 0;
+async function persist(key, text) {
+  if (!hasCaches()) return;
+  try {
+    const cache = await caches.open(DATA_CACHE);
+    await cache.put(key, new Response(text, { headers: { 'content-type': 'application/json', 'x-at': String(Date.now()) } }));
+    // Now and then, what's older than a few days goes.
+    if (Date.now() - prunedAt > 10 * 60_000) {
+      prunedAt = Date.now();
+      for (const req of await cache.keys()) {
+        const res = await cache.match(req);
+        if (Date.now() - (Number(res?.headers.get('x-at')) || 0) > DATA_KEEP_MS) await cache.delete(req);
+      }
+    }
+  } catch {}
+}
+export function clearData() {
+  memory.clear();
+  if (hasCaches()) caches.delete(DATA_CACHE).catch(() => {});
+}
+// The last copy kept on this device, of any age: { at, data } or null.
+export const peekJson = (url, { trim = '' } = {}) => persisted(dataKey(url, trim));
+
+async function dataToken() {
+  const s = dataSession;
+  if (!s) return '';
+  return s.ensureToken().catch(() => s.token || '');
+}
+const proxyAddress = (url, trim, token) => `${PROXY_URL}?url=${encodeURIComponent(url)}${trim ? `&trim=${trim}` : ''}${token ? `&qt=${encodeURIComponent(token)}` : ''}`;
+async function fetchOne(url, trim, timeout) {
+  const token = await dataToken();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(proxyAddress(url, trim, token), { signal: AbortSignal.timeout(timeout) });
+      if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
+      return await res.text();
+    } catch (error) {
+      if (attempt >= 1 || (error.status >= 400 && error.status < 500 && error.status !== 429)) throw error;
+      await new Promise(r => setTimeout(r, 700));
+    }
+  }
+}
+// The batch queue.
+const BATCH_MAX = 12;
+let queue = [];
+let flushTimer = 0;
+let batchOff = false;
+function enqueue(url, trim, timeout) {
+  return new Promise((resolve, reject) => {
+    queue.push({ url, trim, timeout, resolve, reject });
+    if (queue.length >= BATCH_MAX) flush();
+    else if (!flushTimer) flushTimer = setTimeout(flush, 12);
+  });
+}
+async function flush() {
+  clearTimeout(flushTimer);
+  flushTimer = 0;
+  const items = queue.splice(0, BATCH_MAX);
+  if (queue.length) flushTimer = setTimeout(flush, 0);
+  if (!items.length) return;
+  const one = item => fetchOne(item.url, item.trim, item.timeout).then(item.resolve, item.reject);
+  if (items.length === 1 || batchOff) return void items.forEach(one);
+  try {
+    const token = await dataToken();
+    const u = items.map(i => `&u=${encodeURIComponent(i.trim ? `${i.trim}!${i.url}` : i.url)}`).join('');
+    const res = await fetch(`${PROXY_URL}?batch=1${u}${token ? `&qt=${encodeURIComponent(token)}` : ''}`, { signal: AbortSignal.timeout(Math.max(...items.map(i => i.timeout))) });
+    if (res.status === 400) {
+      // A proxy from before batches: one by one from now on.
+      batchOff = true;
+      return void items.forEach(one);
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { r } = await res.json();
+    items.forEach((item, i) => {
+      const got = r?.[i];
+      if (got?.s === 200) item.resolve(got.b);
+      else if (got?.s >= 500 || got?.s === 429 || !got) one(item);
+      else item.reject(Object.assign(new Error(`HTTP ${got.s}`), { status: got.s }));
+    });
+  } catch {
+    items.forEach(one);
+  }
+}
+
+export function proxyJson(url, { ttl = 60_000, trim = '', persist: keep = true, timeout = 20_000 } = {}) {
+  const key = dataKey(url, trim);
+  const hit = memory.get(key);
+  if (hit && Date.now() - hit.at < ttl) return hit.promise;
+  const promise = (async () => {
+    if (keep) {
+      const saved = await persisted(key);
+      if (saved && Date.now() - saved.at < ttl) return saved.data;
+    }
+    const got = await enqueue(url, trim, timeout);
+    const data = typeof got === 'string' ? JSON.parse(got) : got;
+    // Kept on the device off the critical path.
+    if (keep) setTimeout(() => persist(key, typeof got === 'string' ? got : JSON.stringify(got)), 0);
+    return data;
+  })();
+  memory.set(key, { at: Date.now(), promise });
+  promise.catch(() => memory.delete(key));
+  if (memory.size > 500) memory.delete(memory.keys().next().value);
+  return promise;
+}
+
 // ---- The session ---------------------------------------------------------------------
 //
 // const q = quadraSession('odds');
@@ -184,6 +334,11 @@ function statusStrip() {
 if (typeof document !== 'undefined') document.body ? statusStrip() : document.addEventListener('DOMContentLoaded', statusStrip);
 
 export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } = {}) {
+  const made = makeSession(app, { lang, heartbeat });
+  dataSession = made;
+  return made;
+}
+function makeSession(app, { lang, heartbeat }) {
   const listeners = {};
   const emit = (name, value) => (listeners[name] || []).forEach(fn => fn(value));
   let token = '';
@@ -250,6 +405,7 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
       tokenAt = Date.now();
     }
     if (data.wallet) setWallet(data.wallet);
+    if (typeof data.payload === 'string') cachePayload(app, storedAccount(), data.payload);
     if (data.active != null) setActive(Boolean(data.active), data.live || null);
     return data;
   }
@@ -270,7 +426,8 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
     }
   }
   function signedOut() {
-    for (const k of [KEY.refresh, KEY.account, KEY.wallet, KEY.oldPass]) writeStore(k, null);
+    for (const k of [KEY.refresh, KEY.account, KEY.wallet, KEY.oldPass, payloadKey(app)]) writeStore(k, null);
+    clearData();
     token = '';
     wallet = null;
     active = false;
@@ -328,7 +485,10 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
         throw error;
       }
       return call('PATCH', qs({ qt, app }), { payload, wallet: patch });
-    }).then(absorb);
+    }).then(res => {
+      if (typeof payload === 'string') cachePayload(app, storedAccount(), payload);
+      return absorb(res);
+    });
   s.dropInbox = id => withToken(qt => call('DELETE', qs({ qt, app, inbox: id })));
   // Other passes into this one (they're deleted after).
   s.merge = passes => withToken(qt => call('POST', '', { op: 'merge', qt, sources: passes.map(passcode => ({ passcode })) })).then(absorb);
@@ -773,9 +933,14 @@ function hideMoved() {
 // own settings).
 
 // extra(): the app's own settings for the sheet (an element), optional.
+// The button is the account's badge (a person in the Quadra mark's colours),
+// never the balance: the balance lives inside the sheet.
+const PERSON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5c1.2-4 4.2-6 7.5-6s6.3 2 7.5 6"/></svg>';
 export function accountButton(s, { extra = null } = {}) {
-  const btn = node('button', { class: 'q-account', type: 'button', 'aria-label': s.lang === 'en' ? 'Account' : '帳戶' }, [node('span', { class: 'q-account-pool' }), node('span', { class: 'q-account-dot', 'aria-hidden': 'true' })]);
-  const paint = () => (btn.firstChild.textContent = s.wallet ? money(s.pool) : 'Quadra');
+  const btn = node('button', { class: 'q-account', type: 'button', 'aria-label': s.lang === 'en' ? 'Quadra Pass' : 'Quadra Pass 帳戶', title: BRAND.pass });
+  btn.innerHTML = PERSON_SVG;
+  btn.append(node('span', { class: 'q-account-dot', 'aria-hidden': 'true' }));
+  const paint = () => btn.classList.toggle('signed', Boolean(s.wallet));
   paint();
   s.on('wallet', paint);
   btn.addEventListener('click', () => accountSheet(s, { extra: extra ? extra() : null }));
@@ -833,6 +998,54 @@ export function paydayText(lang, now = Date.now()) {
   return lang === 'en'
     ? `Payday: ${money(ECONOMY.monthly)} on the 1st of every month (next ${d.getUTCMonth() + 1}/1; a missed month is paid when you're back)`
     : `發薪日：每月 1 日 ${money(ECONOMY.monthly)}（下次 ${d.getUTCMonth() + 1}/1；沒打開的月份下次補發）`;
+}
+// The account at a glance: its number, since when, this month's money in
+// and out, and the latest entries (every app's, like a bank statement).
+export function accountDetails(wallet, lang = 'zh', now = Date.now()) {
+  const entries = [...(wallet?.entries || [])].sort((a, b) => b.t - a.t);
+  const month = taipeiDay(now).slice(0, 7);
+  const thisMonth = entries.filter(e => taipeiDay(e.t).slice(0, 7) === month);
+  const sum = list => Math.round(list.reduce((x, e) => x + e.amount, 0) * 100) / 100;
+  return {
+    created: Number.isFinite(wallet?.created) ? wallet.created : null,
+    in: sum(thisMonth.filter(e => e.amount > 0)),
+    out: sum(thisMonth.filter(e => e.amount < 0)),
+    count: thisMonth.length,
+    recent: entries.slice(0, 8).map(e => ({ t: e.t, amount: e.amount, text: describeEntry(e, lang), app: e.app }))
+  };
+}
+const accountNumber = id => (id ? `QP ${id.slice(0, 4).toUpperCase()} ${id.slice(4, 8).toUpperCase()} ${id.slice(8, 12).toUpperCase()}` : '');
+function detailsCard(s) {
+  const en = s.lang === 'en';
+  const T = (zh, e) => (en ? e : zh);
+  const d = accountDetails(s.wallet, s.lang);
+  const date = t => new Date(t).toLocaleDateString(en ? 'en-US' : 'zh-TW', { year: 'numeric', month: 'short', day: 'numeric' });
+  const short = t => new Date(t).toLocaleDateString(en ? 'en-US' : 'zh-TW', { month: 'numeric', day: 'numeric' });
+  const days = d.created ? Math.max(1, Math.round((Date.now() - d.created) / 86_400_000)) : 0;
+  return node('div', { class: 'q-details' }, [
+    node('div', { class: 'q-card-hero' }, [
+      node('div', { class: 'q-hero-top' }, [node('span', { class: 'q-hero-brand', text: 'QUADRA PASS' }), node('span', { class: 'q-hero-no num', text: accountNumber(s.pass) })]),
+      node('span', { class: 'q-hero-label', text: T('Quadra 餘額', 'Quadra balance') }),
+      node('strong', { class: 'q-hero-balance num', text: money(s.pool) }),
+      node('span', { class: 'q-hero-sub', text: d.created ? T(`${date(d.created)} 開戶 · 第 ${days} 天`, `Opened ${date(d.created)} · day ${days}`) : '' })
+    ]),
+    node('div', { class: 'q-month' }, [
+      node('div', {}, [node('small', { text: T('本月收入', 'In this month') }), node('strong', { class: 'num up', text: money(d.in, { sign: true }) })]),
+      node('div', {}, [node('small', { text: T('本月支出', 'Out this month') }), node('strong', { class: 'num down', text: money(d.out) })]),
+      node('div', {}, [node('small', { text: T('本月筆數', 'Entries') }), node('strong', { class: 'num', text: String(d.count) })])
+    ]),
+    node('p', { class: 'q-payday', text: paydayText(s.lang) }),
+    d.recent.length
+      ? node('details', { class: 'q-recent' }, [
+          node('summary', { text: T('最近明細', 'Latest entries') }),
+          node(
+            'ul',
+            {},
+            d.recent.map(e => node('li', {}, [node('span', { class: 'q-recent-when num', text: short(e.t) }), node('span', { class: 'q-recent-what', text: e.text }), node('strong', { class: `num ${e.amount < 0 ? 'down' : 'up'}`, text: money(e.amount, { sign: true }) })]))
+          )
+        ])
+      : null
+  ].filter(Boolean));
 }
 export function accountSheet(s, { extra = null } = {}) {
   const en = s.lang === 'en';
@@ -900,8 +1113,7 @@ export function accountSheet(s, { extra = null } = {}) {
   };
   dialog.append(
     node('div', { class: 'q-sheet-head' }, [node('h2', { text: BRAND.pass }), node('button', { class: 'q-close', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×', onclick: close })]),
-    node('div', { class: 'q-balance' }, [node('span', { text: T('Quadra 餘額', 'Quadra balance') }), node('strong', { class: 'num', text: money(s.pool) })]),
-    node('p', { class: 'q-payday', text: paydayText(s.lang) }),
+    detailsCard(s),
     node('h3', { class: 'q-sheet-h', text: T('Quadra 的 App', 'Quadra apps') }),
     tiles,
     ...(extra ? [extra] : []),
@@ -1247,33 +1459,69 @@ export function phoneOnlyGate(app, { lang = detectLang(), qr = '' } = {}) {
 
 // Always the newest deploy (version.json, checked on opening, on coming back
 // and every few minutes): old caches are dropped and the page reloads once.
-export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 5 * 60_000 } = {}) {
+//
+// Never in the person's face: a new deploy found right after opening loads
+// at once (nothing's been done yet); found later, while the app is in use or
+// on coming back to it, it waits for the app to be put away and loads then,
+// so coming back to an app never reloads it under the person's thumb. Away
+// longer than `stale` (the app would have been refreshed anyway), it loads
+// at once on coming back.
+export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 5 * 60_000, stale = 30 * 60_000 } = {}) {
   if (!current || current === 'dev') return;
+  const opened = Date.now();
   let checking = false;
-  async function check() {
+  let pending = null;
+  let hiddenAt = 0;
+  async function apply(latest) {
+    const flag = `${key || 'quadra'}.reloadedTo`;
+    if (sessionStorage.getItem(flag) === latest) return;
+    sessionStorage.setItem(flag, latest);
+    rememberPlace();
+    if (globalThis.caches && cachePrefix) for (const name of await caches.keys()) if (name.startsWith(cachePrefix)) await caches.delete(name);
+    const reg = await navigator.serviceWorker?.getRegistration?.(location.pathname);
+    await reg?.update?.().catch(() => {});
+    location.replace(`${location.pathname}?v=${encodeURIComponent(latest)}${location.hash}`);
+  }
+  async function check({ back = false } = {}) {
     if (checking || document.visibilityState === 'hidden') return;
     checking = true;
     try {
       const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
       const latest = res.ok ? (await res.json())?.version : null;
-      if (!latest || latest === current || busy()) return;
-      const flag = `${key || 'quadra'}.reloadedTo`;
-      if (sessionStorage.getItem(flag) === latest) return;
-      sessionStorage.setItem(flag, latest);
-      document.documentElement.classList.add('quadra-updating');
-      if (globalThis.caches && cachePrefix) for (const name of await caches.keys()) if (name.startsWith(cachePrefix)) await caches.delete(name);
-      const reg = await navigator.serviceWorker?.getRegistration?.(location.pathname);
-      await reg?.update?.().catch(() => {});
-      location.replace(`${location.pathname}?v=${encodeURIComponent(latest)}${location.hash}`);
+      if (!latest || latest === current) return;
+      const now = Date.now() - opened < 6000 || (back && hiddenAt && Date.now() - hiddenAt > stale);
+      if (now && !busy()) await apply(latest);
+      else pending = latest;
     } catch {
     } finally {
       checking = false;
     }
   }
   check();
-  document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && check());
-  globalThis.addEventListener?.('pageshow', event => event.persisted && check());
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      if (pending && !busy()) apply(pending).catch(() => {});
+      else hiddenAt = Date.now();
+    } else check({ back: true });
+  });
+  globalThis.addEventListener?.('pageshow', event => event.persisted && check({ back: true }));
   setInterval(check, every);
+}
+
+// Where the person was (the scroll), kept across a reload for an update and
+// put back by restorePlace() once the app has painted.
+const PLACE_KEY = 'quadra.place';
+export function rememberPlace() {
+  try {
+    sessionStorage.setItem(PLACE_KEY, JSON.stringify({ path: location.pathname, hash: location.hash, y: Math.round(globalThis.scrollY || 0), t: Date.now() }));
+  } catch {}
+}
+export function restorePlace() {
+  try {
+    const p = JSON.parse(sessionStorage.getItem(PLACE_KEY) || 'null');
+    sessionStorage.removeItem(PLACE_KEY);
+    if (p && p.path === location.pathname && p.hash === location.hash && Date.now() - p.t < 60_000 && p.y > 0) requestAnimationFrame(() => globalThis.scrollTo(0, p.y));
+  } catch {}
 }
 
 // The fixed tab bar keeps clear of the iPhone's home indicator even when iOS

@@ -337,6 +337,30 @@ body {
   margin-top: 6px;
 }
 
+/* ---- A phone-only app on a computer: a QR code to open it on the phone ---- */
+.q-qr {
+  width: 188px;
+  height: 188px;
+  margin: 10px auto 2px;
+  padding: 12px;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: var(--q-shadow-sm);
+  border: 1px solid var(--q-border);
+}
+.q-qr svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.q-qr-url {
+  margin: 4px 0 8px;
+  color: var(--q-muted);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /* ---- Paused: Quadra is open in another app ---- */
 .q-moved {
   position: fixed;
@@ -398,6 +422,80 @@ body {
   flex: none;
   border-radius: 50%;
   background: var(--q-accent);
+}
+
+/* ---- Dialogs (ask / tell): Quadra's own confirm and alert ---- */
+.q-ask {
+  width: min(360px, calc(100vw - 32px));
+  margin: auto;
+  padding: 22px 20px 18px;
+  border: 1px solid var(--q-border);
+  border-radius: 24px;
+  background: var(--q-page);
+  color: var(--q-text);
+  font-family: var(--q-font);
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(8, 10, 14, 0.28);
+  box-sizing: border-box;
+  animation: q-ask-in 0.16s ease-out;
+}
+.q-ask.out {
+  opacity: 0;
+  transform: scale(0.97);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.q-ask::backdrop {
+  background: rgba(8, 10, 14, 0.5);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+@keyframes q-ask-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+.q-ask-icon {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 10px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--q-sunken);
+  font-size: 26px;
+}
+.q-ask.danger .q-ask-icon {
+  background: color-mix(in srgb, var(--q-bad) 14%, var(--q-surface));
+}
+.q-ask-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+.q-ask-body {
+  margin: 8px 0 0;
+  color: var(--q-text-2, var(--q-muted));
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+.q-ask-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 10px;
+  margin-top: 20px;
+}
+.q-btn.danger {
+  border-color: transparent;
+  background: var(--q-bad);
+  color: #fff;
+}
+@media (prefers-reduced-motion: reduce) {
+  .q-ask {
+    animation: none;
+  }
 }
 
 /* ---- Sheets ---- */

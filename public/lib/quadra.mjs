@@ -770,6 +770,47 @@ export function accountButton(s, { extra = null } = {}) {
   return btn;
 }
 
+// ---- Dialogs: Quadra's own, never the browser's alert/confirm ---------------------------
+//
+// ask({ title, body, ok, cancel, danger }) resolves true or false; tell({
+// title, body, ok }) resolves once closed. A centred card over the page (and
+// over an open sheet), Esc or a tap outside cancels.
+export function ask({ title, body = '', ok = '', cancel = '', danger = false, icon = '', lang = detectLang(), alertOnly = false } = {}) {
+  const en = lang === 'en';
+  return new Promise(resolve => {
+    const dialog = node('dialog', { class: `q-ask${danger ? ' danger' : ''}`, 'aria-labelledby': 'q-ask-title' });
+    let done = false;
+    const finish = value => {
+      if (done) return;
+      done = true;
+      dialog.classList.add('out');
+      setTimeout(() => {
+        dialog.close();
+        dialog.remove();
+      }, 140);
+      resolve(value);
+    };
+    const okBtn = node('button', { class: `q-btn ${danger ? 'danger' : 'primary'}`, type: 'button', text: ok || (alertOnly ? (en ? 'OK' : '好') : en ? 'Continue' : '繼續'), onclick: () => finish(true) });
+    dialog.append(
+      ...[
+      icon ? node('div', { class: 'q-ask-icon', 'aria-hidden': 'true', text: icon }) : null,
+      node('h2', { id: 'q-ask-title', class: 'q-ask-title', text: title }),
+      body ? node('p', { class: 'q-ask-body', text: body }) : null,
+      node('div', { class: 'q-ask-actions' }, [
+        alertOnly ? null : node('button', { class: 'q-btn', type: 'button', text: cancel || (en ? 'Cancel' : '取消'), onclick: () => finish(false) }),
+        okBtn
+      ])
+      ].filter(Boolean)
+    );
+    dialog.addEventListener('cancel', event => (event.preventDefault(), finish(alertOnly)));
+    dialog.addEventListener('click', event => event.target === dialog && finish(alertOnly));
+    document.body.append(dialog);
+    dialog.showModal();
+    (alertOnly || !danger ? okBtn : dialog.querySelector('.q-btn:not(.danger)'))?.focus();
+  });
+}
+export const tell = (opts = {}) => ask({ ...opts, alertOnly: true }).then(() => undefined);
+
 export function accountSheet(s, { extra = null } = {}) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
@@ -849,12 +890,12 @@ export function accountSheet(s, { extra = null } = {}) {
     node('h3', { class: 'q-sheet-h', text: T('帳戶安全', 'Security') }),
     node('div', { class: 'q-rows' }, [
       act(T('登出其他所有裝置', 'Sign out every other device'), async () => {
-        if (!confirm(T('除了這台以外，所有裝置都會登出。繼續？', 'Every device except this one is signed out. Continue?'))) return;
+        if (!(await ask({ lang: s.lang, icon: '🔒', title: T('登出其他所有裝置？', 'Sign out every other device?'), body: T('除了這台以外，所有裝置都會登出，要用通行碼或裝置代碼重新登入。', 'Every device except this one is signed out and needs your pass or a device code to sign in again.'), ok: T('全部登出', 'Sign them out'), danger: true }))) return;
         await s.signOutEverywhere();
         note.textContent = T('其他裝置都已登出。', 'Every other device is signed out.');
       }),
       act(T('更換通行碼', 'Change my pass'), async () => {
-        if (!confirm(T('換一組新的通行碼：帳戶和所有資料都會移過去，舊通行碼立即失效，其他裝置也會登出。繼續？', 'Get a new pass: everything moves to it, the old pass stops working at once and every other device is signed out. Continue?'))) return;
+        if (!(await ask({ lang: s.lang, icon: '🔑', title: T('換一組新的通行碼？', 'Get a new pass?'), body: T('帳戶和所有資料都會移到新通行碼，舊通行碼立即失效，其他裝置也會登出。新通行碼只會顯示一次，請記下來。', 'Everything moves to the new pass, the old one stops working at once and every other device is signed out. The new pass is shown once: write it down.'), ok: T('換新通行碼', 'Get a new pass'), danger: true }))) return;
         await showNewPass(s, await s.rotate());
         note.textContent = T('已換成新的通行碼。', 'Your pass has been changed.');
       }),
@@ -862,7 +903,7 @@ export function accountSheet(s, { extra = null } = {}) {
       act(
         T('在這台裝置登出', 'Sign out on this device'),
         async () => {
-          if (!confirm(T('在這台裝置登出？資料都保留在 Quadra Pass，之後用通行碼或裝置代碼登入。', 'Sign out on this device? Everything stays on your Quadra Pass; sign in again with the pass or a device code.'))) return;
+          if (!(await ask({ lang: s.lang, icon: '👋', title: T('在這台裝置登出？', 'Sign out on this device?'), body: T('資料都保留在 Quadra Pass，之後用通行碼或裝置代碼再登入。', 'Everything stays on your Quadra Pass; sign in again with the pass or a device code.'), ok: T('登出', 'Sign out') }))) return;
           s.signOut();
           location.reload();
         },
@@ -1033,6 +1074,52 @@ export function installGate(app, lang = detectLang()) {
         'ol',
         { class: 'q-steps' },
         steps.map(t => node('li', { text: t }))
+      )
+    ])
+  ]);
+  document.body.append(gate);
+  document.documentElement.classList.add('q-signing-in');
+  document.getElementById('loading')?.setAttribute('hidden', '');
+  return true;
+}
+
+// A phone-only app on a computer: covers the page with where to open it
+// instead (a QR code the app draws, `qr` as SVG markup, and the link), then
+// how to add it to the home screen. Returns true when it covered the page.
+export function phoneOnlyGate(app, { lang = detectLang(), qr = '' } = {}) {
+  if (isPhoneOrTablet()) return false;
+  const en = lang === 'en';
+  const name = appName(app);
+  const url = `${SITE}${APPS[app].path}`;
+  const qrBox = node('div', { class: 'q-qr', role: 'img', 'aria-label': en ? `QR code for ${url}` : `${url} 的 QR code` });
+  qrBox.innerHTML = qr;
+  const copy = node('button', {
+    class: 'q-btn',
+    type: 'button',
+    text: en ? 'Copy the link' : '複製連結',
+    onclick: async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        copy.textContent = en ? 'Copied ✓' : '已複製 ✓';
+      } catch {}
+    }
+  });
+  const gate = node('div', { class: 'q-gate q-phone-only', role: 'dialog', 'aria-modal': 'true', style: `--q-accent:${APPS[app].color}` }, [
+    node('div', { class: 'q-gate-box' }, [
+      node('img', { class: 'q-gate-icon', src: './favicon.svg', alt: '', width: '72', height: '72' }),
+      node('p', { class: 'q-gate-brand', text: 'QUADRA' }),
+      node('h1', { class: 'q-gate-title', text: en ? `${name} is made for your phone` : `${name} 是手機 App` }),
+      node('p', { class: 'q-gate-lede', text: en ? 'It lives in your pocket, beside your day. Open it on your phone:' : '課表跟著你一整天，所以只在手機上使用。用手機打開：' }),
+      qrBox,
+      node('p', { class: 'q-qr-url', text: url.replace(/^https:\/\//, '') }),
+      copy,
+      node(
+        'ol',
+        { class: 'q-steps' },
+        (en
+          ? ['Scan the code with your phone’s camera (or open the link on it).', 'Add it to the home screen: Share → “Add to Home Screen” on iPhone, ⋮ → “Install app” on Android.', 'Sign in with your Quadra Pass or a device code: your schedule is already there.']
+          : ['用手機相機掃描上面的條碼（或在手機打開連結）。', '加入主畫面：iPhone 點「分享」→「加入主畫面」；Android 點 ⋮ →「安裝應用程式」。', '用 Quadra Pass 或裝置代碼登入，課表就在裡面。']
+        ).map(t => node('li', { text: t }))
       )
     ])
   ]);

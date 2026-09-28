@@ -24,7 +24,7 @@ import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
   APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, notify, notifyOn, randomId as quadraId
+  affinity, helpUrl, notify, notifyOn, ask, randomId as quadraId
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -2817,12 +2817,16 @@ document.addEventListener('click', event => {
     case 'plan-add':
       addPlan();
       break;
-    case 'plan-off':
-      if (!confirm(t('planStopConfirm'))) return;
-      commit(setPlan(state.account, { id: el.dataset.id, on: false }).account);
-      render();
-      if (state.detail) refreshDetailLive();
+    case 'plan-off': {
+      const id = el.dataset.id;
+      ask({ lang: locale, icon: '📅', title: t('planStopTitle'), body: t('planStopConfirm'), ok: t('planStop'), danger: true }).then(yes => {
+        if (!yes || !state.account) return;
+        commit(setPlan(state.account, { id, on: false }).account);
+        render();
+        if (state.detail) refreshDetailLive();
+      });
       break;
+    }
     case 'tm-open':
       state.tm.symbol = el.dataset.symbol;
       state.tm.result = null;

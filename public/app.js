@@ -23,7 +23,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
-  APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
+  APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
   affinity, helpUrl, notify, notifyOn, ask, randomId as quadraId
 } from './lib/quadra.mjs';
 
@@ -1598,7 +1598,7 @@ function renderPortfolio() {
         ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
         ${v.debtTWD > 0 ? `<span>${h(t('loans'))} <strong class="num">−${h(money(v.debtTWD, BASE))}</strong></span>` : ''}
       </div>
-      <p class="hero-payday">💵 ${h(t('nextPayday', { amount: money(incomeAmount(), BASE), date: fmtDate(nextPayday(Date.now())) }))}</p>
+      <p class="hero-payday">💵 ${h(t('nextPayday', { amount: money(ECONOMY.monthly, BASE), date: fmtDate(nextPayday(Date.now())) }))}</p>
       <div class="button-row hero-actions">
         <button class="hero-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button>
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>

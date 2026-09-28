@@ -1101,3 +1101,11 @@ dialog.q-newpass::backdrop { background: var(--q-page); }
   outline: 2px solid var(--q-accent);
   outline-offset: 2px;
 }
+
+/* The payday line under the balance in the account sheet. */
+.q-payday {
+  margin: 8px 4px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--q-muted);
+}

@@ -40,16 +40,15 @@ export const appName = app => APPS[app]?.name || app;
 // ---- The economy -------------------------------------------------------------------
 //
 // One pool, one payday (paid by the Worker, whichever app is opened): a new
-// pass opens with NT$110,000, and every Taiwan month adds NT$5,000 and
-// every Taiwan week NT$500. Securities is where it grows (a diversified
+// pass opens with NT$110,000, and the 1st of every Taiwan month pays
+// NT$7,000 (shown under the balance in the account sheet). Securities is where it grows (a diversified
 // portfolio about 6-8% a year, real costs); Play is where it shrinks (the
 // lottery keeps about 22%); Rewards pays for effort: word practice best
 // (about NT$20 a minute), games about NT$15 a minute, missions a little
 // for using the apps, all capped a day.
 export const ECONOMY = {
   start: 110_000,
-  monthly: 5_000,
-  weekly: 500,
+  monthly: 7_000,
   // Rewards: word practice, games and missions, with their caps a Taiwan day.
   vocab: { perCorrect: 3, perMastered: 25, dailyCap: 600 },
   gamesPerMinute: 15,
@@ -457,7 +456,7 @@ export const entriesNotFrom = (wallet, app) => (wallet?.entries || []).filter(e 
 
 const KIND = {
   start: ['開戶金', 'Opening money'],
-  grant: ['每週零用金', 'Weekly allowance'],
+  grant: ['零用金', 'Allowance'],
   pay: ['每月薪資', 'Monthly pay'],
   stake: ['下注', 'Bet'],
   payout: ['彩金', 'Winnings'],
@@ -824,6 +823,17 @@ export function ask({ title, body = '', ok = '', cancel = '', danger = false, ic
 }
 export const tell = (opts = {}) => ask({ ...opts, alertOnly: true }).then(() => undefined);
 
+// The next payday: the 1st of next Taiwan month.
+export function nextPayday(now = Date.now()) {
+  const d = new Date(now + TPE);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - TPE;
+}
+export function paydayText(lang, now = Date.now()) {
+  const d = new Date(nextPayday(now) + TPE);
+  return lang === 'en'
+    ? `Payday: ${money(ECONOMY.monthly)} on the 1st of every month (next ${d.getUTCMonth() + 1}/1)`
+    : `發薪日：每月 1 日 ${money(ECONOMY.monthly)}（下次 ${d.getUTCMonth() + 1}/1）`;
+}
 export function accountSheet(s, { extra = null } = {}) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
@@ -891,6 +901,7 @@ export function accountSheet(s, { extra = null } = {}) {
   dialog.append(
     node('div', { class: 'q-sheet-head' }, [node('h2', { text: BRAND.pass }), node('button', { class: 'q-close', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×', onclick: close })]),
     node('div', { class: 'q-balance' }, [node('span', { text: T('Quadra 餘額', 'Quadra balance') }), node('strong', { class: 'num', text: money(s.pool) })]),
+    node('p', { class: 'q-payday', text: paydayText(s.lang) }),
     node('h3', { class: 'q-sheet-h', text: T('Quadra 的 App', 'Quadra apps') }),
     tiles,
     ...(extra ? [extra] : []),

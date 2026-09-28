@@ -1295,8 +1295,10 @@ export function incomeSummary(account, now = Date.now()) {
 export const startAmount = account => account?.events.find(e => e.id === 'deposit:start')?.amount || 0;
 
 // NT$ a month.
+// Securities' own monthly pay before Quadra's payday (months up to 2026-09):
+// NT$5,000, what it was then. Quadra's payday is ECONOMY.monthly.
 export function incomeAmount() {
-  return ECONOMY.monthly;
+  return 5_000;
 }
 
 // The first payday after `t`: the next 1st, 00:00 Taiwan time.

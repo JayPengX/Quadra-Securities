@@ -185,6 +185,8 @@ export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } =
   let timer = 0;
   let started = false;
   const oldPass = PASS_PATTERN.test(readStore(KEY.oldPass) || '') ? readStore(KEY.oldPass) : '';
+  // Signed in by an older version: the account's id from its refresh token.
+  if (readStore(KEY.refresh) && !readStore(KEY.account)) writeStore(KEY.account, accountOf(readStore(KEY.refresh)));
 
   const s = {
     app,

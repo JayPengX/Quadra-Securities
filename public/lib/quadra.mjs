@@ -174,6 +174,16 @@ export function randomId() {
 // q.write({ payload, wallet })  only while live
 // q.proxy(url, extra)           the data proxy's address for `url`, signed in
 
+// The solid strip under the phone's status bar (see .q-statusbar in quadra.css).
+function statusStrip() {
+  if (typeof document === 'undefined' || !document.body || document.querySelector('.q-statusbar')) return;
+  const bar = document.createElement('div');
+  bar.className = 'q-statusbar';
+  bar.setAttribute('aria-hidden', 'true');
+  document.body.prepend(bar);
+}
+if (typeof document !== 'undefined') document.body ? statusStrip() : document.addEventListener('DOMContentLoaded', statusStrip);
+
 export function quadraSession(app, { lang = detectLang(), heartbeat = 60_000 } = {}) {
   const listeners = {};
   const emit = (name, value) => (listeners[name] || []).forEach(fn => fn(value));

@@ -115,7 +115,7 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 /* Opened from the home screen (iPad, iPhone, Android): the page runs under
    the status bar, so the bar starts below it; and a solid bar, since a
    see-through blurred one under the status bar looks smeared on iPadOS. */
-.appbar { padding-top: env(safe-area-inset-top); }
+.appbar { padding-top: var(--q-top, env(safe-area-inset-top)); }
 @media (display-mode: standalone) {
   .appbar { background: var(--page); backdrop-filter: none; -webkit-backdrop-filter: none; }
 }
@@ -159,7 +159,7 @@ h1 { font-size: 1.1rem; letter-spacing: -0.01em; line-height: 1.2; }
   .tab svg { width: 22px; height: 22px; }
   .tab[aria-selected='true'] { background: var(--accent-wash); box-shadow: none; }
   .tab-badge { position: absolute; top: 2px; left: calc(50% + 6px); }
-  .mobile-bar { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: calc(env(safe-area-inset-top) + 2px) 0 10px; }
+  .mobile-bar { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: calc(var(--q-top, env(safe-area-inset-top)) + 2px) 0 10px; }
   .mobile-bar .status { flex: 1 1 auto; }
   .mobile-bar .icon-button { width: 34px; height: 34px; }
 }

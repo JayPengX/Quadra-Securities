@@ -106,18 +106,29 @@ html:has(.loading:not([hidden])) body {
 body {
   overflow-wrap: break-word;
 }
-/* The phone's status bar: a solid strip under it. Without one, the page
-   scrolled up under the clock and battery (the app is full-screen,
-   viewport-fit=cover), and the phone blurs whatever is there, so the top of
-   the app looked smeared. An app can colour it with --q-status-bg. */
-html::before {
-  content: '';
+/* The phone's status bar: a solid strip under it (.q-statusbar, added by
+   quadra.mjs). Since iOS 26 an installed web app gets a "Liquid Glass" blur
+   laid over its top edge, whatever the status bar style; iOS skips it only
+   when a real fixed box with a background, over 10px tall and the page's
+   full width, covers that edge (a ::before doesn't count). An app can
+   colour it with --q-status-bg. */
+:root {
+  --q-top: env(safe-area-inset-top, 0px);
+}
+/* Installed, with the status bar not over the page, the strip still needs
+   its 12px for iOS to count it; apps pad their tops with var(--q-top). */
+@media (display-mode: standalone) {
+  :root {
+    --q-top: max(env(safe-area-inset-top, 0px), 12px);
+  }
+}
+.q-statusbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 2147482000;
-  height: env(safe-area-inset-top, 0px);
+  height: var(--q-top);
   background: var(--q-status-bg, var(--q-page));
   pointer-events: none;
 }

@@ -2066,7 +2066,7 @@ function activityRow(e) {
     case 'deposit':
       icon = '<span class="side-tag div">🏦</span>';
       title = e.pool ? describeEntry(e, locale) : e.id === 'deposit:start' || e.start ? t('openedWith') : e.income ? t('payday') : e.game ? t('gameIncome', { game: t(`sg_${e.game}`) }) : t('deposited');
-      icon = e.pool ? `<span class="side-tag div">${APPS[e.app]?.icon || '🔄'}</span>` : e.game ? '<span class="side-tag div">🎮</span>' : icon;
+      icon = e.pool ? `<span class="side-tag div">${appIcon(e.app)}</span>` : e.game ? '<span class="side-tag div">🎮</span>' : icon;
       sub = e.pool ? t('poolDepositSub') : '';
       amount = `<strong class="num ${e.amount < 0 ? 'down-ink' : ''}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, e.currency))}</strong>`;
       break;
@@ -2111,8 +2111,20 @@ const ACTIVITY_FILTERS = {
   fx: e => e.type === 'fx',
   income: e => e.type === 'div' || e.type === 'split' || e.type === 'interest',
   loans: e => e.type === 'borrow' || e.type === 'repay',
-  cash: e => e.type === 'deposit'
+  cash: e => e.type === 'deposit' && !ACTIVITY_FILTERS.apps(e),
+  // Money moved by the other Quadra apps (bets, games, rewards): one line per
+  // app and day under 全部, each record here (one app at a time, or all).
+  apps: e => e.type === 'deposit' && Boolean(e.pool) && Boolean(APPS[e.app]) && e.app !== 'stock'
 };
+const APP_ICONS = { odds: '🎯', match: '🏟️', vocab: '🎁', orbit: '🪐' };
+const appIcon = app => APP_ICONS[app] || '🔄';
+// A day's records from one other app, as one line.
+function appDayRow(app, list) {
+  const sum = list.reduce((a, e) => a + (e.amount || 0), 0);
+  return `<button type="button" class="activity-row" data-action="afilter" data-f="apps" data-app="${h(app)}">
+    <span class="side-tag div">${appIcon(app)}</span><span class="row-main"><span class="row-title">${h(APPS[app]?.short || app)}</span><span class="row-sub">${h(t('appRecords', { n: list.length }))}</span></span>
+    <span class="row-amt"><strong class="num ${sum < 0 ? 'down-ink' : ''}">${sum < 0 ? '' : '+'}${h(money(sum, BASE))}</strong></span></button>`;
+}
 
 function renderHistory() {
   const box = $('history-body');
@@ -2140,18 +2152,35 @@ function renderHistory() {
     renderBench();
     return;
   }
-  const events = [...state.account.events].filter(ACTIVITY_FILTERS[state.activityFilter]).sort((a, b) => b.t - a.t);
-  const shown = events.slice(0, state.activityShown);
+  const f = ACTIVITY_FILTERS[state.activityFilter] ? state.activityFilter : 'all';
+  const app = f === 'apps' ? state.activityApp || '' : '';
+  const all = [...state.account.events].sort((a, b) => b.t - a.t);
+  const apps = [...new Set(all.filter(ACTIVITY_FILTERS.apps).map(e => e.app))].filter(Boolean);
+  const events = all.filter(ACTIVITY_FILTERS[f]).filter(e => !app || e.app === app);
+  // Under 全部, the other apps' records fold into a line per app and day
+  // (and don't count against the rows shown).
+  const own = f === 'all' ? events.filter(e => !ACTIVITY_FILTERS.apps(e)) : events;
+  const shown = own.slice(0, state.activityShown);
+  const until = shown.length < own.length ? shown.at(-1).t : -Infinity;
   const groups = new Map();
-  for (const e of shown) {
-    const day = taipeiDay(e.t);
-    if (!groups.has(day)) groups.set(day, []);
-    groups.get(day).push(e);
-  }
+  const group = day => (groups.has(day) ? groups.get(day) : groups.set(day, { rows: [], apps: new Map() }).get(day));
+  for (const e of shown) group(taipeiDay(e.t)).rows.push(e);
+  if (f === 'all')
+    for (const e of events.filter(x => ACTIVITY_FILTERS.apps(x) && x.t >= until)) {
+      const g = group(taipeiDay(e.t));
+      if (!g.apps.has(e.app)) g.apps.set(e.app, []);
+      g.apps.get(e.app).push(e);
+    }
+  const days = [...groups].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  const appChips =
+    f === 'apps' && apps.length > 1
+      ? `<div class="chips filter-chips app-chips">${['', ...apps].map(k => `<button class="chip" type="button" data-action="afilter" data-f="apps" data-app="${h(k)}" aria-pressed="${app === k}">${h(k ? APPS[k]?.short || k : t('af_all'))}</button>`).join('')}</div>`
+      : '';
   box.innerHTML = `${tabs}
-    <div class="chips filter-chips">${Object.keys(ACTIVITY_FILTERS).map(k => `<button class="chip" type="button" data-action="afilter" data-f="${k}" aria-pressed="${state.activityFilter === k}">${h(t(`af_${k}`))}</button>`).join('')}</div>
-    ${[...groups].map(([day, list]) => `<h3 class="day-head">${h(dayLabel(day))}</h3><div class="card list-card">${list.map(activityRow).join('')}</div>`).join('') || `<p class="empty">${h(t('nothingYet'))}</p>`}
-    ${events.length > shown.length ? `<button class="ghost-button more" type="button" data-action="more">${h(t('showMore', { n: events.length - shown.length }))}</button>` : ''}`;
+    <div class="chips filter-chips">${Object.keys(ACTIVITY_FILTERS).map(k => `<button class="chip" type="button" data-action="afilter" data-f="${k}" data-app="" aria-pressed="${f === k}">${h(t(`af_${k}`))}</button>`).join('')}</div>
+    ${appChips}
+    ${days.map(([day, g]) => `<h3 class="day-head">${h(dayLabel(day))}</h3><div class="card list-card">${g.rows.map(activityRow).join('')}${[...g.apps].map(([a, list]) => appDayRow(a, list)).join('')}</div>`).join('') || `<p class="empty">${h(t('nothingYet'))}</p>`}
+    ${own.length > shown.length ? `<button class="ghost-button more" type="button" data-action="more">${h(t('showMore', { n: own.length - shown.length }))}</button>` : ''}`;
 }
 
 function dayLabel(day) {
@@ -2779,6 +2808,7 @@ document.addEventListener('click', event => {
       break;
     case 'afilter':
       state.activityFilter = el.dataset.f;
+      state.activityApp = el.dataset.app || '';
       state.activityShown = 60;
       renderHistory();
       break;

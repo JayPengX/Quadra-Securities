@@ -1042,9 +1042,13 @@ body {
   margin: 0;
   color: var(--q-muted);
   font-size: 13px;
-  white-space: nowrap;
+  line-height: 1.35;
+  /* Two lines rather than a name cut off mid-word. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .q-rec-foot {
   display: flex;
@@ -1239,4 +1243,11 @@ dialog.q-newpass::backdrop { background: var(--q-page); }
   font-size: 13px;
   font-weight: 600;
   color: var(--q-muted);
+}
+.q-rec-when {
+  margin: 2px 0 0;
+  color: var(--q-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }

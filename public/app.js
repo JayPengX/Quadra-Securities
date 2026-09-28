@@ -3033,13 +3033,17 @@ $('refresh').addEventListener('click', () => refresh({ list: true }));
 
 // Phones: the status and refresh button move to a slim row at the top (the
 // tabs are at the bottom).
+// The same top-right in every Quadra app: help, refresh, then the account.
+const helpLink = Object.assign(document.createElement('a'), { className: 'icon-button help-button', href: helpUrl('stock'), textContent: '?' });
+helpLink.addEventListener('click', e => (e.preventDefault(), q.go('vocab', 'help=stock')));
+helpLink.setAttribute('aria-label', locale === 'en' ? 'Help' : '說明');
 {
   const phone = matchMedia('(max-width: 720px)');
   const place = () => {
-    if (phone.matches) $('mobile-bar').append($('status'), $('account-slot'), $('refresh'));
+    if (phone.matches) $('mobile-bar').append($('status'), helpLink, $('refresh'), $('account-slot'));
     else {
       document.querySelector('.brand-text').append($('status'));
-      document.querySelector('.appbar-inner').append($('account-slot'), $('refresh'));
+      document.querySelector('.appbar-inner').append(helpLink, $('refresh'), $('account-slot'));
     }
   };
   place();

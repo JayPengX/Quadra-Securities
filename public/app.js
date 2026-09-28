@@ -2384,18 +2384,27 @@ function ensureAccount(wallet) {
   state.bench = null;
 }
 
-// Merges this device's account with the pass's copy both ways.
-async function syncNow({ pull = false } = {}) {
-  if (!q.pass || state.sync.busy || !q.active) return;
-  state.sync.busy = true;
-  try {
-    await mergeRemote(await q.read({ data: true, inbox: true }), { pull });
-  } catch (error) {
-    if (error.code !== 'ECO_SESSION_MOVED') state.sync.error = error.code === 'TOO_BIG' ? t('syncTooBig') : error.message;
-  } finally {
-    state.sync.busy = false;
-    render();
-  }
+// Merges this device's account with the pass's copy both ways. Syncs run one
+// after another: a write on its way never lands after a newer one.
+let syncChain = Promise.resolve();
+let syncQueued = false;
+function syncNow({ pull = false } = {}) {
+  if (!q.pass || syncQueued) return syncChain;
+  syncQueued = true;
+  syncChain = syncChain.then(async () => {
+    syncQueued = false;
+    if (!q.active) return;
+    state.sync.busy = true;
+    try {
+      await mergeRemote(await q.read({ data: true, inbox: true }), { pull });
+    } catch (error) {
+      if (error.code !== 'ECO_SESSION_MOVED') state.sync.error = error.code === 'TOO_BIG' ? t('syncTooBig') : error.message;
+    } finally {
+      state.sync.busy = false;
+      render();
+    }
+  });
+  return syncChain;
 }
 
 async function mergeRemote(remote, { pull = false } = {}) {
@@ -3030,7 +3039,7 @@ async function boot() {
   state.wallet = q.wallet;
   state.account = await loadAccount();
   // The pass's own copy, merged in (and the account made, the first time).
-  if (first && !first.offline) await mergeRemote(first).catch(error => (state.sync.error = error.message));
+  if (first && !first.offline) await (syncChain = syncChain.then(() => mergeRemote(first)).catch(error => (state.sync.error = error.message)));
   if (!state.account) ensureAccount(q.wallet);
   state.accountReady = true;
   if (state.fromCache) $('loading').hidden = true;

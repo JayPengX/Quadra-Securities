@@ -122,6 +122,29 @@ export const plusPlan = wallet => (wallet?.settings?.plus?.value?.plan === 'year
 // The last month already paid for (YYYY-MM), or null.
 export const plusUntil = wallet => [...plusMonths(wallet)].sort().at(-1) ?? null;
 
+// ---- Free bets ------------------------------------------------------------------------
+//
+// A free bet is a token Rewards gives for a mission ('vocab:fb:<day>:<mission>',
+// kind 'freebet', amount 0, its value in the note): Play stakes it on one
+// slip, and only the winnings come back, never the stake. Play marks it
+// spent with 'odds:fb-<token id>' (a fixed id: spent once). Unspent tokens
+// last FREEBET.days.
+export const FREEBET = { days: 7, max: 500 };
+export const freeBetValue = e => {
+  const v = Number(e?.note);
+  return Number.isInteger(v) && v > 0 && v <= FREEBET.max && v % 10 === 0 ? v : 0;
+};
+// The tokens not yet spent or expired: [{ id, value, t, until }], soonest to expire first.
+export function freeBets(wallet, now = Date.now(), spent = []) {
+  const entries = wallet?.entries || [];
+  const used = new Set([...spent, ...entries.filter(e => e.app === 'odds' && typeof e.id === 'string' && e.id.startsWith('odds:fb-')).map(e => e.id.slice(8))]);
+  return entries
+    .filter(e => e.app === 'vocab' && e.kind === 'freebet' && typeof e.id === 'string' && e.id.startsWith('vocab:fb:') && freeBetValue(e) && !used.has(e.id))
+    .map(e => ({ id: e.id, value: freeBetValue(e), t: e.t, until: e.t + FREEBET.days * 86_400_000 }))
+    .filter(x => x.until > now)
+    .sort((a, b) => a.until - b.until);
+}
+
 // ---- Language ------------------------------------------------------------------------
 
 export function detectLang() {
@@ -741,6 +764,9 @@ const KIND = {
   rebase: ['經濟調整', 'Economy reset'],
   od: ['透支利息', 'Overdraft interest'],
   cashout: ['提前兌現', 'Cash out'],
+  shop: ['Rewards 加值', 'Rewards purchase'],
+  freeze: ['連續紀錄保護卡', 'Streak protection'],
+  freebet: ['免費投注', 'Free bet'],
   'xfer-in': ['轉入', 'Transfer in'],
   'xfer-out': ['轉出', 'Transfer out'],
   merge: ['合併帶入', 'Carried over']
@@ -1228,7 +1254,10 @@ export function plusPerks(lang = 'zh') {
     ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? 'Instead of 0.8%, accrued daily' : '一般 0.8%，每日計息'],
     ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
     ['odds', en ? 'Parlay boost doubled' : '串關加成加倍', en ? 'Up to +40% on a winning parlay' : '全過最高多拿 40% 獎金'],
-    ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(PLUS.odds.cashOutKeep)} instead of 5%` : `只扣 ${pct(PLUS.odds.cashOutKeep)}，一般扣 5%`]
+    ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(PLUS.odds.cashOutKeep)} instead of 5%` : `只扣 ${pct(PLUS.odds.cashOutKeep)}，一般扣 5%`],
+    ['vocab', en ? 'A streak protection every month' : '每月一張連續紀錄保護卡', en ? 'Your streak survives a missed day' : '漏掉一天，連續紀錄照樣算'],
+    ['vocab', en ? 'NT$50 more word pay a day' : '單字獎勵每日上限 +NT$50', en ? 'NT$250 instead of 200' : '一般 NT$200，會員 NT$250'],
+    ['vocab', en ? 'Word packs at half price' : '單字包半價', en ? 'TOEIC, IELTS, Business English' : '多益、雅思、商務英文']
   ];
 }
 const PLUS_MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.6 6.9 6.9 2.6-6.9 2.6L12 21.5l-2.6-6.9L2.5 12l6.9-2.6z"/></svg>';
@@ -1259,7 +1288,7 @@ export function plusCard(s, { compact = false } = {}) {
       : T(`年繳 ${money(PLUS.year)}，省下兩個月`, `${money(PLUS.year)} a year: two months free`);
   return node('button', { class: `q-plus-card${member ? ' member' : ''}${compact ? ' compact' : ''}`, type: 'button', onclick: () => openPlus(s) }, [
     node('span', { class: 'q-plus-top' }, [plusGlyph(), node('span', { class: 'q-plus-word', text: 'QUADRA PLUS' }), node('span', { class: 'q-plus-go', text: member ? T('管理', 'Manage') : price === 0 ? T('免費試用', 'Try free') : T('加入', 'Join') })]),
-    compact ? null : node('span', { class: 'q-plus-pitch', text: T('手續費 5 折、活存 2%、串關加成加倍', 'Half-price trades, 2% on cash, doubled parlay boosts') }),
+    compact ? null : node('span', { class: 'q-plus-pitch', text: T('手續費 5 折、活存 2%、串關加成加倍、單字包半價', 'Half-price trades, 2% on cash, doubled parlay boosts, half-price word packs') }),
     node('span', { class: 'q-plus-status', text: status })
   ].filter(Boolean));
 }
@@ -1343,6 +1372,7 @@ export function openPlus(s) {
       ]),
       group('stock', 'Quadra Securities'),
       group('odds', 'Quadra Play'),
+      group('vocab', 'Quadra Rewards'),
       ...cta
     );
   };

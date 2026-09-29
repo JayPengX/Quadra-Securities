@@ -1237,6 +1237,8 @@ function addPlan() {
   const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
   commit(r.account);
+  // Rewards' mission: a monthly plan set up.
+  track('plan', symbolKeys(d.symbol), 2);
   toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
   redrawDetail();
 }

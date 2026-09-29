@@ -6,7 +6,7 @@ import {
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
-  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary
+  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
@@ -24,7 +24,7 @@ import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
   APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId
+  affinity, helpUrl, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId, PLUS, plusMonths, plusCard, openPlus
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -764,32 +764,34 @@ function recRow(title, cards, { sub = '', cat = '' } = {}) {
     <div class="q-recs">${cards.join('')}</div>
   </section>`;
 }
+// The markets home: your money at a glance, what's for you, today's movers.
+// The full lists stay below, by category.
 function renderHomeRows() {
   const box = $('home-rows');
   if (!box) return;
   if (state.query) return void (box.innerHTML = '');
   const held = Object.keys(snap()?.positions || {});
   const recs = forYou({ quotes: state.quotes, held, watched: watched(state.account), wallet: state.wallet, aff: affinityMap(), n: 10 });
-  const pick = (id, n = 10) => (CATEGORIES.find(c => c.id === id)?.items || []).map(i => i[0]).filter(sym => state.quotes.has(sym)).slice(0, n);
-  // The broker's featured offers first: borrowing, monthly plans, US stocks, crypto.
-  const promo = (icon, title, subText, action, color) =>
-    `<button class="promo-card" type="button" ${action} style="--promo:${color}"><span class="promo-icon" aria-hidden="true">${icon}</span><strong>${h(title)}</strong><small>${h(subText)}</small><span class="promo-go">${h(t('promoGo'))} ›</span></button>`;
-  const promos = `<section class="q-section home-row promo-row"><div class="q-section-head"><h2>${h(t('promoTitle'))}</h2></div><div class="promo-strip">${[
-    promo('💰', t('promoLoan'), t('promoLoanSub'), 'data-action="goto" data-tab="fx"', '#d97706'),
-    promo('📅', t('promoPlan'), t('promoPlanSub'), 'data-action="open" data-symbol="0050.TW"', '#0f766e'),
-    promo('🇺🇸', t('promoUs'), t('promoUsSub'), 'data-action="cat" data-id="us"', '#2563eb'),
-    promo('₿', t('promoCrypto'), t('promoCryptoSub'), 'data-action="cat" data-id="crypto"', '#7c3aed')
-  ].join('')}</div></section>`;
-  box.innerHTML = [
-    promos,
-    recRow(t('forYou'), recs.map(r => recCard(r.symbol, r.why)), { sub: t('forYouSub') }),
-    recRow(t('moversUp'), movers(state.quotes, { up: true }).map(q => recCard(q.symbol))),
-    recRow(t('moversDown'), movers(state.quotes, { up: false }).map(q => recCard(q.symbol))),
-    recRow(t('popularTw'), pick('tw').map(sym => recCard(sym)), { cat: 'tw' }),
-    recRow(t('popularUs'), pick('us').map(sym => recCard(sym)), { cat: 'us' }),
-    recRow(t('popularEtf'), [...pick('twetf', 6), ...pick('usetf', 6)].map(sym => recCard(sym)), { cat: 'usetf' }),
-    recRow(t('popularCrypto'), pick('crypto', 8).map(sym => recCard(sym)), { cat: 'crypto' })
-  ].join('');
+  const v = state.account ? valuation() : null;
+  const base = v ? v.netWorth - v.dayChange : 0;
+  const summary = v
+    ? `<button class="acct-strip" type="button" data-action="goto" data-tab="portfolio">
+        <span class="acct-main"><small>${h(t('netWorth'))}${plusAt() ? ' <b class="acct-plus">✦ PLUS</b>' : ''}</small><strong class="num">${h(money(v.netWorth, BASE))}</strong></span>
+        <span class="acct-day ${dirClass(v.dayChange)}"><small>${h(t('today'))}</small><strong class="num">${h(money(v.dayChange, BASE, { sign: true }))}</strong><em class="num">${base ? h(pct(v.dayChange / base)) : '—'}</em></span>
+      </button>`
+    : '';
+  const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}"><span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
+  const up = movers(state.quotes, { up: true }).slice(0, 5);
+  const down = movers(state.quotes, { up: false }).slice(0, 5);
+  const moversHtml =
+    up.length || down.length
+      ? `<section class="q-section home-row"><div class="q-section-head"><h2>${h(t('moversTitle'))}</h2></div>
+          <div class="movers">
+            <div class="movers-col"><p class="movers-head">${h(t('moversUp'))}</p>${up.map(moverRow).join('') || `<p class="muted">—</p>`}</div>
+            <div class="movers-col"><p class="movers-head">${h(t('moversDown'))}</p>${down.map(moverRow).join('') || `<p class="muted">—</p>`}</div>
+          </div></section>`
+      : '';
+  box.innerHTML = [summary, recRow(t('forYou'), recs.map(r => recCard(r.symbol, r.why)), { sub: t('forYouSub') }), moversHtml].join('');
 }
 
 function renderMarkets() {
@@ -820,8 +822,14 @@ function renderMarkets() {
   const symbols = state.category === 'watch' ? watch : cat.items.map(i => i[0]);
   $('list-title').textContent = state.category === 'watch' ? t('watchlist') : L(cat);
   $('list-note').textContent = cat?.id === 'index' || cat?.id === 'metal' ? t('watchOnlyNote') : cat?.id === 'crypto' ? t('cryptoNote') : cat?.id === 'fx' ? t('fxTradeNote') : '';
-  $('quote-list').innerHTML = symbols.map(s => quoteRow(s)).join('') || `<p class="empty">${h(t('nothingHere'))}</p>`;
+  // A long list opens on its first rows; the rest a tap away.
+  const cap = state.listAll === state.category ? Infinity : LIST_SHOWN;
+  const more = symbols.length - Math.min(cap, symbols.length);
+  $('quote-list').innerHTML =
+    (symbols.slice(0, cap).map(s => quoteRow(s)).join('') || `<p class="empty">${h(t('nothingHere'))}</p>`) +
+    (more > 0 ? `<button class="list-more" type="button" data-action="list-all">${h(t('listAll', { n: symbols.length }))}</button>` : '');
 }
+const LIST_SHOWN = 15;
 
 let searchTimer;
 function onSearchInput(value) {
@@ -1568,7 +1576,8 @@ function renderTicket() {
         ? `<dl class="preview">${lines.map(([k, v]) => `<div><dt>${h(k)}</dt><dd class="num">${h(v)}</dd></div>`).join('')}
         <div class="preview-total"><dt>${h(d.side === 'buy' ? t('totalCost') : t('totalProceeds'))}</dt><dd class="num"><strong>${h(money(est.total, q.currency))}</strong>${rate && q.currency !== BASE ? `<small>≈ ${h(money(est.total * rate, BASE))}</small>` : ''}</dd></div>
         ${req && req.buffer > 0 ? `<div class="preview-held"><dt>${h(t('heldUntilFill'))}<small>${h(t('bufferNote'))}</small></dt><dd class="num"><strong>${h(money(need, q.currency))}</strong></dd></div>` : ''}
-        ${d.side === 'buy' ? `<div class="preview-have ${short > 0 ? 'short' : ''}"><dt>${h(t('youHave', { amount: '' }).trim())}</dt><dd class="num">${h(money(cash, q.currency))}</dd></div>` : ''}</dl>`
+        ${d.side === 'buy' ? `<div class="preview-have ${short > 0 ? 'short' : ''}"><dt>${h(t('youHave', { amount: '' }).trim())}</dt><dd class="num">${h(money(cash, q.currency))}</dd></div>` : ''}</dl>
+        ${est.commission && !plusAt() ? `<button class="q-plus-hint fee-plus" type="button" data-action="plus">${h(t('feePlus', { v: money(q.market === 'TW' ? Math.floor(est.commission * PLUS.stock.commission) : est.commission * PLUS.stock.commission, q.currency) }))}</button>` : ''}`
         : ''
     }
     ${shorting && isShortable(q.kind) && !problems.length ? `<p class="note">${h(t('shortNote', { qty: fmtQty(qty - shares), unit, fee: rateText(SHORT_FEE) }))}</p>` : ''}
@@ -1638,19 +1647,6 @@ function errorText(r) {
 
 // ---- Portfolio tab ----------------------------------------------------------------------
 
-// Money not working: a nudge to put it into the market (or borrow on top of it).
-function idleCashHtml(v, heldTWD) {
-  const idle = v.cashTWD - heldTWD;
-  if (!(idle >= 10_000) || idle < v.netWorth * 0.2) return '';
-  return `<div class="card idle-card">
-    <div class="idle-top"><span class="idle-icon" aria-hidden="true">💤</span><div><strong>${h(t('idleTitle', { v: money(idle, BASE) }))}</strong><small>${h(t('idleSub'))}</small></div></div>
-    <div class="button-row">
-      <button class="primary-button" type="button" data-action="open" data-symbol="0050.TW">${h(t('idleEtf'))}</button>
-      <button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('idleHot'))}</button>
-    </div>
-  </div>`;
-}
-
 function renderPortfolio() {
   const box = $('portfolio-body');
   if (!state.account) {
@@ -1689,7 +1685,7 @@ function renderPortfolio() {
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
       </div>
     </div>
-    ${idleCashHtml(v, heldTWD)}
+    ${plusAt() ? '' : '<div id="plus-slot" class="plus-slot"></div>'}
     ${marginCardHtml(v)}
     <div class="two-col">
       <div class="card">
@@ -1713,6 +1709,7 @@ function renderPortfolio() {
     ${plansListHtml()}
     ${alertsListHtml()}
   `;
+  $('plus-slot')?.append(plusCard(q));
   renderNetWorthChart(v, s);
 }
 
@@ -1986,7 +1983,7 @@ function exchangeHtml() {
   const haveTo = Math.max(0, withdrawable(state.account, s)[f.to] || 0);
   const waiting = unsettled(state.account)[f.from] || 0;
   const mid = state.rates[f.from] && state.rates[f.to] ? state.rates[f.from] / state.rates[f.to] : null;
-  const spread = Math.max(currencyInfo(f.from).spread, currencyInfo(f.to).spread) * (state.fxOpen ? 1 : CLOSED_FX_MULTIPLIER);
+  const spread = fxSpread(f.from, f.to, state.fxOpen);
   const tooMuch = amount > have + 1e-9;
   const usd = state.quotes.get(fxSymbol('USD'));
   const pay = f.mode === 'get';
@@ -2021,6 +2018,7 @@ function exchangeHtml() {
         <div><dt>${h(t('spread'))}</dt><dd class="num">${h(pct(spread, { digits: 2, sign: false }))}${state.fxOpen ? '' : ` <small>${h(t('closedDouble'))}</small>`}</dd></div>
         ${q ? `<div><dt>${h(t('fxCost'))}</dt><dd class="num">${h(money(q.spreadTWD, BASE, { digits: q.spreadTWD < 10 ? 2 : 0 }))}</dd></div>` : ''}
       </dl>
+      ${spread > 0 && !plusAt() ? `<button class="q-plus-hint fee-plus" type="button" data-action="plus">${h(t('fxPlus', { v: pct(spread * PLUS.stock.fxSpread, { digits: 2, sign: false }) }))}</button>` : ''}
       ${tooMuch ? `<p class="warn">${h(t('notEnoughCur', { cur: f.from, have: money(have, f.from) }))}</p>` : ''}
       ${waiting > 0 ? `<p class="note">${h(t('unsettledNote', { amount: money(waiting, f.from) }))}</p>` : ''}
       ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
@@ -2051,7 +2049,7 @@ function fxPayAmount() {
 function rateRow(c) {
   const q = state.quotes.get(fxSymbol(c));
   const info = currencyInfo(c);
-  const sp = info.spread * (state.fxOpen ? 1 : CLOSED_FX_MULTIPLIER);
+  const sp = fxSpread(c, BASE, state.fxOpen);
   const unit = info.digits === 0 && q?.price < 1 ? 100 : 1;
   return `<button class="rate-row" type="button" data-action="fx-to" data-cur="${h(c)}">
     <span class="wallet-flag">${info.flag}</span>
@@ -2070,7 +2068,7 @@ function loansHtml() {
   const s = snap();
   const loan = s.loans[l.currency];
   const avail = available(state.account, s);
-  const rate = currencyInfo(l.currency).loanRate;
+  const rate = loanRateAt(l.currency);
   const amount = Number(l.amount);
   const capacityCur = state.rates[l.currency] ? v.capacity / state.rates[l.currency] : 0;
   const limit = v.debtTWD + v.capacity;
@@ -2099,7 +2097,7 @@ function loansHtml() {
       </div>
       <div class="fx-side">
         <div class="fx-side-row"><select id="loan-cur" class="fx-cur">${currencyOptions(l.currency)}</select><input id="loan-amount" class="fx-input num" inputmode="decimal" autocomplete="off" value="${h(l.amount)}" placeholder="0" aria-label="${h(t('amount'))}" /></div>
-        <div class="fx-side-foot"><span class="muted">${h(repaying ? (loan?.balance > 0 ? t('owed', { amount: money(loan.balance, l.currency) }) : t('noLoanCur', { cur: l.currency })) : t('loanTerms', { rate: pct(rate, { digits: 2, sign: false }), cap: money(capacityCur, l.currency) }))}</span></div>
+        <div class="fx-side-foot"><span class="muted">${h(repaying ? (loan?.balance > 0 ? t('owed', { amount: money(loan.balance, l.currency) }) : t('noLoanCur', { cur: l.currency })) : t('loanTerms', { rate: pct(rate, { digits: 2, sign: false }), cap: money(capacityCur, l.currency) }))}</span>${!repaying && !plusAt() ? `<button class="q-plus-hint" type="button" data-action="plus">${h(t('loanPlus', { v: pct(Math.max(0, rate - PLUS.stock.loanCut), { digits: 2, sign: false }) }))}</button>` : ''}</div>
       </div>
       ${!repaying && amount > 0 ? `<p class="muted">${h(t('interestPerDay', { amount: money((amount * rate) / 365, l.currency, { digits: 2 }) }))}</p>` : ''}
       ${repaying
@@ -2758,8 +2756,15 @@ document.addEventListener('click', event => {
       $('search').value = '';
       renderMarkets();
       refresh({ list: true });
-      // From an ad or a 「全部」 link: straight down to that list.
-      if (el.closest('.promo-card, .q-section-head')) requestAnimationFrame(() => $('categories')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      // From a 「全部」 link: straight down to that list.
+      if (el.closest('.q-section-head')) requestAnimationFrame(() => $('categories')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      break;
+    case 'plus':
+      openPlus(q);
+      break;
+    case 'list-all':
+      state.listAll = state.category;
+      renderMarkets();
       break;
     case 'open':
       openDetail(el.dataset.symbol);
@@ -3169,8 +3174,15 @@ applySettings();
 loadQuotes();
 renderStatic();
 $('account-slot').append(accountButton(q, { extra: settingsEl }));
+// Quadra Plus: the months paid for, from the wallet, into the ledger's perks.
+function syncPlus(wallet) {
+  const months = plusMonths(wallet);
+  usePlus(months.size ? { months, ...PLUS.stock } : null);
+  memo.at = 0;
+}
 q.on('wallet', wallet => {
   state.wallet = wallet;
+  syncPlus(wallet);
   // Money the other apps moved arrives in this account's NT$ cash.
   if (state.account) {
     const pooled = applyPool(state.account, wallet);
@@ -3192,6 +3204,7 @@ q.on('active', live => {
 async function boot() {
   const first = await q.start();
   state.wallet = first.wallet || q.wallet;
+  syncPlus(state.wallet);
   state.account = await loadAccount();
   // The pass's own copy, merged in (and the account made, the first time).
   if (first && !first.offline) await (syncChain = syncChain.then(() => mergeRemote(first)).catch(error => (state.sync.error = error.message)));

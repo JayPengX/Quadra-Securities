@@ -1288,3 +1288,198 @@ dialog.q-newpass::backdrop { background: var(--q-page); }
 html:not([data-q-keys]) :is(:focus-visible, :focus):not(input, textarea, select) {
   outline: none !important;
 }
+
+/* ---- Quadra Plus: the membership (black card, one gold line) ---- */
+:root {
+  --q-plus-gold: #d9b877;
+  --q-plus-ink: #0d0d10;
+}
+.q-plus-glyph {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.q-plus-glyph svg {
+  width: 100%;
+  height: 100%;
+  fill: var(--q-plus-gold);
+}
+.q-plus-card,
+.q-plus-hero {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--q-plus-gold) 38%, transparent);
+  border-radius: var(--q-radius);
+  color: #f5f1e8;
+  text-align: left;
+  font: inherit;
+  background: radial-gradient(120% 160% at 100% 0%, rgba(217, 184, 119, 0.16), transparent 55%), linear-gradient(160deg, #1b1a1f, var(--q-plus-ink));
+  box-shadow: var(--q-shadow-sm);
+  cursor: pointer;
+}
+.q-plus-card {
+  margin: 12px 0 4px;
+}
+.q-plus-card:active {
+  transform: scale(0.99);
+}
+.q-plus-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.q-plus-word {
+  flex: 1;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: var(--q-plus-gold);
+  white-space: nowrap;
+}
+.q-plus-go {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--q-plus-ink);
+  background: var(--q-plus-gold);
+  white-space: nowrap;
+}
+.q-plus-card.member .q-plus-go {
+  color: var(--q-plus-gold);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--q-plus-gold) 55%, transparent);
+}
+.q-plus-pitch {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.q-plus-status {
+  font-size: 12.5px;
+  color: rgba(245, 241, 232, 0.66);
+}
+.q-plus-card.compact {
+  margin: 0;
+  gap: 4px;
+  padding: 12px 14px;
+}
+.q-plus-hero {
+  gap: 2px;
+  padding: 18px 18px 20px;
+  cursor: default;
+}
+.q-plus-hero .q-plus-top {
+  margin-bottom: 12px;
+}
+.q-plus-price {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.q-plus-per {
+  font-size: 13px;
+  color: rgba(245, 241, 232, 0.66);
+}
+.q-plus-body {
+  display: grid;
+  gap: 4px;
+}
+.q-plus-perks {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--q-border);
+  border-radius: var(--q-radius-sm);
+  background: var(--q-surface);
+}
+.q-plus-perks li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+}
+.q-plus-perks li + li {
+  border-top: 1px solid var(--q-divider);
+}
+.q-plus-perks .q-plus-glyph svg {
+  fill: color-mix(in srgb, var(--q-plus-gold) 80%, var(--q-text));
+}
+.q-plus-perks span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.q-plus-perks strong {
+  font-size: 15px;
+}
+.q-plus-perks small {
+  font-size: 12.5px;
+  color: var(--q-muted);
+}
+.q-plus-cta,
+.q-plus-quiet {
+  width: 100%;
+  min-height: 50px;
+  margin-top: 16px;
+  border: 0;
+  border-radius: 14px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.q-plus-cta {
+  color: var(--q-plus-ink);
+  background: var(--q-plus-gold);
+}
+.q-plus-quiet {
+  margin-top: 8px;
+  color: var(--q-text-2);
+  background: var(--q-sunken);
+}
+.q-plus-cta:disabled,
+.q-plus-quiet:disabled {
+  opacity: 0.55;
+}
+.q-plus-state {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--q-text-2);
+}
+.q-plus-fine {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  color: var(--q-muted);
+  text-align: center;
+}
+/* A member's mark: a gold star on the account button. */
+.q-account.plus .q-account-dot {
+  width: 11px;
+  height: 11px;
+  background: var(--q-plus-gold);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  box-shadow: none;
+}
+/* A quiet line that names a Plus price where money is spent. */
+.q-plus-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--q-plus-gold) 70%, var(--q-text));
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}

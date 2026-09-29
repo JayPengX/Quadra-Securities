@@ -290,10 +290,12 @@ function levy(rules, kind) {
 // What a trade of `gross` (price × quantity, in the market's currency) costs
 // on top: commission, taxes, exchange fees. Taiwan's brokers and tax office
 // drop the fractions of a dollar; elsewhere it's to the cent.
-export function tradeCosts({ market, side, kind, gross, currency }) {
+// `discount`: the share of the commission charged (Quadra Plus: 0.5), the
+// minimum included.
+export function tradeCosts({ market, side, kind, gross, currency, discount = 1 }) {
   const m = MARKETS[market] || MARKETS.INTL;
   const round = m.floorFees ? x => Math.floor(x) : x => roundCash(x, currency);
-  const commission = gross > 0 && m.commission.rate > 0 ? round(Math.max(gross * m.commission.rate, m.commission.min)) : 0;
+  const commission = gross > 0 && m.commission.rate > 0 ? round(Math.max(gross * m.commission.rate, m.commission.min) * discount) : 0;
   const { tax: taxRate, fee: feeRate } = levy(side === 'buy' ? m.buy : m.sell, kind);
   const tax = round(gross * taxRate);
   const fee = round(gross * feeRate);

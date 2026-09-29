@@ -86,11 +86,37 @@ export function newAccount(start = START_AMOUNT, now = Date.now(), id = randomId
 const byTime = (a, b) => a.t - b.t || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const add = (map, key, amount) => (map[key] = (map[key] || 0) + amount);
 
+// ---- Quadra Plus ---------------------------------------------------------------
+//
+// A member (quadra.mjs PLUS.stock) pays part of the commission and FX spread,
+// borrows cheaper and earns more on NT$ cash. Each counts by when it happens:
+// a trade, exchange or loan by the moment it's made, cash interest by each
+// Taiwan month the membership was paid for. The app keeps `months` current
+// from the wallet (usePlus); with none, nothing here changes anything.
+const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, cashRate: CASH_RATE, loanCut: 0 };
+let plus = PLUS_NONE;
+export function usePlus(settings) {
+  plus = settings ? { ...PLUS_NONE, ...settings } : PLUS_NONE;
+}
+export const plusAt = (t = Date.now()) => plus.months.has(taipeiDay(t).slice(0, 7));
+// NT$ cash interest between two moments, month by month: rate × time.
+function cashYield(from, to) {
+  if (!plus.months.size) return CASH_RATE * (to - from);
+  let sum = 0;
+  for (let a = from; a < to; ) {
+    const d = new Date(a + 8 * 3_600_000);
+    const b = Math.min(to, Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 8 * 3_600_000);
+    sum += (plusAt(a) ? plus.cashRate : CASH_RATE) * (b - a);
+    a = b;
+  }
+  return sum;
+}
+
 // ---- Replay ------------------------------------------------------------------
 
 function accrue(s, t) {
-  // NT$ cash earns the demand-deposit rate.
-  if (t > s.cashLast && (s.cash[BASE] || 0) > 0) s.cashInterest += ((s.cash[BASE] || 0) * CASH_RATE * (t - s.cashLast)) / YEAR_MS;
+  // NT$ cash earns the demand-deposit rate (Quadra Plus: more).
+  if (t > s.cashLast && (s.cash[BASE] || 0) > 0) s.cashInterest += ((s.cash[BASE] || 0) * cashYield(s.cashLast, t)) / YEAR_MS;
   s.cashLast = Math.max(s.cashLast, t);
   for (const p of Object.values(s.positions)) {
     if (p.qty < 0 && t > p.feeLast) p.borrowFee += (-p.cost * SHORT_FEE * (t - p.feeLast)) / YEAR_MS;
@@ -277,10 +303,10 @@ export function withdrawable(account, s, now = Date.now()) {
 // ---- Orders ------------------------------------------------------------------
 
 // What a trade of `qty` at `price` costs or brings in, all in.
-export function estimate({ market, kind, currency, side, qty, price }) {
+export function estimate({ market, kind, currency, side, qty, price, t = Date.now() }) {
   const deal = dealPrice(market, side, price);
   const gross = roundCash(deal * qty, currency);
-  const costs = tradeCosts({ market, side, kind, gross, currency });
+  const costs = tradeCosts({ market, side, kind, gross, currency, discount: plusAt(t) ? plus.commission : 1 });
   const total = side === 'buy' ? gross + costs.total : gross - costs.total;
   return { price: deal, gross, ...costs, costs: costs.total, total };
 }
@@ -418,7 +444,7 @@ function fillOrder(account, order, price, rates, now, at = now) {
   const quote = price;
   if (order.type !== 'limit') price = marketFill(order.market, order.kind, order.side, price);
   else price = order.side === 'buy' ? Math.min(price, order.limit) : Math.max(price, order.limit);
-  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price });
+  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at });
   // A fill found in the past must have fitted the cash (or shares) at that
   // moment and still fit today's.
   const moments = at < now ? [at, now] : [now];
@@ -521,8 +547,8 @@ export function fillFromHistory(account, orderId, { t, price }, twd, now = Date.
 
 // ---- Currency exchange -------------------------------------------------------
 
-export function fxSpread(from, to, fxOpen = true) {
-  return Math.max(currencyInfo(from).spread, currencyInfo(to).spread) * (fxOpen ? 1 : CLOSED_FX_MULTIPLIER);
+export function fxSpread(from, to, fxOpen = true, t = Date.now()) {
+  return Math.max(currencyInfo(from).spread, currencyInfo(to).spread) * (fxOpen ? 1 : CLOSED_FX_MULTIPLIER) * (plusAt(t) ? plus.fxSpread : 1);
 }
 
 // What `amount` of `from` buys in `to`: the middle rate less the spread,
@@ -703,13 +729,15 @@ function currencyExposure(s, positions, rates) {
 
 // ---- Loans -------------------------------------------------------------------
 
+// The yearly rate a loan taken now carries (Quadra Plus: less).
+export const loanRateAt = (currency, t = Date.now()) => Math.max(0, currencyInfo(currency).loanRate - (plusAt(t) ? plus.loanCut : 0));
 export function borrow(account, { currency, amount }, { valuation, rates, now = Date.now(), id = randomId() }) {
   amount = roundCash(Number(amount), currency);
   if (!(amount > 0)) return { error: 'amount' };
   if (!rates?.[currency]) return { error: 'noRate' };
   if (valuation.margin !== 'ok') return { error: 'margin' };
   if (amount * rates[currency] > valuation.capacity + EPS) return { error: 'capacity', capacity: valuation.capacity };
-  const event = { id: `borrow:${id}`, type: 'borrow', t: now, currency, amount, rate: currencyInfo(currency).loanRate };
+  const event = { id: `borrow:${id}`, type: 'borrow', t: now, currency, amount, rate: loanRateAt(currency, now) };
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 

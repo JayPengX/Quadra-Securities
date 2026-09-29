@@ -56,6 +56,29 @@ export const ECONOMY = {
   missionsDailyCap: 300
 };
 
+// ---- Quadra Plus ---------------------------------------------------------------------
+//
+// The one membership across Quadra: PLUS.fee a Taiwan month from the pool,
+// billed by the Worker (eco.js: `op: 'plus'`, renewal with the payday). The
+// first month someone ever joins is free. A month is a member's when the
+// wallet holds `eco:plus:<YYYY-MM>`, so every app reads the same answer, for
+// any past day too (Securities' daily cash interest). The perks are real
+// money each app gives up; the fee is what it earns back.
+export const PLUS = {
+  fee: 290,
+  // Securities: commission ×0.5, FX spread ×0.5, NT$ cash interest 2% a year
+  // (0.8% otherwise), borrowing 1 point cheaper.
+  stock: { commission: 0.5, fxSpread: 0.5, cashRate: 0.02, loanCut: 0.01 },
+  // Play: the parlay boost doubled, and cash out keeps 2% instead of 5%.
+  odds: { boost: 2, cashOutKeep: 0.02 }
+};
+const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
+export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
+export const plusMember = (wallet, t = Date.now()) => (wallet?.entries || []).some(e => e.id === `eco:plus:${plusMonth(t)}` && e.app === 'eco');
+// Renewing next month (the member hasn't left).
+export const plusRenewing = wallet => wallet?.settings?.plus?.value?.on === true;
+export const plusTried = wallet => plusMonths(wallet).size > 0;
+
 // ---- Language ------------------------------------------------------------------------
 
 export function detectLang() {
@@ -531,6 +554,8 @@ function makeSession(app, { lang, heartbeat }) {
       if (typeof payload === 'string') cachePayload(app, storedAccount(), payload);
       return absorb(res);
     });
+  // Quadra Plus: join (on) or leave (off); the Worker bills it.
+  s.plus = on => withToken(qt => call('POST', '', { op: 'plus', qt, on: Boolean(on) })).then(absorb);
   s.dropInbox = id => withToken(qt => call('DELETE', qs({ qt, app, inbox: id })));
   // Other passes into this one (they're deleted after).
   s.merge = passes => withToken(qt => call('POST', '', { op: 'merge', qt, sources: passes.map(passcode => ({ passcode })) })).then(absorb);
@@ -668,6 +693,7 @@ const KIND = {
   game: ['遊戲', 'Game'],
   reward: ['單字獎勵', 'Word practice'],
   mission: ['任務獎勵', 'Mission reward'],
+  plus: ['Quadra Plus 月費', 'Quadra Plus'],
   'xfer-in': ['轉入', 'Transfer in'],
   'xfer-out': ['轉出', 'Transfer out'],
   merge: ['合併帶入', 'Carried over']
@@ -867,6 +893,8 @@ const ERR = {
   SYNC_PASSCODE_NOT_FOUND: ['找不到這組通行碼。', 'No Quadra Pass has this code.'],
   ECO_PAIR_NOT_FOUND: ['這組裝置代碼無效或已過期（10 分鐘內、只能用一次）。', 'That device code isn’t valid or has expired (10 minutes, once).'],
   RATE_LIMITED: ['嘗試太多次，請稍後再試。', 'Too many tries. Please wait a little.'],
+  ECO_PLUS_FUNDS: ['Quadra 餘額不足以支付本月會費。', 'Your Quadra balance doesn’t cover this month’s fee.'],
+  ECO_SESSION_MOVED: ['帳戶正在另一個 App 使用中，回到這裡後再試一次。', 'Your account is in use in another app. Come back here and try again.'],
   INVALID_PASSCODE: ['請輸入 10 碼通行碼（例如 ABCDE-23456）或 8 碼裝置代碼。', 'Enter your 10-character pass (like ABCDE-23456) or an 8-character device code.']
 };
 export const errorText = (error, lang) => {
@@ -1020,7 +1048,10 @@ export function accountButton(s, { extra = null } = {}) {
   const btn = node('button', { class: 'q-account', type: 'button', 'aria-label': s.lang === 'en' ? 'Quadra Pass' : 'Quadra Pass 帳戶', title: BRAND.pass });
   btn.innerHTML = PERSON_SVG;
   btn.append(node('span', { class: 'q-account-dot', 'aria-hidden': 'true' }));
-  const paint = () => btn.classList.toggle('signed', Boolean(s.wallet));
+  const paint = () => {
+    btn.classList.toggle('signed', Boolean(s.wallet));
+    btn.classList.toggle('plus', plusMember(s.wallet));
+  };
   paint();
   s.on('wallet', paint);
   btn.addEventListener('click', () => accountSheet(s, { extra: extra ? extra() : null }));
@@ -1126,6 +1157,130 @@ function detailsCard(s) {
       : null
   ].filter(Boolean));
 }
+// ---- Quadra Plus on screen --------------------------------------------------------
+//
+// What joining costs now: free the first time, else the rest of the month's
+// share of the fee (the Worker's own rule, eco.js plusJoinEntry).
+export function plusJoinPrice(wallet, now = Date.now()) {
+  if (!plusTried(wallet)) return 0;
+  const d = new Date(now + TPE);
+  const days = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  const left = days - d.getUTCDate() + 1;
+  return Math.max(10, Math.round((PLUS.fee * left) / days / 10) * 10);
+}
+export function plusPerks(lang = 'zh') {
+  const en = lang === 'en';
+  const pct = x => `${Math.round(x * 1000) / 10}%`;
+  return [
+    ['stock', en ? 'Half-price commission' : '證券手續費 5 折', en ? 'Every market, every order' : '所有市場、每一筆委託'],
+    ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
+    ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? 'Instead of 0.8%, accrued daily' : '一般 0.8%，每日計息'],
+    ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
+    ['odds', en ? 'Parlay boost doubled' : '串關加成加倍', en ? 'Up to +40% on a winning parlay' : '全過最高多拿 40% 獎金'],
+    ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(PLUS.odds.cashOutKeep)} instead of 5%` : `只扣 ${pct(PLUS.odds.cashOutKeep)}，一般扣 5%`]
+  ];
+}
+const PLUS_MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.6 6.9 6.9 2.6-6.9 2.6L12 21.5l-2.6-6.9L2.5 12l6.9-2.6z"/></svg>';
+function plusGlyph() {
+  const i = node('span', { class: 'q-plus-glyph' });
+  i.innerHTML = PLUS_MARK;
+  return i;
+}
+// The membership as a card: a member's status, or what it gives and costs.
+export function plusCard(s, { compact = false } = {}) {
+  const en = s.lang === 'en';
+  const T = (zh, e) => (en ? e : zh);
+  const member = plusMember(s.wallet);
+  const renewing = plusRenewing(s.wallet);
+  const next = new Date(nextPayday() + TPE);
+  const nextText = `${next.getUTCMonth() + 1}/1`;
+  const price = plusJoinPrice(s.wallet);
+  const status = member
+    ? renewing
+      ? T(`會員 · ${nextText} 續訂 ${money(PLUS.fee)}`, `Member · renews ${nextText} for ${money(PLUS.fee)}`)
+      : T(`會員 · 用到本月底`, 'Member · until the end of the month')
+    : price === 0
+      ? T(`本月免費 · 之後每月 ${money(PLUS.fee)}`, `Free this month · then ${money(PLUS.fee)} a month`)
+      : T(`每月 ${money(PLUS.fee)} · 隨時取消`, `${money(PLUS.fee)} a month · cancel any time`);
+  return node('button', { class: `q-plus-card${member ? ' member' : ''}${compact ? ' compact' : ''}`, type: 'button', onclick: () => openPlus(s) }, [
+    node('span', { class: 'q-plus-top' }, [plusGlyph(), node('span', { class: 'q-plus-word', text: 'QUADRA PLUS' }), node('span', { class: 'q-plus-go', text: member ? T('管理', 'Manage') : price === 0 ? T('免費試用', 'Try free') : T('加入', 'Join') })]),
+    compact ? null : node('span', { class: 'q-plus-pitch', text: T('手續費 5 折、活存 2%、串關加成加倍', 'Half-price trades, 2% on cash, doubled parlay boosts') }),
+    node('span', { class: 'q-plus-status', text: status })
+  ].filter(Boolean));
+}
+// The membership sheet: the perks, the price, join or leave.
+export function openPlus(s) {
+  const en = s.lang === 'en';
+  const T = (zh, e) => (en ? e : zh);
+  const dialog = node('dialog', { class: 'q-sheet q-plus-sheet' });
+  const close = () => dialog.close();
+  const note = node('p', { class: 'q-sheet-note', role: 'status' });
+  const body = node('div', { class: 'q-plus-body' });
+  const paint = () => {
+    const member = plusMember(s.wallet);
+    const renewing = plusRenewing(s.wallet);
+    const price = plusJoinPrice(s.wallet);
+    const next = new Date(nextPayday() + TPE);
+    const nextText = T(`${next.getUTCMonth() + 1} 月 1 日`, `${next.getUTCMonth() + 1}/1`);
+    const run = (label, fn, cls) =>
+      node('button', {
+        class: cls,
+        type: 'button',
+        text: label,
+        onclick: async event => {
+          const b = event.currentTarget;
+          b.disabled = true;
+          note.textContent = '';
+          try {
+            await fn();
+            paint();
+          } catch (e) {
+            note.textContent = errorText(e, s.lang);
+            b.disabled = false;
+          }
+        }
+      });
+    const join = () => s.plus(true);
+    const leave = async () => {
+      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消續訂？', 'Stop renewing?'), body: T(`已付的這個月照常享有會員權益，到月底為止；${nextText}起不再扣款。`, `You keep every perk to the end of this paid month; nothing is charged from ${nextText}.`), ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
+      await s.plus(false);
+    };
+    const cta = member
+      ? renewing
+        ? [node('p', { class: 'q-plus-state', text: T(`你是 Plus 會員。${nextText}從 Quadra 餘額續訂 ${money(PLUS.fee)}。`, `You're a Plus member. It renews ${nextText} for ${money(PLUS.fee)} from your Quadra balance.`) }), run(T('取消續訂', 'Stop renewing'), leave, 'q-plus-quiet')]
+        : [node('p', { class: 'q-plus-state', text: T(`會員權益用到本月底，${nextText}不會扣款。`, `Your perks last to the end of the month; nothing is charged ${nextText}.`) }), run(T(`恢復續訂（${nextText}起每月 ${money(PLUS.fee)}）`, `Keep renewing (${money(PLUS.fee)} from ${nextText})`), join, 'q-plus-cta')]
+      : [
+          run(price === 0 ? T('免費試用到月底', 'Try it free this month') : T(`加入 · 本月 ${money(price)}`, `Join · ${money(price)} this month`), join, 'q-plus-cta'),
+          node('p', { class: 'q-plus-fine', text: price === 0 ? T(`本月免費。${nextText}起每月 ${money(PLUS.fee)}，從 Quadra 餘額扣款，隨時可取消。`, `Free this month. From ${nextText}, ${money(PLUS.fee)} a month from your Quadra balance; cancel any time.`) : T(`本月依剩下天數計費，之後每月 1 日 ${money(PLUS.fee)}，隨時可取消。`, `This month by the days left, then ${money(PLUS.fee)} on the 1st; cancel any time.`) })
+        ];
+    const perks = plusPerks(s.lang);
+    const group = (app, title) =>
+      node('div', { class: 'q-plus-group' }, [
+        node('h3', { class: 'q-sheet-h', text: title }),
+        node('ul', { class: 'q-plus-perks' }, perks.filter(p => p[0] === app).map(([, a, b]) => node('li', {}, [plusGlyph(), node('span', {}, [node('strong', { text: a }), node('small', { text: b })])])))
+      ]);
+    body.replaceChildren(
+      node('div', { class: `q-plus-hero${member ? ' member' : ''}` }, [
+        node('span', { class: 'q-plus-top' }, [plusGlyph(), node('span', { class: 'q-plus-word', text: 'QUADRA PLUS' })]),
+        node('strong', { class: 'q-plus-price num', text: money(PLUS.fee) }),
+        node('span', { class: 'q-plus-per', text: T('每月 · 一個會員，所有 Quadra App', 'a month · one membership, every Quadra app') })
+      ]),
+      group('stock', 'Quadra Securities'),
+      group('odds', 'Quadra Play'),
+      ...cta
+    );
+  };
+  dialog.append(node('div', { class: 'q-sheet-head' }, [node('h2', { text: 'Quadra Plus' }), node('button', { class: 'q-close', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×', onclick: close })]), body, note);
+  paint();
+  const repaint = () => dialog.open && paint();
+  s.on('wallet', repaint);
+  document.body.append(dialog);
+  dialog.addEventListener('close', () => dialog.remove());
+  dialog.addEventListener('click', e => e.target === dialog && close());
+  dialog.showModal();
+  return dialog;
+}
+
 export function accountSheet(s, { extra = null } = {}) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
@@ -1193,6 +1348,7 @@ export function accountSheet(s, { extra = null } = {}) {
   dialog.append(
     node('div', { class: 'q-sheet-head' }, [node('h2', { text: BRAND.pass }), node('button', { class: 'q-close', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×', onclick: close })]),
     detailsCard(s),
+    plusCard(s),
     node('h3', { class: 'q-sheet-h', text: T('Quadra 的 App', 'Quadra apps') }),
     tiles,
     ...(extra ? [extra] : []),

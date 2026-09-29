@@ -38,9 +38,10 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 
 ### 市場 Markets
 
+- **The home:** your total and today's change at the top (a tap opens 資產), what's for you, and today's movers (top five up and down, side by side). No promotions, no nudges.
 - **Search:** by Chinese name, English name or ticker. Chinese finds the curated lists; Latin letters also search Yahoo Finance, which reaches almost any listed stock, ETF or fund worldwide (`7203.T`, `0700.HK`, `SAP.DE`, `PETR4.SA` …).
 - **World markets strip:** TAIEX, S&P 500, Nasdaq, SOX, Nikkei, Hang Seng, Bitcoin, USD/TWD, the gold passbook, the US 10-year yield.
-- **Lists** (`public/lib/catalog.mjs`, about 300 items with Chinese names): Taiwan stocks (TWSE and TPEx), Taiwan ETFs (0050, 0056, 00878, leveraged and inverse ones …), US stocks, US ETFs, government bonds (see below), bond ETFs (Taiwan's bond ETFs, US Treasury and corporate bond ETFs, and Treasury yields to watch), crypto, forex (18 currency pairs), gold and commodities, Japan, Hong Kong and China A-shares, Korea, Europe, US mutual funds, more markets (Canada, Australia, Singapore, India), and indexes. There's a watchlist (☆ on any item) too.
+- **Lists** (`public/lib/catalog.mjs`, about 300 items with Chinese names): Taiwan stocks (TWSE and TPEx), Taiwan ETFs (0050, 0056, 00878, leveraged and inverse ones …), US stocks, US ETFs, government bonds (see below), bond ETFs (Taiwan's bond ETFs, US Treasury and corporate bond ETFs, and Treasury yields to watch), crypto, forex (18 currency pairs), gold and commodities, Japan, Hong Kong and China A-shares, Korea, Europe, US mutual funds, more markets (Canada, Australia, Singapore, India), and indexes. There's a watchlist (☆ on any item) too. A list opens on its first 15 rows; the rest are a tap away.
 - **Each row:** today's price line against yesterday's close, the price and its currency, whether its market is open, and the day's change.
 - **Up and down colours:** red for up and green for down (Taiwan's way) in Chinese, green for up in English. The account sheet's settings switch either way.
 
@@ -182,7 +183,8 @@ Two devices' copies merge by uniting their logs:
 - **The spread:** market and triggered stop orders buy at the ask and sell at the bid: half a tick at least, or a typical half-spread per market (US 0.01%, Europe and Asia 0.05%, crypto 0.02%). Limit orders fill only at their price or better. Monthly plans size their buy at the ask.
 - **Settlement:** every fill records when it settles (Taiwan T+2, US, Canada, India and China T+1, most others T+2, weekdays only). Sale money can buy again at once in its market, but can't be exchanged into another currency until it settles; wallets show what's still settling.
 - **Taiwan odd lots** (not whole lots of 1,000) match only from 09:10, in the intraday odd-lot session, live and in history.
-- **Interest on idle NT$:** the settlement account earns the bank's demand-deposit rate (0.8% a year, `CASH_RATE`), accrued daily and paid June 21 and December 21, with 10% tax and the 2.11% NHI premium on a payment of NT$20,000 or more.
+- **Quadra Plus** (the kit's `PLUS.stock`, `usePlus` in `account.mjs`): half the commission (its minimum too), half the FX spread, 1 point off a new loan's rate, and 2% a year on NT$ cash. Each counts by when it happens: a trade by its fill time, an exchange or loan by its moment, cash interest by each Taiwan month the membership was paid for (the wallet's `eco:plus:<month>`). The ticket, the FX desk and the loan form show the member price as one quiet line.
+- **Interest on idle NT$:** the settlement account earns the bank's demand-deposit rate (0.8% a year, `CASH_RATE`; Quadra Plus 2%), accrued daily and paid June 21 and December 21, with 10% tax and the 2.11% NHI premium on a payment of NT$20,000 or more.
 - **The ledger is read as of a moment:** `replay(account, t)` ignores anything dated after `t`.
 - **Data safety:** an account with no sync code, not installed to the home screen, gets a reminder that Safari can clear site data after 7 days unopened.
 

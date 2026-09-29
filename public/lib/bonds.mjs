@@ -68,7 +68,6 @@ const LIST = [
 export const BONDS = Object.fromEntries(
   LIST.map(([id, issuer, coupon, maturity]) => [id, { id, issuer, coupon, maturity: Date.parse(`${maturity}T00:00:00Z`), ...ISSUERS[issuer] }])
 );
-export const isBond = symbol => Boolean(BONDS[symbol]);
 
 export function bondName(bond, locale) {
   const years = Math.max(0, (bond.maturity - Date.now()) / YEAR);

@@ -34,9 +34,9 @@ apps sharing one account and one money pool:
 
 ## The app
 
-Five tabs: a bottom bar on phones, the top bar on desktop.
+Four tabs, drawn by the kit (`tabBar`): a bottom bar on phones, the top bar on desktop; each keeps its place. The top right is help, refresh and the account (`topActions`).
 
-### 市場 Markets
+### 首頁 Home
 
 - **The home:** your total and today's change at the top (a tap opens 資產), what's for you, and today's movers (top five up and down, side by side). No promotions, no nudges.
 - **Buying power** under the account strip: NT$ cash plus what margin lends right now.

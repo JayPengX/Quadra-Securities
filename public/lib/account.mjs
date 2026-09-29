@@ -44,7 +44,6 @@ import {
 } from './markets.mjs';
 import { nextTradingStart } from './holidays.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
-import { ECONOMY } from './quadra.mjs';
 
 export const ACCOUNT_VERSION = 1;
 // Every new account opens with the same NT$100,000 (Quadra's base amount);
@@ -1477,24 +1476,6 @@ export function ownCash(account, s, now = Date.now()) {
 
 // Without the pool (a pass unlinked from this device).
 export const stripPool = account => (account ? { ...account, events: account.events.filter(e => !e.pool) } : account);
-
-// Money put in, by where it came from (NT$, events up to `now`).
-export function moneySources(account, now = Date.now()) {
-  const out = { start: 0, pay: 0, game: 0, odds: 0, vocab: 0, transfer: 0, merge: 0, other: 0 };
-  for (const e of account?.events || []) {
-    if (e.type !== 'deposit' || e.t > now) continue;
-    const v = e.amount * (e.twd || 1);
-    if (e.id === 'deposit:start' || e.start || (e.pool && e.app === 'eco' && e.kind === 'start')) out.start += v;
-    else if (e.income || (e.pool && e.app === 'eco' && (e.kind === 'pay' || e.kind === 'grant'))) out.pay += v;
-    else if (e.game || (e.pool && e.app === 'vocab' && e.kind === 'game')) out.game += v;
-    else if (e.pool && e.app === 'odds') out.odds += v;
-    else if (e.pool && e.app === 'vocab') out.vocab += v;
-    else if (e.pool && (e.kind === 'xfer-in' || e.kind === 'xfer-out')) out.transfer += v;
-    else if (e.pool && e.kind === 'merge') out.merge += v;
-    else out.other += v;
-  }
-  return out;
-}
 
 // Another, separate account folded in (the Quadra merge tool): both logs,
 // with the second's fixed ids ('deposit:start', 'pay:…', 'int:…') renamed so

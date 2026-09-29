@@ -198,9 +198,6 @@ const INDEXES = [
   ['^BSESN', '印度孟買 Sensex', 'BSE Sensex'], ['^AXJO', '澳洲 ASX 200', 'ASX 200']
 ];
 
-// Companies for the ticker mini game (games.mjs): [symbol, zh, en].
-export const GAME_COMPANIES = [...TW, ...US, ...JP].filter(item => !item[3]);
-
 export const CATEGORIES = [
   { id: 'tw', zh: '台股', en: 'Taiwan', icon: '🇹🇼', items: TW },
   { id: 'twetf', zh: '台灣 ETF', en: 'Taiwan ETFs', icon: '🧺', items: TW_ETF },

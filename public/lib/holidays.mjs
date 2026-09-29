@@ -145,10 +145,6 @@ const LISTED = {
 // Which calendar each market (see markets.mjs) keeps.
 const CALENDAR = { TW: 'TW', US: 'US', JP: 'JP', HK: 'HK', CN: 'CN', KR: 'KR', UK: 'UK', FR: 'EU', NL: 'EU', ES: 'EU', DE: 'DE', IT: 'IT', CH: 'CH', DK: 'DK', CA: 'CA', AU: 'AU', SG: 'SG', METAL: 'US', FX: null, CRYPTO: null, INTL: null };
 export const calendarOf = market => CALENDAR[market] ?? null;
-export const knownYears = market => {
-  const cal = calendarOf(market);
-  return cal && LISTED[cal] ? Object.keys(LISTED[cal]).map(Number) : null;
-};
 
 const cache = new Map();
 function holidaySet(cal, y) {

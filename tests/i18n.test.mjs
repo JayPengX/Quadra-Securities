@@ -28,7 +28,6 @@ test('every key the page asks for exists', () => {
     hview_: ['activity', 'orders', 'stats'],
     rating_: ['strong_buy', 'buy', 'hold', 'underperform', 'sell'],
     af_: ['all', 'trades', 'fx', 'income', 'loans', 'cash'],
-    cost_: ['commission', 'tax', 'fee', 'fx', 'interest', 'withheld', 'nhi', 'borrow'],
     margin_: ['ok', 'call', 'liquidate'],
     tab_: ['markets', 'portfolio', 'fx', 'history', 'guide'],
     err_: ['funds', 'shares', 'qty', 'qtyStep', 'limit', 'stop', 'noQuote', 'notTradable', 'noRate', 'side', 'fx', 'tooSmall', 'amount', 'capacity', 'margin', 'noLoan', 'shortMargin', 'noValuation', 'planAmount', 'planDay', 'alertPrice', 'tick', 'priceLimit', 'unsettled']

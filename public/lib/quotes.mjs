@@ -10,14 +10,6 @@ export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const YAHOO = 'https://query1.finance.yahoo.com';
 const SPARK_BATCH = 20;
 
-// The proxy answers signed-in apps only: the Quadra session (quadra.mjs)
-// supplies the token.
-let session = null;
-export const useSession = s => (session = s);
-
-export function proxied(url, token = session?.token || '') {
-  return `${PROXY_URL}/sports-proxy?url=${encodeURIComponent(url)}${token ? `&qt=${encodeURIComponent(token)}` : ''}`;
-}
 
 // Through the kit's proxyJson: requests made together go as one batch
 // (one Worker request), and each answer is remembered (in memory and on the

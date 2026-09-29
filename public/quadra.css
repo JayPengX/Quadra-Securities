@@ -89,6 +89,14 @@ html {
   text-size-adjust: 100%;
   touch-action: pan-x pan-y;
 }
+/* The page itself never moves sideways, whatever pokes past the edge (rows
+   that scroll sideways still do). clip, unlike hidden, doesn't make body a
+   scroller, so sticky bars keep working. */
+html,
+body {
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
 body,
 button,
 a,

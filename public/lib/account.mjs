@@ -808,6 +808,27 @@ export function liquidationPlan(account, valuation) {
   return plan;
 }
 
+// Selling to cover an overdraft (the Quadra pool below zero, NT$ cash
+// negative): the fewest sales that raise `owedTWD` (plus 1% for costs), from
+// the largest holdings down, each only as much as it needs (rounded up to
+// what can be traded). Holdings with no price now are skipped.
+export function coverPlan(valuation, owedTWD) {
+  const plan = [];
+  let left = owedTWD * 1.01;
+  const longs = valuation.positions.filter(p => !p.short && p.qty > 0 && p.valueTWD > 0 && isTradable(p.kind)).sort((a, b) => b.valueTWD - a.valueTWD);
+  for (const p of longs) {
+    if (left <= 0) break;
+    const unit = p.valueTWD / p.qty;
+    const step = qtyStep(p.kind);
+    let qty = Math.min(p.qty, Math.ceil(left / unit / step) * step);
+    qty = roundQty(qty, p.kind);
+    if (!(qty > 0)) continue;
+    plan.push({ symbol: p.symbol, qty, twd: qty * unit, all: qty >= p.qty });
+    left -= qty * unit;
+  }
+  return { plan, covered: left <= 0 };
+}
+
 // While the page was closed, a loan or a short could have fallen below the
 // liquidation ratio and recovered since; a broker would have sold then. This
 // walks `times` (the moments prices are known for, oldest first), values

@@ -6,7 +6,7 @@ import {
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
-  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread
+  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
@@ -24,7 +24,7 @@ import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
   APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId, PLUS, plusMonths, plusCard, openPlus
+  affinity, helpUrl, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId, paydayFor, PLUS, plusMonths, plusCard, openPlus
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -785,7 +785,7 @@ function renderHomeRows() {
         <span class="acct-main"><small>${h(t('netWorth'))}${plusAt() ? ' <b class="acct-plus">✦ PLUS</b>' : ''}</small><strong class="num">${h(money(v.netWorth, BASE))}</strong></span>
         <span class="acct-day ${dirClass(v.dayChange)}"><small>${h(t('today'))}</small><strong class="num">${h(money(v.dayChange, BASE, { sign: true }))}</strong><em class="num">${base ? h(pct(v.dayChange / base)) : '—'}</em></span>
       </button>
-      <div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span><small>${h(t('buyingPowerSub'))}</small></div>`
+      ${overdrawnBy(v) >= 1 ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span><small>${h(t('buyingPowerSub'))}</small></div>`}`
     : '';
   const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}"><span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
   const up = movers(state.quotes, { up: true }).slice(0, 5);
@@ -1670,6 +1670,20 @@ function errorText(r) {
 
 // ---- Portfolio tab ----------------------------------------------------------------------
 
+// NT$ cash below zero: the Quadra pool is overdrawn (1% a month, charged by
+// the Worker). What it takes to cover it, and the sales that would.
+const overdrawnBy = v => Math.max(0, -(v.cash.find(c => c.currency === BASE)?.amount ?? 0));
+function overdraftHtml(v) {
+  const owed = overdrawnBy(v);
+  if (owed < 1) return '';
+  const { plan, covered } = coverPlan(v, owed);
+  const rows = plan.map(x => `<li><span>${h(nameOf(x.symbol))}</span><span class="num">${h(t('coverSell', { qty: fmtQty(x.qty) }))}${x.all ? ` · ${h(t('coverAll'))}` : ''}</span><strong class="num">≈ ${h(money(x.twd, BASE))}</strong></li>`).join('');
+  return `<div class="card overdraft-card">
+    <div class="od-head"><strong>${h(t('odTitle', { v: money(owed, BASE) }))}</strong><small>${h(t('odSub'))}</small></div>
+    ${plan.length ? `<ul class="od-plan">${rows}</ul><button class="primary-button block" type="button" data-action="cover" ${pricesLive() ? '' : 'disabled'}>${h(t(covered ? 'coverGo' : 'coverGoPart'))}</button>` : `<p class="note">${h(t('odNothing'))}</p>`}
+  </div>`;
+}
+
 function renderPortfolio() {
   const box = $('portfolio-body');
   if (!state.account) {
@@ -1702,12 +1716,13 @@ function renderPortfolio() {
         ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
         ${v.debtTWD > 0 ? `<span>${h(t('loans'))} <strong class="num">−${h(money(v.debtTWD, BASE))}</strong></span>` : ''}
       </div>
-      <p class="hero-payday">💵 ${h(t('nextPayday', { amount: money(ECONOMY.monthly, BASE), date: fmtDate(nextPayday(Date.now())) }))}</p>
+      <p class="hero-payday">💵 ${h(t('nextPayday', { amount: money(paydayFor(state.wallet), BASE), date: fmtDate(nextPayday(Date.now())) }))}</p>
       <div class="button-row hero-actions">
         <button class="hero-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button>
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
       </div>
     </div>
+    ${overdraftHtml(v)}
     ${plusAt() ? '' : '<div id="plus-slot" class="plus-slot"></div>'}
     ${marginCardHtml(v)}
     <div class="two-col">
@@ -2618,7 +2633,14 @@ async function mergeRemote(remote, { pull = false } = {}) {
   }
   account = applyPool(account, wallet).account;
   const figure = ownCash(account, replay(account));
-  const snapPatch = wallet?.snap?.stock?.cash === figure ? undefined : { stock: { cash: figure, t: Date.now() } };
+  // What the holdings are worth (less loans and shorts), for the monthly
+  // allowance, which goes by the whole account's worth: sent once prices are
+  // in, again when it moves 2% (or NT$1,000).
+  const prev = wallet?.snap?.stock;
+  const v = state.loaded ? valuate(replay(account), state.quotes, state.rates) : null;
+  const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - v.cashTWD) : prev?.holdings;
+  const moved = Number.isFinite(holdings) && !(Math.abs((prev?.holdings ?? Infinity) - holdings) < Math.max(1_000, Math.abs(holdings) * 0.02));
+  const snapPatch = prev?.cash === figure && !moved ? undefined : { stock: { cash: figure, ...(Number.isFinite(holdings) ? { holdings } : {}), t: Date.now() } };
   const changed = !their || JSON.stringify(account) !== JSON.stringify(their);
   if (account !== state.account) commit(account, { sync: false });
   if (changed || snapPatch || (remote.inbox || []).length) {
@@ -2784,6 +2806,28 @@ document.addEventListener('click', event => {
     case 'plus':
       openPlus(q);
       break;
+    case 'cover': {
+      // Sell what the plan says, at market, one order each.
+      const v = valuation();
+      const { plan } = coverPlan(v, overdrawnBy(v));
+      let account = state.account;
+      let sold = 0;
+      for (const x of plan) {
+        const quote = state.quotes.get(x.symbol);
+        const r = placeOrder(account, { symbol: x.symbol, side: 'sell', type: 'market', qty: x.qty }, { quote, rates: state.rates, valuation: valuate(replay(account), state.quotes, state.rates), now: Date.now() });
+        if (r.account) {
+          account = r.account;
+          sold++;
+        }
+      }
+      if (sold) {
+        commit(account);
+        track('trade', [], 1);
+        toast(t('coverDone', { n: sold }), 'good');
+      }
+      render();
+      break;
+    }
     case 'list-all':
       state.listAll = state.category;
       renderMarkets();

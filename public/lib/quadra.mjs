@@ -39,22 +39,60 @@ export const appName = app => APPS[app]?.name || app;
 
 // ---- The economy -------------------------------------------------------------------
 //
-// One pool, one payday (paid by the Worker, whichever app is opened): a new
-// pass opens with NT$110,000, and the 1st of every Taiwan month pays
-// NT$7,000 (shown under the balance in the account sheet). Securities is where it grows (a diversified
-// portfolio about 6-8% a year, real costs); Play is where it shrinks (the
-// lottery keeps about 22%); Rewards pays for effort: word practice best
-// (about NT$20 a minute), games about NT$15 a minute, missions a little
-// for using the apps, all capped a day.
+// Balanced so money matters (Shared-Proxy/tools/economy.mjs has the model):
+// a new pass opens with NT$30,000; the 1st of every Taiwan month pays an
+// allowance by what the account is worth (the pool plus Securities'
+// holdings): NT$6,000 under NT$40,000, 4,000 under 100,000, 2,000 under
+// 250,000, 1,000 above: the full amount to get going or back in the game,
+// less once there's plenty, never nothing (eco.js pays it). Securities is
+// where it grows (the market, real costs); Play and the lottery are where it
+// goes (the house keeps about 14% of a single, a third of a treble, half of a
+// draw ticket); Rewards pays for effort, capped a day so a regular player
+// needs a little of it to keep level and nobody can grind past the house.
 export const ECONOMY = {
-  start: 110_000,
-  monthly: 7_000,
-  // Rewards: word practice, games and missions, with their caps a Taiwan day.
-  vocab: { perCorrect: 3, perMastered: 25, dailyCap: 600 },
-  gamesPerMinute: 15,
-  gamesDailyCap: 400,
-  missionsDailyCap: 300
+  start: 30_000,
+  monthly: 6_000,
+  payTiers: [
+    [40_000, 6_000],
+    [100_000, 4_000],
+    [250_000, 2_000],
+    [Infinity, 1_000]
+  ],
+  // Rewards: word practice, games and missions, with their caps a Taiwan day
+  // (NT$400 at most; about NT$12 a minute).
+  vocab: { perCorrect: 2, perMastered: 15, dailyCap: 200 },
+  gamesPerMinute: 10,
+  gamesDailyCap: 120,
+  missionsDailyCap: 80
 };
+const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+// What the account is worth for the allowance: the pool and Securities' holdings.
+export const worthOf = wallet => poolBalance(wallet) + finiteOr0(wallet?.snap?.stock?.holdings);
+export const payFor = worth => ECONOMY.payTiers.find(([below]) => !(worth >= below))[1];
+// The next allowance, as the account stands now.
+export const paydayFor = wallet => payFor(worthOf(wallet));
+// Below zero: an overdraft (1% a month, eco.js), fixed by selling something
+// in Securities or borrowing on margin there.
+export const OVERDRAFT_RATE = 0.01;
+export const overdraft = wallet => Math.max(0, -poolBalance(wallet));
+
+// Once per device: what the economy reset did to an account made before it.
+const RESET_SEEN = 'quadra.seen.rebase-v3';
+function resetNotice(s) {
+  const e = (s.wallet?.entries || []).find(x => x.id === 'eco:rebase:v3' && x.app === 'eco');
+  if (!e || readStore(RESET_SEEN)) return;
+  writeStore(RESET_SEEN, '1');
+  const en = s.lang === 'en';
+  const owed = overdraft(s.wallet);
+  tell({
+    lang: s.lang,
+    icon: '⚖️',
+    title: en ? 'Quadra’s new economy' : 'Quadra 經濟調整',
+    body: en
+      ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. The monthly allowance now goes by what you're worth (NT$6,000 down to 1,000).${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
+      : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月津貼改為依資產發放（NT$6,000 到 1,000）。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
+  });
+}
 
 // ---- Quadra Plus ---------------------------------------------------------------------
 //
@@ -596,6 +634,7 @@ function makeSession(app, { lang, heartbeat }) {
     if (!first) first = await signInGate(s);
     s.first = first;
     loop();
+    setTimeout(() => resetNotice(s), 1200);
     // The first reply: what the app merges its own copy with (never the
     // session itself: an app that took the session for the reply saw "no
     // data" and saved over the pass).
@@ -689,7 +728,7 @@ export const entriesNotFrom = (wallet, app) => (wallet?.entries || []).filter(e 
 const KIND = {
   start: ['開戶金', 'Opening money'],
   grant: ['零用金', 'Allowance'],
-  pay: ['每月薪資', 'Monthly pay'],
+  pay: ['每月津貼', 'Monthly allowance'],
   stake: ['下注', 'Bet'],
   payout: ['彩金', 'Winnings'],
   refund: ['退款', 'Refund'],
@@ -699,6 +738,9 @@ const KIND = {
   reward: ['單字獎勵', 'Word practice'],
   mission: ['任務獎勵', 'Mission reward'],
   plus: ['Quadra Plus 月費', 'Quadra Plus'],
+  rebase: ['經濟調整', 'Economy reset'],
+  od: ['透支利息', 'Overdraft interest'],
+  cashout: ['提前兌現', 'Cash out'],
   'xfer-in': ['轉入', 'Transfer in'],
   'xfer-out': ['轉出', 'Transfer out'],
   merge: ['合併帶入', 'Carried over']
@@ -1109,12 +1151,15 @@ export function nextPayday(now = Date.now()) {
   const d = new Date(now + TPE);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - TPE;
 }
-export function paydayText(lang, now = Date.now()) {
+export function paydayText(lang, now = Date.now(), wallet = null) {
   const d = new Date(nextPayday(now) + TPE);
+  const next = `${d.getUTCMonth() + 1}/1`;
+  const amount = money(wallet ? paydayFor(wallet) : ECONOMY.monthly);
   return lang === 'en'
-    ? `Payday: ${money(ECONOMY.monthly)} on the 1st of every month (next ${d.getUTCMonth() + 1}/1; a missed month is paid when you're back)`
-    : `發薪日：每月 1 日 ${money(ECONOMY.monthly)}（下次 ${d.getUTCMonth() + 1}/1；沒打開的月份下次補發）`;
+    ? `Next allowance ${next}: ${amount} (by what you're worth: ${ECONOMY.payTiers.map(t => money(t[1]).replace('NT$', '')).join(' / ')})`
+    : `下次津貼 ${next}：${amount}（依資產，越少領越多：${ECONOMY.payTiers.map(t => money(t[1]).replace('NT$', '')).join(' / ')}）`;
 }
+
 // The account at a glance: its number, since when, this month's money in
 // and out, and the latest entries (every app's, like a bank statement).
 export function accountDetails(wallet, lang = 'zh', now = Date.now()) {
@@ -1149,7 +1194,8 @@ function detailsCard(s) {
       node('div', {}, [node('small', { text: T('本月收入', 'In this month') }), node('strong', { class: 'num up', text: money(d.in, { sign: true }) })]),
       node('div', {}, [node('small', { text: T('本月支出', 'Out this month') }), node('strong', { class: 'num down', text: money(d.out) })])
     ]),
-    node('p', { class: 'q-payday', text: paydayText(s.lang) }),
+    overdraft(s.wallet) > 0 ? node('p', { class: 'q-overdraft', text: T(`帳戶透支 ${money(overdraft(s.wallet))}：透支每月計息 1%，到 Quadra Securities 賣出持股補足。`, `Overdrawn by ${money(overdraft(s.wallet))}: 1% a month until it's covered. Sell some holdings in Quadra Securities.`) }) : null,
+    node('p', { class: 'q-payday', text: paydayText(s.lang, Date.now(), s.wallet) }),
     d.recent.length
       ? node('details', { class: 'q-recent' }, [
           node('summary', { text: T(`最近明細（本月 ${d.count} 筆）`, `Latest entries (${d.count} this month)`) }),

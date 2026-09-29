@@ -1539,3 +1539,13 @@ html:not([data-q-keys]) :is(:focus-visible, :focus):not(input, textarea, select)
   cursor: pointer;
   text-align: center;
 }
+/* An overdraft: said plainly where the balance is. */
+.q-details .q-overdraft {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--q-radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--q-bad);
+  background: color-mix(in srgb, var(--q-bad) 10%, transparent);
+}

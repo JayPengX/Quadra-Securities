@@ -856,3 +856,14 @@ a.activity-row { color: inherit; text-decoration: none; }
 .power-strip strong { color: var(--q-text); }
 .power-strip small { font-size: 0.74rem; color: var(--q-muted); white-space: nowrap; }
 .margin-line { color: var(--q-accent); }
+
+/* ---- An overdraft, and the sales that cover it ---- */
+.overdraft-card { border-color: color-mix(in srgb, var(--q-bad) 40%, var(--q-border)); }
+.od-head { display: grid; gap: 4px; margin-bottom: 10px; }
+.od-head strong { font-size: 1.1rem; color: var(--q-bad); }
+.od-head small { font-size: 0.8rem; color: var(--q-text-2); }
+.od-plan { display: grid; margin: 0 0 12px; padding: 0; list-style: none; border: 1px solid var(--q-border); border-radius: var(--q-radius-sm); }
+.od-plan li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 9px 12px; font-size: 0.86rem; }
+.od-plan li + li { border-top: 1px solid var(--q-divider); }
+.od-plan li span:first-child { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.od-strip { display: block; width: 100%; margin: 0 0 18px; padding: 10px 14px; border: 0; border-radius: var(--q-radius-sm); background: color-mix(in srgb, var(--q-bad) 12%, transparent); color: var(--q-bad); font: inherit; font-weight: 700; font-size: 0.86rem; text-align: left; cursor: pointer; }

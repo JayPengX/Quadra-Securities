@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  newAccount, replay, setPlan, planRuns, nextPlanRun, runPlan, activePlans, setAlert, checkAlerts, alertHitInBars, markAlertHit, activeAlerts,
+  newAccount, replay, setPlan, dedupePlans, planRuns, nextPlanRun, runPlan, activePlans, setAlert, checkAlerts, alertHitInBars, markAlertHit, activeAlerts,
   mergeAccounts, planDue
 } from '../public/lib/account.mjs';
 import { timeMachine, movingAverage, valueAt } from '../public/lib/timemachine.mjs';
@@ -331,4 +331,18 @@ test('NT$ cash earns the demand-deposit rate, paid June 21 and December 21', asy
   // June's interest earns interest too until December (a few NT$).
   const extra = r.added[0].gross + r.added[1].gross - Math.floor((1_000_000 * 0.008 * 354) / 365);
   assert.ok(extra >= 0 && extra < 30);
+});
+
+test('a plan a symbol: starting again changes it, repeated taps leave one', () => {
+  const T = Date.parse('2026-09-01T00:00:00Z');
+  let a = newAccount(100_000, T, 'acc');
+  a = setPlan(a, { symbol: '0050.TW', amount: 5000, day: 5 }, T).account;
+  a = setPlan(a, { symbol: '0050.TW', amount: 8000, day: 10 }, T + 1).account;
+  assert.equal(activePlans(a).length, 1);
+  assert.equal(activePlans(a)[0].amount, 8000);
+  // Copies from before: the first kept.
+  const copies = { ...a, plans: { x1: { id: 'x1', symbol: '2330.TW', amount: 3000, day: 5, on: true, since: T }, x2: { id: 'x2', symbol: '2330.TW', amount: 3000, day: 5, on: true, since: T + 5 }, ...a.plans } };
+  const once = dedupePlans(copies, T + 10);
+  assert.deepEqual(activePlans(once).map(p => p.id).sort(), ['x1', Object.keys(a.plans)[0]].sort());
+  assert.equal(dedupePlans(once), once);
 });

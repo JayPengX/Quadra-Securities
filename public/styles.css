@@ -484,8 +484,6 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .row-pl small.up { color: var(--up); }
 .row-pl small.down { color: var(--down); }
 /* A holding's share of the assets, under its name. */
-.weight-bar { display: block; height: 4px; margin-top: 5px; max-width: 180px; border-radius: 2px; background: var(--surface-sunken); overflow: hidden; }
-.weight-bar i { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
 .position-row .row-spark { width: 80px; }
 .position-row .row-spark .spark { width: 80px; }
 @media (max-width: 560px) {

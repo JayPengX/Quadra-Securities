@@ -1055,7 +1055,9 @@ export const watched = account => Object.entries(account?.watch || {}).filter(([
 export const PLAN_MIN = 1000;
 export const PLAN_MAX_CATCHUP = 24;
 
-export function setPlan(account, { id = randomId(), symbol, amount, day, on = true, name, kind, market, currency }, now = Date.now()) {
+export function setPlan(account, { id, symbol, amount, day, on = true, name, kind, market, currency }, now = Date.now()) {
+  // One plan a symbol: starting another changes the one there is.
+  id ||= Object.values(account.plans || {}).find(p => p.on && p.symbol === symbol)?.id || randomId();
   amount = Math.round(Number(amount));
   day = Math.round(Number(day));
   const old = account.plans?.[id];
@@ -1067,6 +1069,23 @@ export function setPlan(account, { id = randomId(), symbol, amount, day, on = tr
 }
 
 export const activePlans = account => Object.values(account?.plans || {}).filter(p => p.on).sort((a, b) => a.since - b.since);
+
+// Plans started more than once for a symbol (a tap that registered several
+// times): the first kept, the rest stopped. Returns the account unchanged when
+// there are none.
+export function dedupePlans(account, now = Date.now()) {
+  const seen = new Set();
+  let plans = null;
+  for (const p of activePlans(account)) {
+    if (!seen.has(p.symbol)) {
+      seen.add(p.symbol);
+      continue;
+    }
+    plans ||= { ...account.plans };
+    plans[p.id] = { ...p, on: false, t: now };
+  }
+  return plans ? { ...account, plans } : account;
+}
 
 // The Taiwan midnight a month's buy is due: YYYY-MM-DD 00:00 +08:00.
 export function planDue(month, day) {

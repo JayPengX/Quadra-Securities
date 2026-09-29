@@ -3,7 +3,7 @@
 import {
   newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay,
   repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot,
-  benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
+  benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
   START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary
@@ -17,7 +17,7 @@ import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, searchSymbols, fxSymbol, useSession } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
-import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, SERIES } from './lib/chart.mjs';
+import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, stackBar, SERIES } from './lib/chart.mjs';
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
@@ -423,6 +423,9 @@ async function checkPlans() {
   if (!state.account || plansRunning || !state.backfilled) return;
   plansRunning = true;
   try {
+    // The copies a repeated tap left: one plan a symbol.
+    const once = dedupePlans(state.account);
+    if (once !== state.account) commit(once);
     for (const plan of activePlans(state.account)) {
       const due = planRuns(plan).filter(r => !state.account.orders.some(o => o.id === planOrderId(plan, r.month)));
       if (!due.length) continue;
@@ -1142,15 +1145,19 @@ function addAlert() {
   refreshDetailLive();
 }
 
+let planAddedAt = 0;
 function addPlan() {
   const d = state.detail;
   const q = state.quotes.get(d.symbol);
-  if (!state.account) return;
+  if (!state.account || Date.now() - planAddedAt < 2000) return;
+  planAddedAt = Date.now();
+  // The keyboard away, so the sheet redraws with the plan in place.
+  document.activeElement?.blur?.();
   const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
   commit(r.account);
   toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
-  refreshDetailLive();
+  redrawDetail();
 }
 
 // ---- Detail sheet: what the company does, its numbers, news ------------------------
@@ -1713,8 +1720,7 @@ function positionRow(p) {
   return `<button class="row position-row" type="button" data-action="open" data-symbol="${h(p.symbol)}">
     ${symbolBadge(p.symbol, p)}
     <span class="row-main"><span class="row-title">${h(nameOf(p.symbol, q))}${p.short ? `<span class="held-tag short">${h(t('shortTag'))}</span>` : ''}</span>
-      <span class="row-sub">${flagOf(p.symbol, p)} ${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)}</span>
-      <span class="weight-bar" aria-hidden="true"><i style="width:${Math.min(100, p.weight * 100).toFixed(1)}%"></i></span></span>
+      <span class="row-sub">${flagOf(p.symbol, p)} ${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)}</span></span>
     <span class="row-spark">${q?.line?.length > 1 ? sparkline(q.line, q.kind === 'crypto' ? null : q.prev) : ''}</span>
     <span class="row-value"><strong class="num">${h(money(p.valueTWD, BASE))}</strong><small class="num">${h(t('weight', { w: pct(p.weight, { digits: 1, sign: false }) }))}</small></span>
     <span class="row-pl"><strong class="num ${dirClass(p.pl)}">${h(money(p.pl, BASE, { sign: true }))}</strong><small class="num ${dirClass(p.pl)}">${h(pct(p.plPct))}</small><small class="num ${dirClass(p.dayTWD)}">${h(t('todayShort'))} ${h(money(p.dayTWD, BASE, { sign: true }))}</small></span>
@@ -2636,7 +2642,13 @@ function redrawDetail() {
 
 // Prices changed under an open sheet: update its numbers without touching
 // what's being typed.
+// A finger on the screen: the live redraw waits, so the button it's on
+// is still there when the tap lands.
+let pressedAt = 0;
+document.addEventListener('pointerdown', () => (pressedAt = Date.now()), true);
+document.addEventListener('click', () => (pressedAt = 0), true);
 function refreshDetailLive() {
+  if (Date.now() - pressedAt < 800) return void setTimeout(refreshDetailLive, 800 - (Date.now() - pressedAt) + 20);
   const active = document.activeElement;
   if (active && $('detail').contains(active) && active.matches('input, select')) {
     renderTicket();

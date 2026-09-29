@@ -162,17 +162,17 @@ function syncPush() {
   const items = [];
   for (const a of activeAlerts(account)) {
     if (a.hit || BONDS[a.symbol]) continue;
-    items.push({ at: a.since, until: a.since + 30 * 86_400_000, title: `🔔 ${t('alertTitle')}`, body: `${nameOf(a.symbol)} ${a.op === 'above' ? '≥' : '≤'} ${a.price}`, tag: `alert:${a.id}`, hash: 'portfolio', kind: 'alert', check: { yahoo: a.symbol, op: a.op, price: a.price } });
+    items.push({ at: a.since, until: a.since + 30 * 86_400_000, title: `🔔 ${t('alertTitle')}`, body: t(a.op === 'above' ? 'alertHitAbove' : 'alertHitBelow', { name: nameOf(a.symbol), price: fmtPrice(a.price, state.quotes.get(a.symbol)?.currency) }), tag: `alert:${a.id}`, hash: 'portfolio', kind: 'alert', check: { yahoo: a.symbol, op: a.op, price: a.price } });
   }
   for (const o of account.orders.filter(x => x.status === 'open' && !BONDS[x.symbol] && (x.type === 'limit' || x.type === 'stop'))) {
     const price = Number(o.type === 'limit' ? o.limit : o.stop);
     if (!(price > 0)) continue;
     const op = (o.type === 'limit') === (o.side === 'buy') ? 'below' : 'above';
-    items.push({ at: o.t, until: o.t + 30 * 86_400_000, title: t('noticeReached'), body: `${t(o.side)} ${nameOf(o.symbol)} @ ${fmtPrice(price, o.currency)}`, tag: `fill:${o.id}`, hash: 'history', kind: 'fill', check: { yahoo: o.symbol, op, price } });
+    items.push({ at: o.t, until: o.t + 30 * 86_400_000, title: t('noticeReached'), body: t('noticeReachedBody', { side: t(o.side).toLowerCase(), name: nameOf(o.symbol), price: fmtPrice(price, o.currency) }), tag: `fill:${o.id}`, hash: 'history', kind: 'fill', check: { yahoo: o.symbol, op, price } });
   }
   for (const p of activePlans(account)) {
     const next = nextPlanRun(p, now);
-    if (next) items.push({ at: next + 9 * 3_600_000, title: t('planTitle'), body: t('noticePlanDay', { name: nameOf(p.symbol), amount: money(p.amount, BASE) }), tag: `plan:${p.id}:${next}`, hash: 'portfolio', kind: 'fill' });
+    if (next) items.push({ at: next + 9 * 3_600_000, title: t('noticePlanTitle'), body: t('noticePlanDay', { name: nameOf(p.symbol), amount: money(p.amount, BASE) }), tag: `plan:${p.id}:${next}`, hash: 'portfolio', kind: 'fill' });
   }
   schedulePush(q, items);
 }
@@ -350,7 +350,7 @@ function afterPrices() {
   const now = Date.now();
   const r = processOrders(account, state.quotes, state.rates, now);
   account = r.account;
-  for (const f of r.filled) filledNotice(t('toastFilled', { side: t(f.side), qty: fmtQty(f.qty), name: nameOf(f.symbol), price: fmtPrice(f.price, f.currency) }), f.id);
+  for (const f of r.filled) filledNotice(t('toastFilled', { side: t(f.side), qty: fmtQty(f.qty), name: nameOf(f.symbol), price: fmtPrice(f.price, f.currency) }), f);
   for (const o of r.rejected) toast(t('toastRejected', { name: nameOf(o.symbol), why: t(`err_${o.reason}`) }), 'bad');
   if (r.filled.some(f => f.forced)) account = repayAll(account, state.rates, state.fxOpen, now);
   let v = valuate(replay(account, now), state.quotes, state.rates);
@@ -408,9 +408,9 @@ function alertFired(a, { late = false } = {}) {
   notify(q, { title: `🔔 ${t('alertTitle')}`, body: text, tag: `alert:${a.id}:${a.hit?.t || ''}`, hash: 'portfolio', kind: 'alert' });
 }
 // An order filled: a toast on screen, a notice when the app is in the background.
-function filledNotice(text, id) {
+function filledNotice(text, fill) {
   if (document.visibilityState === 'visible') return toast(text, 'good');
-  notify(q, { title: t('noticeFilled'), body: text, tag: `fill:${id}`, hash: 'history', kind: 'fill' });
+  notify(q, { title: t('noticeFilled'), body: t('noticeFilledBody', { side: t(fill.side), name: nameOf(fill.symbol), qty: fmtQty(fill.qty), price: fmtPrice(fill.price, fill.currency) }), tag: `fill:${fill.id}`, hash: 'history', kind: 'fill' });
 }
 
 // Alerts set before the page was closed: checked against the price bars
@@ -526,7 +526,7 @@ async function backfillOrders() {
   for (const r of results.filter(Boolean).sort((a, b) => a.hit.t - b.hit.t)) {
     const f = fillFromHistory(state.account, r.o.id, r.hit, r.twd, Date.now());
     if (f.account !== state.account) commit(f.account);
-    if (f.fill) filledNotice(t('toastFilledAt', { side: t(f.fill.side), name: nameOf(f.fill.symbol), qty: fmtQty(f.fill.qty), price: fmtPrice(f.fill.price, f.fill.currency), time: dateTime(f.fill.t) }), f.fill.id);
+    if (f.fill) filledNotice(t('toastFilledAt', { side: t(f.fill.side), name: nameOf(f.fill.symbol), qty: fmtQty(f.fill.qty), price: fmtPrice(f.fill.price, f.fill.currency), time: dateTime(f.fill.t) }), f.fill);
     else if (f.order?.status === 'rejected') toast(t('toastRejected', { name: nameOf(f.order.symbol), why: t(`err_${f.order.reason}`) }), 'bad');
   }
   if (state.account?.orders.some(o => o.forced && o.status === 'filled')) commit(repayAll(state.account, state.rates, state.fxOpen, Date.now()));

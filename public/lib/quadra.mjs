@@ -1286,10 +1286,71 @@ export function showNewPass(s, passcode) {
 // is on screen, and a system notification when it isn't (once allowed in
 // the account sheet, per device). `tag` keeps one notice per thing (a slip,
 // a match), `hash` is where tapping it goes, `kind` is its NOTICE_KINDS entry
-// (a kind turned off in the account sheet is dropped). There's no push server: a
-// notice comes from an app that's open or in the background.
+// (a kind turned off in the account sheet is dropped).
+//
+// A phone stops an app in the background, so what's known ahead (a game's
+// start, a class, a streak about to end) and what the Worker can find out
+// itself (a final score, a price reached) goes to the Worker as a list,
+// schedulePush(s, items), and arrives as a push notice while the app is
+// closed (Shared-Proxy/push.js).
 
 export const notifyOn = () => readStore(KEY.notify) === '1' && globalThis.Notification?.permission === 'granted';
+
+const PUSH_URL = PROXY_URL.replace(/\/sports-proxy$/, '/push');
+async function pushPost(s, path, body) {
+  const token = await s.ensureToken?.().catch(() => s.token || '');
+  if (!token) return null;
+  // text/plain: no preflight request.
+  return fetch(`${PUSH_URL}/${path}?qt=${encodeURIComponent(token)}`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body) })
+    .then(r => (r.ok ? r.json() : null))
+    .catch(() => null);
+}
+const keyBytes = text => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((text.length + 3) % 4)), c => c.charCodeAt(0));
+// This device's push subscription, given to the Worker (again each day, or
+// whenever it changes). False when this browser can't take pushes (an
+// iPhone needs the app on the home screen, iOS 16.4 or later).
+export async function enablePush(s, force = false) {
+  if (!notifyOn() || !globalThis.navigator?.serviceWorker) return false;
+  try {
+    const reg = await Promise.race([navigator.serviceWorker.ready, new Promise(r => setTimeout(r, 4000))]);
+    if (!reg?.pushManager) return false;
+    const { key } = await fetch(`${PUSH_URL}/key`).then(r => r.json());
+    let sub = await reg.pushManager.getSubscription();
+    // One made with another key is replaced.
+    const own = sub?.options?.applicationServerKey ? btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') === key : true;
+    if (sub && !own) await sub.unsubscribe().catch(() => {});
+    if (!sub || !own) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+    const mark = `${sub.endpoint}|${new Date().toDateString()}`;
+    const storeKey = `quadra.push.sub.${s.app}`;
+    if (!force && readStore(storeKey) === mark) return true;
+    if (await pushPost(s, 'subscribe', { sub: sub.toJSON(), lang: s.lang })) writeStore(storeKey, mark);
+    return true;
+  } catch {
+    return false;
+  }
+}
+// The app's coming notices, for the Worker to send while the app is closed:
+// [{ at, title, body, tag, hash, kind, check, until }] (check: see push.js). The
+// whole list each time (it replaces the last); sent only when it changed.
+export async function schedulePush(s, items) {
+  if (!s?.app) return;
+  const storeKey = `quadra.push.list.${s.app}`;
+  // Turned off: the Worker's list emptied too (once).
+  if (!notifyOn()) {
+    if (readStore(storeKey) && readStore(storeKey) !== '[]' && (await pushPost(s, 'schedule', { items: [] }))) writeStore(storeKey, '[]');
+    return;
+  }
+  const base = `${globalThis.location?.origin || 'https://jaypengx.github.io'}${APPS[s.app]?.path || '/'}`;
+  const list = items
+    .filter(x => x && Number.isFinite(x.at) && kindOn(s.app, x.kind))
+    .map(x => ({ at: Math.round(x.at), title: x.title || '', body: x.body || '', tag: `${s.app}:${x.tag || x.title}`, url: `${base}${x.hash ? `#${x.hash}` : ''}`, ...(x.check ? { check: x.check } : {}), ...(x.until ? { until: Math.round(x.until) } : {}) }))
+    .sort((a, b) => a.at - b.at)
+    .slice(0, 60);
+  const text = JSON.stringify(list);
+  if (readStore(storeKey) === text && readStore(`quadra.push.sub.${s.app}`)) return;
+  if (!(await enablePush(s))) return;
+  if (await pushPost(s, 'schedule', { items: list })) writeStore(storeKey, text);
+}
 
 // Every kind of notice, by app: what it is and when it comes. Each can be
 // turned off on its own (per device, `quadra.notify.kinds`); a kind that's
@@ -1361,7 +1422,10 @@ function notifyRows(s, note) {
             return true;
           }
           const p = await Notification.requestPermission().catch(() => 'denied');
-          if (p === 'granted') writeStore(KEY.notify, '1');
+          if (p === 'granted') {
+            writeStore(KEY.notify, '1');
+            enablePush(s, true);
+          }
           else note.textContent = T('系統沒有允許通知：請到系統設定開啟。', 'Notifications aren’t allowed: turn them on in the system settings.');
           sub.textContent = state();
           return p === 'granted';
@@ -1390,7 +1454,7 @@ export async function notify(s, { title, body = '', tag = '', hash = '', kind = 
   const key = `${s.app}:${tag || title}`;
   if (tag && shown.has(key)) return;
   if (tag) shown.add(key);
-  if (typeof document !== 'undefined' && document.visibilityState === 'visible') return banner(s, { title, body, hash });
+  if (typeof document !== 'undefined' && document.visibilityState === 'visible') return queueBanner(s, { title, body, hash });
   if (!notifyOn()) return;
   const options = { body, tag: key, icon: './icons/icon-192.png', badge: './icons/icon-192.png', data: { url: `${APPS[s.app].path}${hash ? `#${hash}` : ''}` } };
   try {
@@ -1404,8 +1468,22 @@ export async function notify(s, { title, body = '', tag = '', hash = '', kind = 
     };
   } catch {}
 }
+// Notices that come together (the first sign-in on a device, catching up
+// after a while away) are one banner: the first, and how many more.
+let bannerQueue = null;
+function queueBanner(s, notice) {
+  if (bannerQueue) return void bannerQueue.push(notice);
+  bannerQueue = [notice];
+  setTimeout(() => {
+    const list = bannerQueue;
+    bannerQueue = null;
+    if (list.length === 1) return banner(s, list[0]);
+    const zh = !/^en/i.test(globalThis.navigator?.language || '');
+    banner(s, { title: list[0].title, body: zh ? `還有 ${list.length - 1} 則通知` : `and ${list.length - 1} more`, hash: list[0].hash, more: list.slice(1) });
+  }, 700);
+}
 let bannerEl = null;
-function banner(s, { title, body, hash }) {
+function banner(s, { title, body, hash, more = [] }) {
   bannerEl?.remove();
   const el = node('div', { class: 'q-banner', role: 'status', style: `--q-accent:${APPS[s.app].color}` }, [
     node('img', { src: './favicon.svg', alt: '' }),
@@ -1415,13 +1493,21 @@ function banner(s, { title, body, hash }) {
     el.classList.add('out');
     setTimeout(() => el.remove(), 250);
   };
+  let open = false;
   el.addEventListener('click', () => {
+    // A grouped banner: the first tap lists them all, the next closes it.
+    if (more.length && !open) {
+      open = true;
+      el.classList.add('open');
+      el.append(node('ul', { class: 'q-banner-more' }, more.map(n => node('li', {}, [node('strong', { text: n.title }), n.body ? node('span', { text: n.body }) : null]))));
+      return;
+    }
     if (hash) location.hash = hash;
     gone();
   });
   document.body.append(el);
   bannerEl = el;
-  setTimeout(gone, 5000);
+  setTimeout(() => !open && gone(), more.length ? 7000 : 5000);
 }
 
 // ---- Shell: installed-only on phones, and always the newest version ------------------------

@@ -24,7 +24,7 @@ import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
   APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, notify, notifyOn, ask, translate, randomId as quadraId
+  affinity, helpUrl, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -136,6 +136,8 @@ let saveTimer;
 let syncTimer;
 function commit(account, { sync = true } = {}) {
   state.account = account;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(syncPush, 3000);
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
@@ -147,6 +149,32 @@ function commit(account, { sync = true } = {}) {
     clearTimeout(syncTimer);
     syncTimer = setTimeout(syncNow, 1200);
   }
+}
+
+// What to be told while the app is closed (the Worker watches the prices):
+// price alerts and open orders reaching their price, and each monthly plan's
+// day. The app catches up on the rest when it's opened.
+let pushTimer = 0;
+function syncPush() {
+  const account = state.account;
+  if (!account) return;
+  const now = Date.now();
+  const items = [];
+  for (const a of activeAlerts(account)) {
+    if (a.hit || BONDS[a.symbol]) continue;
+    items.push({ at: a.since, until: a.since + 30 * 86_400_000, title: `🔔 ${t('alertTitle')}`, body: `${nameOf(a.symbol)} ${a.op === 'above' ? '≥' : '≤'} ${a.price}`, tag: `alert:${a.id}`, hash: 'portfolio', kind: 'alert', check: { yahoo: a.symbol, op: a.op, price: a.price } });
+  }
+  for (const o of account.orders.filter(x => x.status === 'open' && !BONDS[x.symbol] && (x.type === 'limit' || x.type === 'stop'))) {
+    const price = Number(o.type === 'limit' ? o.limit : o.stop);
+    if (!(price > 0)) continue;
+    const op = (o.type === 'limit') === (o.side === 'buy') ? 'below' : 'above';
+    items.push({ at: o.t, until: o.t + 30 * 86_400_000, title: t('noticeReached'), body: `${t(o.side)} ${nameOf(o.symbol)} @ ${fmtPrice(price, o.currency)}`, tag: `fill:${o.id}`, hash: 'history', kind: 'fill', check: { yahoo: o.symbol, op, price } });
+  }
+  for (const p of activePlans(account)) {
+    const next = nextPlanRun(p, now);
+    if (next) items.push({ at: next + 9 * 3_600_000, title: t('planTitle'), body: t('noticePlanDay', { name: nameOf(p.symbol), amount: money(p.amount, BASE) }), tag: `plan:${p.id}:${next}`, hash: 'portfolio', kind: 'fill' });
+  }
+  schedulePush(q, items);
 }
 
 // ---- Names and labels ------------------------------------------------------------
@@ -582,14 +610,43 @@ function setBusy(busy) {
 
 // ---- Toasts -------------------------------------------------------------------------
 
+// Toasts that come together (catching up on fills, plans, interest after a
+// while away) show as one: the first two, then how many more (tap for all).
+let toastBatch = null;
 function toast(text, kind = '') {
+  if (toastBatch) return void toastBatch.push([text, kind]);
+  toastBatch = [[text, kind]];
+  setTimeout(() => {
+    const list = toastBatch;
+    toastBatch = null;
+    if (list.length <= 2) return list.forEach(([x, k]) => showToast(x, k));
+    showToast(list[0][0], list[0][1], list.slice(1));
+  }, 500);
+}
+function showToast(text, kind = '', more = []) {
   const box = $('toasts');
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
   el.textContent = text;
+  let open = false;
+  if (more.length) {
+    const tail = document.createElement('small');
+    tail.className = 'toast-more';
+    tail.textContent = t('toastMore', { n: more.length });
+    el.append(tail);
+    el.addEventListener('click', () => {
+      if (open) return el.remove();
+      open = true;
+      tail.remove();
+      const ul = document.createElement('ul');
+      for (const [x] of more) ul.append(Object.assign(document.createElement('li'), { textContent: x }));
+      el.append(ul);
+    });
+  }
   box.append(el);
-  setTimeout(() => el.classList.add('out'), 4200);
-  setTimeout(() => el.remove(), 4700);
+  const wait = more.length ? 7000 : 4200;
+  setTimeout(() => !open && el.classList.add('out'), wait);
+  setTimeout(() => !open && el.remove(), wait + 500);
 }
 
 // ---- Shared bits of markup --------------------------------------------------------

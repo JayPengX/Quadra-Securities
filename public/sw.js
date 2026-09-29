@@ -93,3 +93,16 @@ self.addEventListener('notificationclick', event => {
     })
   );
 });
+
+// A notice the Worker sent while the app was closed (Shared-Proxy/push.js):
+// shown as it came; a tap opens the app where it points.
+self.addEventListener('push', event => {
+  let data;
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: event.data?.text() || '' };
+  }
+  const icon = new URL('./icons/icon-192.png', self.registration.scope).href;
+  event.waitUntil(self.registration.showNotification(data.title || 'Quadra', { body: data.body || '', tag: data.tag || undefined, icon, badge: icon, data: { url: data.url || self.registration.scope } }));
+});

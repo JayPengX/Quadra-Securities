@@ -594,8 +594,11 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 /* ---- Toasts --------------------------------------------------------------------------- */
 .toasts { position: fixed; left: 50%; bottom: calc(20px + var(--bottom-nav)); transform: translateX(-50%); z-index: 100; display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); pointer-events: none; }
 .toast { background: var(--text-primary); color: var(--page); border-radius: 12px; padding: 10px 14px; font-size: 0.86rem; box-shadow: var(--shadow); transition: opacity 0.4s, transform 0.4s; animation: rise 0.2s ease-out; }
+.toast:has(.toast-more), .toast:has(ul) { pointer-events: auto; cursor: pointer; }
 .toast.good { border-left: 4px solid var(--accent); }
 .toast.bad { border-left: 4px solid var(--warn); }
+.toast-more { display: block; margin-top: 4px; opacity: 0.75; font-size: 0.78rem; }
+.toast ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .toast.out { opacity: 0; transform: translateY(8px); }
 
 /* ---- Learn ----------------------------------------------------------------------------- */

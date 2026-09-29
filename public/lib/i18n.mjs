@@ -565,6 +565,9 @@ export const STRINGS = {
     alertsTitle: '到價通知',
 
     planTitle: '定期定額',
+    toastMore: '還有 {n} 則，點一下看全部',
+    noticeReached: '掛單到價了',
+    noticePlanDay: '今天定期定額：{name} {amount}，打開 App 就會買進',
     planIntro: '每個月固定一天、自動買固定金額。價格低的月份買到比較多股、高的月份買比較少，長期下來不用猜高低點——這叫平均成本法，是最多上班族用的投資方式。',
     planAmount: '每月金額',
     planDay: '扣款日',
@@ -1380,6 +1383,9 @@ export const STRINGS = {
     alertNotifyNote: 'Turn on notifications in the account sheet (top right) to be told while the app is in the background.',
     alertsTitle: 'Price alerts',
 
+    toastMore: 'and {n} more, tap to see them',
+    noticeReached: 'An order’s price was reached',
+    noticePlanDay: 'Monthly plan today: {name} {amount}, bought when you open the app',
     planTitle: 'Monthly plan',
     planIntro: 'Buy a fixed amount on the same day every month, automatically. Cheap months buy more shares, dear months fewer, and there’s no guessing highs and lows. It’s called dollar-cost averaging, and it’s how most working people invest.',
     planAmount: 'Every month',

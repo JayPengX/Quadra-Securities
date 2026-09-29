@@ -1172,6 +1172,10 @@ dialog.q-newpass::backdrop { background: var(--q-page); }
 .q-banner div { display: grid; gap: 2px; min-width: 0; }
 .q-banner strong { font-size: 14px; font-weight: 800; }
 .q-banner span { font-size: 13px; color: var(--q-text-2); line-height: 1.35; }
+.q-banner.open { flex-wrap: wrap; align-items: flex-start; max-height: 70vh; overflow-y: auto; }
+.q-banner-more { list-style: none; margin: 4px 0 0; padding: 8px 0 0; border-top: 1px solid var(--q-border); width: 100%; display: grid; gap: 8px; }
+.q-banner-more li { display: grid; gap: 1px; }
+.q-banner-more strong { font-size: 13px; }
 @keyframes q-banner-in { from { opacity: 0; transform: translate(-50%, -16px); } }
 
 /* ---- Notification settings (account sheet) ---- */

@@ -1182,8 +1182,8 @@ export function paydayText(lang, now = Date.now(), wallet = null) {
   const next = `${d.getUTCMonth() + 1}/1`;
   const amount = money(wallet ? paydayFor(wallet) : ECONOMY.monthly);
   return lang === 'en'
-    ? `Next allowance ${next}: ${amount} (by what you're worth: ${ECONOMY.payTiers.map(t => money(t[1]).replace('NT$', '')).join(' / ')})`
-    : `下次津貼 ${next}：${amount}（依資產，越少領越多：${ECONOMY.payTiers.map(t => money(t[1]).replace('NT$', '')).join(' / ')}）`;
+    ? `Next allowance ${amount} · ${next}`
+    : `下次津貼 ${amount} · ${next}`;
 }
 
 // The account at a glance: its number, since when, this month's money in
@@ -1288,7 +1288,7 @@ export function plusCard(s, { compact = false } = {}) {
       : T(`年繳 ${money(PLUS.year)}，省下兩個月`, `${money(PLUS.year)} a year: two months free`);
   return node('button', { class: `q-plus-card${member ? ' member' : ''}${compact ? ' compact' : ''}`, type: 'button', onclick: () => openPlus(s) }, [
     node('span', { class: 'q-plus-top' }, [plusGlyph(), node('span', { class: 'q-plus-word', text: 'QUADRA PLUS' }), node('span', { class: 'q-plus-go', text: member ? T('管理', 'Manage') : price === 0 ? T('免費試用', 'Try free') : T('加入', 'Join') })]),
-    compact ? null : node('span', { class: 'q-plus-pitch', text: T('手續費 5 折、活存 2%、串關加成加倍、單字包半價', 'Half-price trades, 2% on cash, doubled parlay boosts, half-price word packs') }),
+    compact ? null : node('span', { class: 'q-plus-pitch', text: T('手續費 5 折 · 活存 2% · 串關加成加倍', 'Half-price trades · 2% on cash · double parlay boosts') }),
     node('span', { class: 'q-plus-status', text: status })
   ].filter(Boolean));
 }
@@ -1340,7 +1340,7 @@ export function openPlus(s) {
       ].filter(Boolean))
     ));
     const leave = async () => {
-      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消續訂？', 'Stop renewing?'), body: T('已付的月份照常享有所有會員權益，之後不再自動扣款。', 'You keep every perk for the months already paid; nothing more is charged.'), ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
+      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消續訂？', 'Stop renewing?'), body: T('已付月份照常使用，之後不再扣款。', 'Paid months stay; no more charges.'), ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
       await s.plus(false);
     };
     const until = plusUntil(s.wallet);
@@ -1356,7 +1356,7 @@ export function openPlus(s) {
       : [
           planPick,
           run(plan === 'year' ? T(`年繳加入 · ${money(PLUS.year)}`, `Join yearly · ${money(PLUS.year)}`) : price === 0 ? T('免費試用到月底', 'Try it free this month') : T(`月繳加入 · 本月 ${money(price)}`, `Join monthly · ${money(price)} this month`), join, 'q-plus-cta'),
-          node('p', { class: 'q-plus-fine', text: plan === 'year' ? T('從 Quadra 餘額扣款，十二個月立即生效，到期自動續約。', 'From your Quadra balance: twelve months start now and renew each year.') : price === 0 ? T(`本月免費。${nextText}起每月 ${money(PLUS.fee)}，從 Quadra 餘額扣款。`, `Free this month. From ${nextText}, ${money(PLUS.fee)} a month from your Quadra balance.`) : T(`本月依剩下天數計費，之後每月 1 日 ${money(PLUS.fee)}。`, `This month by the days left, then ${money(PLUS.fee)} on the 1st.`) })
+          node('p', { class: 'q-plus-fine', text: plan === 'year' ? T('十二個月立即生效，每年自動續約。', 'Twelve months from now, renews yearly.') : price === 0 ? T(`本月免費。${nextText}起每月 ${money(PLUS.fee)}，從 Quadra 餘額扣款。`, `Free this month. From ${nextText}, ${money(PLUS.fee)} a month from your Quadra balance.`) : T(`本月依剩下天數計費，之後每月 1 日 ${money(PLUS.fee)}。`, `This month by the days left, then ${money(PLUS.fee)} on the 1st.`) })
         ];
     const perks = plusPerks(s.lang);
     const group = (app, title) =>
@@ -1446,7 +1446,7 @@ export function accountSheet(s, { extra = null } = {}) {
       }
       left.textContent = T(`${Math.ceil(ms / 60_000)} 分鐘內有效，只能用一次`, `Valid ${Math.ceil(ms / 60_000)} more min, once`);
     };
-    device.replaceChildren(node('span', { class: 'q-device-label', text: T('裝置代碼', 'Device code') }), node('strong', { class: 'q-device-code num', text: formatPass(code) }), left, node('span', { class: 'q-device-how', text: T('在另一台裝置打開任一個 Quadra App，輸入這組代碼登入。', 'On the other device, open any Quadra app and enter this code to sign in.') }));
+    device.replaceChildren(node('span', { class: 'q-device-label', text: T('裝置代碼', 'Device code') }), node('strong', { class: 'q-device-code num', text: formatPass(code) }), left, node('span', { class: 'q-device-how', text: T('在另一台裝置輸入這組代碼登入', 'Enter it on the other device to sign in') }));
     device.hidden = false;
     paint();
     tick = setInterval(paint, 15_000);
@@ -1468,12 +1468,12 @@ export function accountSheet(s, { extra = null } = {}) {
     node('h3', { class: 'q-sheet-h', text: T('帳戶安全', 'Security') }),
     node('div', { class: 'q-rows' }, [
       act(T('登出其他所有裝置', 'Sign out every other device'), async () => {
-        if (!(await ask({ lang: s.lang, icon: '🔒', title: T('登出其他所有裝置？', 'Sign out every other device?'), body: T('除了這台以外，所有裝置都會登出，要用通行碼或裝置代碼重新登入。', 'Every device except this one is signed out and needs your pass or a device code to sign in again.'), ok: T('全部登出', 'Sign them out'), danger: true }))) return;
+        if (!(await ask({ lang: s.lang, icon: '🔒', title: T('登出其他所有裝置？', 'Sign out every other device?'), body: T('除了這台，所有裝置都會登出。', 'Every device but this one is signed out.'), ok: T('全部登出', 'Sign them out'), danger: true }))) return;
         await s.signOutEverywhere();
         note.textContent = T('其他裝置都已登出。', 'Every other device is signed out.');
       }),
       act(T('更換通行碼', 'Change my pass'), async () => {
-        if (!(await ask({ lang: s.lang, icon: '🔑', title: T('換一組新的通行碼？', 'Get a new pass?'), body: T('帳戶和所有資料都會移到新通行碼，舊通行碼立即失效，其他裝置也會登出。新通行碼只會顯示一次，請記下來。', 'Everything moves to the new pass, the old one stops working at once and every other device is signed out. The new pass is shown once: write it down.'), ok: T('換新通行碼', 'Get a new pass'), danger: true }))) return;
+        if (!(await ask({ lang: s.lang, icon: '🔑', title: T('換一組新的通行碼？', 'Get a new pass?'), body: T('舊通行碼立即失效，其他裝置會登出。新通行碼只顯示一次。', 'The old pass stops working and other devices sign out. The new one is shown once.'), ok: T('換新通行碼', 'Get a new pass'), danger: true }))) return;
         const passcode = await s.rotate();
         // The sheet closes first: a modal sheet stays above everything else,
         // so the new pass would open behind it.
@@ -1484,14 +1484,14 @@ export function accountSheet(s, { extra = null } = {}) {
       act(
         T('在這台裝置登出', 'Sign out on this device'),
         async () => {
-          if (!(await ask({ lang: s.lang, icon: '👋', title: T('在這台裝置登出？', 'Sign out on this device?'), body: T('資料都保留在 Quadra Pass，之後用通行碼或裝置代碼再登入。', 'Everything stays on your Quadra Pass; sign in again with the pass or a device code.'), ok: T('登出', 'Sign out') }))) return;
+          if (!(await ask({ lang: s.lang, icon: '👋', title: T('在這台裝置登出？', 'Sign out on this device?'), body: T('資料都保留在 Quadra Pass。', 'Everything stays on your Quadra Pass.'), ok: T('登出', 'Sign out') }))) return;
           s.signOut();
           location.reload();
         },
         'q-row-btn danger'
       )
     ]),
-    node('p', { class: 'q-sheet-sub', text: T('通行碼只在建立或更換時顯示一次，裝置上不會保存。忘記了？在已登入的裝置按「更換通行碼」。', 'Your pass is shown only when it’s made or changed, and never kept on a device. Forgot it? Choose “Change my pass” on a signed-in device.') }),
+    node('p', { class: 'q-sheet-sub', text: T('忘記通行碼？在已登入的裝置按「更換通行碼」。', 'Forgot your pass? Choose “Change my pass” on a signed-in device.') }),
     note
   );
   document.body.append(dialog);
@@ -1534,7 +1534,7 @@ export function showNewPass(s, passcode) {
         node('p', { class: 'q-gate-brand', text: 'QUADRA PASS' }),
         node('h1', { class: 'q-gate-title', text: T('這是你的新通行碼', 'This is your new pass') }),
         node('div', { class: 'q-pass-code' }, [node('strong', { class: 'num', text: shown }), copy]),
-        node('p', { class: 'q-gate-lede', text: T('它只會顯示這一次，裝置上也不會保存，舊的通行碼已經失效。記在安全的地方：在新裝置登入、找回帳戶都要用到它。', 'It’s shown only this once and isn’t kept on any device; the old pass no longer works. Keep it somewhere safe: you need it to sign in on a new device or get your account back.') }),
+        node('p', { class: 'q-gate-lede', text: T('只會顯示這一次，請記在安全的地方。', 'Shown only once: keep it somewhere safe.') }),
         node('label', { class: 'q-newpass-label', text: T('記好以後，輸入通行碼的最後 5 個字確認：', 'Once it’s saved, type its last 5 characters to confirm:') }),
         check,
         hint,
@@ -1679,7 +1679,7 @@ function notifyRows(s, note) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
   const supported = 'Notification' in globalThis;
-  const state = () => (!supported ? T('這個瀏覽器不支援', 'Not supported here') : Notification.permission === 'denied' ? T('被系統封鎖：請到系統設定允許', 'Blocked: allow them in the system settings') : notifyOn() ? T('開啟：App 沒開著時也會通知', 'On: notices arrive while the app is closed too') : T('關閉：只在 App 開著時顯示在畫面上', 'Off: notices show only while the app is open'));
+  const state = () => (!supported ? T('這個瀏覽器不支援', 'Not supported here') : Notification.permission === 'denied' ? T('已封鎖：請到系統設定允許', 'Blocked in system settings') : notifyOn() ? T('開啟', 'On') : T('關閉', 'Off'));
   const sub = node('small', { class: 'q-notice-sub', text: state() });
   const master = node('div', { class: 'q-notice-row master' }, [
     node('span', { class: 'q-notice-icon', 'aria-hidden': 'true', text: '🔔' }),
@@ -1696,7 +1696,7 @@ function notifyRows(s, note) {
             writeStore(KEY.notify, '1');
             enablePush(s, true);
           }
-          else note.textContent = T('系統沒有允許通知：請到系統設定開啟。', 'Notifications aren’t allowed: turn them on in the system settings.');
+          else note.textContent = T('請到系統設定允許通知。', 'Allow notifications in system settings.');
           sub.textContent = state();
           return p === 'granted';
         })

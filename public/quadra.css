@@ -1281,3 +1281,10 @@ dialog.q-newpass::backdrop { background: var(--q-page); }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* The focus ring for the keyboard only: a sheet opening or a button focused
+   in code (iOS counts those as :focus-visible) shows no blue square; a Tab
+   or an arrow key brings it back (quadra.mjs sets data-q-keys). */
+html:not([data-q-keys]) :is(:focus-visible, :focus):not(input, textarea, select) {
+  outline: none !important;
+}

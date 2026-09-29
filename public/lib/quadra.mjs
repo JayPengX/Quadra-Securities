@@ -86,6 +86,14 @@ export const formatPass = code => (code && code.length === 10 ? `${code.slice(0,
 // the account's id, never the pass itself: the pass is typed to sign in,
 // shown once when it's made, and that's all.
 
+// Keyboard or touch: the focus ring shows only after a key that moves focus
+// (quadra.css), never for focus a tap or the code put somewhere.
+if (typeof document !== 'undefined') {
+  const root = document.documentElement;
+  document.addEventListener('keydown', e => ['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && root.setAttribute('data-q-keys', ''), true);
+  document.addEventListener('pointerdown', () => root.removeAttribute('data-q-keys'), true);
+}
+
 const KEY = { refresh: 'quadra.refresh', account: 'quadra.account', wallet: 'quadra.wallet', aff: 'quadra.aff', dismiss: 'quadra.dismiss', notify: 'quadra.notify', oldPass: 'quadra.pass' };
 function readStore(key) {
   try {

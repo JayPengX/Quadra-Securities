@@ -785,7 +785,7 @@ function renderHomeRows() {
         <span class="acct-main"><small>${h(t('netWorth'))}${plusAt() ? ' <b class="acct-plus">✦ PLUS</b>' : ''}</small><strong class="num">${h(money(v.netWorth, BASE))}</strong></span>
         <span class="acct-day ${dirClass(v.dayChange)}"><small>${h(t('today'))}</small><strong class="num">${h(money(v.dayChange, BASE, { sign: true }))}</strong><em class="num">${base ? h(pct(v.dayChange / base)) : '—'}</em></span>
       </button>
-      ${overdrawnBy(v) >= 1 ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span><small>${h(t('buyingPowerSub'))}</small></div>`}`
+      ${overdrawnBy(v) >= 1 ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span></div>`}`
     : '';
   const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}"><span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
   const up = movers(state.quotes, { up: true }).slice(0, 5);
@@ -1741,7 +1741,7 @@ function renderPortfolio() {
     </div>
     <div class="card">
       <h3 class="card-title">${h(t('positions'))} <span class="count">${v.positions.length}</span></h3>
-      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button><a class="ghost-button" href="${h(helpUrl('stock'))}" data-go="vocab" data-hash="help=stock">${h(t('newHere'))}</a></div></div>`}
+      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button></div></div>`}
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
     ${cashCardHtml(v, heldTWD, unsettledNow, heldFor)}
@@ -1766,7 +1766,7 @@ function cashCardHtml(v, heldTWD, unsettledNow, heldFor) {
       <span class="cash-chip"><small>${h(t('cashInterestRate'))}</small><strong class="num">${h(pct(CASH_RATE, { digits: 2, sign: false }))}</strong></span>
     </div>
     <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
-    <p class="note">${h(t('walletsNote'))} ${h(t('poolNote'))}</p>
+    <p class="note">${h(t('poolNote'))}</p>
   </div>`;
 }
 

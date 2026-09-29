@@ -1638,6 +1638,19 @@ function errorText(r) {
 
 // ---- Portfolio tab ----------------------------------------------------------------------
 
+// Money not working: a nudge to put it into the market (or borrow on top of it).
+function idleCashHtml(v, heldTWD) {
+  const idle = v.cashTWD - heldTWD;
+  if (!(idle >= 10_000) || idle < v.netWorth * 0.2) return '';
+  return `<div class="card idle-card">
+    <div class="idle-top"><span class="idle-icon" aria-hidden="true">💤</span><div><strong>${h(t('idleTitle', { v: money(idle, BASE) }))}</strong><small>${h(t('idleSub'))}</small></div></div>
+    <div class="button-row">
+      <button class="primary-button" type="button" data-action="open" data-symbol="0050.TW">${h(t('idleEtf'))}</button>
+      <button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('idleHot'))}</button>
+    </div>
+  </div>`;
+}
+
 function renderPortfolio() {
   const box = $('portfolio-body');
   if (!state.account) {
@@ -1676,6 +1689,7 @@ function renderPortfolio() {
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
       </div>
     </div>
+    ${idleCashHtml(v, heldTWD)}
     ${marginCardHtml(v)}
     <div class="two-col">
       <div class="card">
@@ -2744,6 +2758,8 @@ document.addEventListener('click', event => {
       $('search').value = '';
       renderMarkets();
       refresh({ list: true });
+      // From an ad or a 「全部」 link: straight down to that list.
+      if (el.closest('.promo-card, .q-section-head')) requestAnimationFrame(() => $('categories')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
       break;
     case 'open':
       openDetail(el.dataset.symbol);

@@ -567,7 +567,7 @@ export const STRINGS = {
     planTitle: '定期定額',
     toastMore: '還有 {n} 則，點一下看全部',
     noticeReached: '委託到價了',
-    noticeReachedBody: '{name} 到 {price}，打開 App 就會{side}',
+    noticeReachedBody: '{name} 已到 {price}，打開 App 就會{side}',
     noticePlanTitle: '今天定期定額',
     noticePlanDay: '{name} {amount}，打開 App 就會買進',
     planIntro: '每個月固定一天、自動買固定金額。價格低的月份買到比較多股、高的月份買比較少，長期下來不用猜高低點——這叫平均成本法，是最多上班族用的投資方式。',

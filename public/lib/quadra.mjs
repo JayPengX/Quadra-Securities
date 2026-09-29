@@ -1986,6 +1986,148 @@ function steadyTabBar() {
 }
 steadyTabBar();
 
+// ---- The app frame: the tab bar and the top-right, the same in every app -------------------
+//
+// Every app's header is the same markup (index.html):
+//   <header class="q-appbar"><div class="q-appbar-inner">
+//     <div class="q-brand">logo, <h1 id="title">, <p id="status" class="q-status"></div>
+//     <nav id="tabs" class="q-tabbar"></nav> <div id="top-actions" class="q-actions"></div>
+//   </div></header>
+// On a phone the tabs sit at the bottom and the header is only the status
+// line and the buttons; on a wider screen it's one sticky bar.
+
+// One drawing per idea, shared by every app (24×24, stroked).
+export const ICONS = {
+  home: '<path d="M3.5 10.6 12 4l8.5 6.6"/><path d="M5.5 9.3V20h13V9.3"/><path d="M10 20v-5.4h4V20"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  live: '<circle cx="12" cy="12" r="2.3"/><path d="M8 8a5.7 5.7 0 0 0 0 8M16 8a5.7 5.7 0 0 1 0 8M5.2 5.2a9.6 9.6 0 0 0 0 13.6M18.8 5.2a9.6 9.6 0 0 1 0 13.6"/>',
+  star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
+  balls: '<circle cx="8" cy="8" r="4"/><circle cx="16.5" cy="16" r="4"/><circle cx="17" cy="7" r="2.4"/><circle cx="7.2" cy="17" r="2.4"/>',
+  ticket: '<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5V9a3 3 0 0 0 0 6v2.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5V15a3 3 0 0 0 0-6z"/><path d="M9.5 9h5M9.5 12h5M9.5 15h3"/>',
+  history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.8-6.3"/><path d="M3.5 4.5v4.3h4.3"/><path d="M12 7.5V12l3 2"/>',
+  chart: '<path d="M4 20h16"/><path d="M5 16l4.2-5 3.6 3 6.2-8"/><circle cx="19" cy="6" r="1.4"/>',
+  wallet: '<rect x="3.5" y="6.5" width="17" height="13.5" rx="3"/><path d="M8 6.5V5.3A1.8 1.8 0 0 1 9.8 3.5h4.4A1.8 1.8 0 0 1 16 5.3v1.2"/><path d="M3.5 12h17"/>',
+  exchange: '<path d="M4 8.5h14l-3.2-3.2"/><path d="M20 15.5H6l3.2 3.2"/>',
+  book: '<path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v14.5H7.5A2.5 2.5 0 0 0 5 20z"/><path d="M5 20a1.5 1.5 0 0 0 1.5 1.5H19v-4"/><path d="M9.5 7.5h6M9.5 11h4"/>',
+  gamepad: '<rect x="2.5" y="7" width="19" height="11.5" rx="5.2"/><path d="M7.5 10.8v3.9M5.6 12.75h3.8"/><circle cx="15.6" cy="11.6" r=".9"/><circle cx="17.9" cy="14" r=".9"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.4 9.4a2.7 2.7 0 0 1 5.2 1c0 1.8-2.6 2.3-2.6 3.9"/><circle cx="12" cy="17.2" r=".5"/>',
+  refresh: '<path d="M19.5 11.5a7.5 7.5 0 1 0-2.2 5.4"/><path d="M19.5 4.5v7h-7"/>'
+};
+const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || name}</svg>`;
+const reducedMotion = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+// tabBar({ tabs: [{ id, label, icon }], onSelect }) draws the tab bar in #tabs
+// and returns { select, badge, label, hide, current }.
+//   onSelect(id, { again }): the app shows that tab (its own rendering), and
+//     calls select(id) for the bar, the panels (#panel-<id>) and the address.
+//   Tapping the tab that's already open scrolls it back to the top; tapped
+//   again at the top, onSelect(id, { again: true }) (a tab may reset itself).
+//   Each tab keeps its place: switching back returns to where it was
+//   (select(id, { top: true }) starts it at the top instead).
+//   hash(id): the address for a tab ('#<id>' by default; null leaves it).
+export function tabBar({ tabs, onSelect, hash = id => `#${id}`, nav = document.getElementById('tabs'), label: ariaLabel = '' } = {}) {
+  const buttons = new Map();
+  const places = {};
+  let current = null;
+  nav.classList.add('q-tabbar');
+  nav.setAttribute('role', 'tablist');
+  if (ariaLabel) nav.setAttribute('aria-label', ariaLabel);
+  nav.style.setProperty('--q-tabs', String(tabs.length));
+  const again = id => {
+    if ((globalThis.scrollY || 0) > 4) globalThis.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' });
+    else onSelect(id, { again: true });
+  };
+  for (const tab of tabs) {
+    const b = node('button', { class: 'q-tab', id: `tab-${tab.id}`, type: 'button', role: 'tab', 'data-tab': tab.id, 'aria-controls': `panel-${tab.id}`, 'aria-selected': 'false', tabindex: '-1' });
+    b.innerHTML = `<span class="q-tab-icon">${icon(tab.icon)}<b class="q-tab-badge" hidden></b></span><span class="q-tab-label"></span>`;
+    b.querySelector('.q-tab-label').textContent = tab.label;
+    b.addEventListener('click', () => (tab.id === current ? again(tab.id) : onSelect(tab.id, { again: false })));
+    buttons.set(tab.id, b);
+  }
+  nav.replaceChildren(...buttons.values());
+  nav.addEventListener('keydown', event => {
+    const shown = [...buttons].filter(([, b]) => !b.hidden).map(([id]) => id);
+    const i = shown.indexOf(current);
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (!step || i < 0) return;
+    event.preventDefault();
+    const next = shown[(i + step + shown.length) % shown.length];
+    onSelect(next, { again: false });
+    buttons.get(next)?.focus();
+  });
+  const api = {
+    get current() {
+      return current;
+    },
+    select(id, { top = false } = {}) {
+      const changed = current !== id;
+      const first = current == null;
+      if (changed && !first) places[current] = globalThis.scrollY || 0;
+      current = id;
+      for (const [tid, b] of buttons) {
+        const on = tid === id;
+        b.setAttribute('aria-selected', String(on));
+        b.tabIndex = on ? 0 : -1;
+        const panel = document.getElementById(`panel-${tid}`);
+        if (panel) panel.hidden = !on;
+      }
+      // Only a change of tab moves the address (the first paint leaves it:
+      // the app reads it to start).
+      try {
+        const h = changed && !first ? hash(id) : null;
+        if (h != null && location.hash !== h) history.replaceState(null, '', h || location.pathname + location.search);
+      } catch {}
+      if (changed && !first) {
+        // After the app has drawn the tab (it does so right after select).
+        const y = top ? 0 : places[id] || 0;
+        globalThis.scrollTo?.(0, y);
+        if (y) requestAnimationFrame(() => globalThis.scrollTo(0, y));
+      }
+    },
+    // A count (a number or short text) on a tab's icon; 0/''/null hides it.
+    // tone: 'bad' (red, default), 'warn', 'accent'; dot: a dot without text.
+    badge(id, value, { tone = 'bad', dot = false } = {}) {
+      const b = buttons.get(id)?.querySelector('.q-tab-badge');
+      if (!b) return;
+      const show = dot ? Boolean(value) : value != null && value !== '' && value !== 0 && value !== false;
+      b.hidden = !show;
+      b.textContent = show && !dot ? String(value) : '';
+      b.className = `q-tab-badge${dot ? ' dot' : ''}${tone !== 'bad' ? ` ${tone}` : ''}`;
+    },
+    label(id, text) {
+      const l = buttons.get(id)?.querySelector('.q-tab-label');
+      if (l && l.textContent !== text) l.textContent = text;
+    },
+    hide(id, hidden = true) {
+      const b = buttons.get(id);
+      if (b) b.hidden = Boolean(hidden);
+    }
+  };
+  return api;
+}
+
+// topActions(s, { help, refresh, extra }): the top-right of every app, in
+// #top-actions: 說明 · 重新整理 (apps with live data) · the account.
+//   help(): opens the help (default: this app's guide in Rewards).
+//   refresh(): reloads the app's data; the button (id="refresh") spins while
+//     it's disabled, so apps set refresh.disabled while loading.
+export function topActions(s, { help = null, refresh = null, extra = null, into = document.getElementById('top-actions') } = {}) {
+  const en = s.lang === 'en';
+  const helpBtn = node('button', { class: 'q-icon-btn', id: 'help-button', type: 'button', 'aria-label': en ? 'Help' : '說明', title: en ? 'Help' : '說明' });
+  helpBtn.innerHTML = icon('help');
+  helpBtn.addEventListener('click', () => (help ? help() : s.go('vocab', `help=${s.app}`)));
+  let refreshBtn = null;
+  if (refresh) {
+    refreshBtn = node('button', { class: 'q-icon-btn q-refresh', id: 'refresh', type: 'button', 'aria-label': en ? 'Refresh' : '重新整理', title: en ? 'Refresh' : '重新整理' });
+    refreshBtn.innerHTML = icon('refresh');
+    refreshBtn.addEventListener('click', () => refresh());
+  }
+  into.classList.add('q-actions');
+  into.replaceChildren(...[helpBtn, refreshBtn, accountButton(s, { extra })].filter(Boolean));
+  return { help: helpBtn, refresh: refreshBtn };
+}
+
 // Big numbers never wrap: they shrink (to 60% at most) to fit their box.
 export function fitNumbers(nodes) {
   for (const el of nodes) {

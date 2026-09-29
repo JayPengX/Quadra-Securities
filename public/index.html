@@ -90,28 +90,21 @@
     setTimeout(function () { if (!window.__stockStarted) window.__stockFail(); }, 15000);
   })();
 </script>
-<header class="appbar">
-  <div class="appbar-inner">
-    <div class="brand">
-      <img class="brand-logo" src="./favicon.svg" alt="" width="36" height="36" />
-      <div class="brand-text">
+<header class="q-appbar">
+  <div class="q-appbar-inner">
+    <div class="q-brand">
+      <img class="q-brand-logo" src="./favicon.svg" alt="" width="34" height="34" />
+      <div class="q-brand-text">
         <h1 id="title">Quadra Securities</h1>
-        <p id="status" class="status" aria-live="polite"></p>
+        <p id="status" class="q-status" aria-live="polite"></p>
       </div>
     </div>
-    <nav id="tabs" class="tabs q-tabbar" role="tablist">
-      <button id="tab-markets" class="tab q-tab" role="tab" type="button" data-tab="markets"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><path d="M5 16l4-5 4 3 6-8"/><circle cx="19" cy="6" r="1.5"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
-      <button id="tab-portfolio" class="tab q-tab" role="tab" type="button" data-tab="portfolio"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 12h18"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
-      <button id="tab-fx" class="tab q-tab" role="tab" type="button" data-tab="fx"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h13l-3-3"/><path d="M20 16H7l3 3"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
-      <button id="tab-history" class="tab q-tab" role="tab" type="button" data-tab="history"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg><span class="tab-label"></span><span class="tab-badge" hidden></span></button>
-    </nav>
-    <div id="account-slot" class="account-slot"></div>
-    <button id="refresh" class="icon-button" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg></button>
+    <nav id="tabs" class="q-tabbar" role="tablist"></nav>
+    <div id="top-actions" class="q-actions"></div>
   </div>
 </header>
 
 <main class="page">
-  <div id="mobile-bar" class="mobile-bar"></div>
   <p id="notice" class="notice" role="note" hidden></p>
 
   <div id="panel-markets" class="tab-panel" role="tabpanel" aria-labelledby="tab-markets">

@@ -33,7 +33,6 @@
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #4a3aa7; --c8: #e34948;
   --radius: var(--q-radius);
   --radius-sm: var(--q-radius-sm);
-  --bottom-nav: 0px;
   font-family: var(--q-font);
 }
 @media (prefers-color-scheme: dark) {
@@ -105,74 +104,17 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0; }
 /* The loading screen is the Quadra one (quadra.css). */
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---- App bar and tabs --------------------------------------------------------- */
-.appbar {
-  position: sticky; top: 0; z-index: 10;
-  background: var(--bar-bg); backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px);
-  border-bottom: 1px solid var(--border);
-}
-.appbar-inner { max-width: 1120px; margin: 0 auto; padding: 8px max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left)); display: flex; align-items: center; gap: 12px; }
-/* Opened from the home screen (iPad, iPhone, Android): the page runs under
-   the status bar, so the bar starts below it; and a solid bar, since a
-   see-through blurred one under the status bar looks smeared on iPadOS. */
-.appbar { padding-top: var(--q-top, env(safe-area-inset-top)); }
-@media (display-mode: standalone) {
-  .appbar { background: var(--page); backdrop-filter: none; -webkit-backdrop-filter: none; }
-}
-.brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
-.brand-logo { width: 36px; height: 36px; border-radius: 10px; flex: none; box-shadow: var(--shadow-sm); }
-.brand-text { min-width: 0; }
-h1 { font-size: 1.1rem; letter-spacing: -0.01em; line-height: 1.2; }
-.status { font-size: 0.72rem; color: var(--text-muted); overflow-wrap: anywhere; }
+/* ---- Buttons with an icon (the header and tab bar are the kit's) ---- */
 .icon-button {
   flex: none; width: 38px; height: 38px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface);
   display: grid; place-items: center; box-shadow: var(--shadow-sm); padding: 0; font-size: 1.1rem;
 }
 .icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-#refresh:disabled { opacity: 1; }
-#refresh:disabled svg { animation: spin 0.9s linear infinite; }
 .icon-button.star.on { color: #eab308; }
 @media (hover: hover) { .icon-button:hover { background: var(--accent-wash); } }
 
-.tabs { display: flex; gap: 2px; padding: 3px; border-radius: 14px; background: var(--surface-sunken); }
-.tab {
-  position: relative; display: flex; align-items: center; gap: 6px; border: 0; background: none; color: var(--text-secondary);
-  padding: 7px 14px; border-radius: 11px; font-size: 0.9rem; font-weight: 600; white-space: nowrap; transition: background 0.15s, color 0.15s;
-}
-.tab svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-@media (hover: hover) { .tab:hover { color: var(--text-primary); } }
-.tab[aria-selected='true'] { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); }
-.tab-badge {
-  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--warn); color: #fff;
-  font-size: 0.7rem; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
-}
-.mobile-bar { display: none; }
-
-@media (max-width: 720px) {
-  :root { --bottom-nav: calc(62px + env(safe-area-inset-bottom)); }
-  .tabs {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; border-radius: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom));
-    background: var(--bar-bg); backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px);
-    border-top: 1px solid var(--border);
-  }
-  .tab { flex: 1 1 0; flex-direction: column; gap: 2px; padding: 6px 2px; font-size: 0.7rem; }
-  .tab svg { width: 22px; height: 22px; }
-  .tab[aria-selected='true'] { background: var(--accent-wash); box-shadow: none; }
-  .tab-badge { position: absolute; top: 2px; left: calc(50% + 6px); }
-  .mobile-bar { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: calc(var(--q-top, env(safe-area-inset-top)) + 2px) 0 10px; }
-  .mobile-bar .status { flex: 1 1 auto; }
-  .mobile-bar .icon-button { width: 34px; height: 34px; }
-}
-/* Phones: no app bar, only its tabs (fixed at the bottom). A backdrop filter
-   would make the bar the fixed tabs' containing block, so it goes too. */
-@media (max-width: 720px) {
-  .appbar { position: static; height: 0; padding-top: 0; border: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .appbar-inner { padding: 0; }
-  .brand { display: none; }
-}
-
 /* ---- Page --------------------------------------------------------------------- */
-.page { max-width: 1120px; margin: 0 auto; padding: 14px 16px calc(40px + var(--bottom-nav)); }
+.page { max-width: var(--q-page-max); margin: 0 auto; padding: 10px 16px calc(40px + var(--q-nav)); }
 .notice { font-size: 0.8rem; color: var(--notice-ink); background: var(--notice-bg); border-radius: var(--radius-sm); padding: 8px 14px; margin-bottom: 14px; }
 section { margin-bottom: 22px; }
 .section-heading { font-size: 1.12rem; letter-spacing: -0.01em; margin: 6px 0 10px; }
@@ -592,7 +534,7 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .sync-card hr { margin: 6px 0; }
 
 /* ---- Toasts --------------------------------------------------------------------------- */
-.toasts { position: fixed; left: 50%; bottom: calc(20px + var(--bottom-nav)); transform: translateX(-50%); z-index: 100; display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); pointer-events: none; }
+.toasts { position: fixed; left: 50%; bottom: calc(20px + var(--q-nav)); transform: translateX(-50%); z-index: 100; display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); pointer-events: none; }
 .toast { background: var(--text-primary); color: var(--page); border-radius: 12px; padding: 10px 14px; font-size: 0.86rem; box-shadow: var(--shadow); transition: opacity 0.4s, transform 0.4s; animation: rise 0.2s ease-out; }
 .toast:has(.toast-more), .toast:has(ul) { pointer-events: auto; cursor: pointer; }
 .toast.good { border-left: 4px solid var(--accent); }
@@ -762,8 +704,6 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 a.activity-row { color: inherit; text-decoration: none; }
 
 /* ---- Quadra v2: the account chip, the home rows, the ticket's figures ---- */
-.account-slot { flex: none; min-width: 0; }
-.mobile-bar .account-slot .q-account { min-height: 34px; font-size: 13px; }
 .home-row .q-recs { --q-gap: 16px; }
 .row-sub-note { margin: -4px 0 10px; color: var(--text-muted); font-size: 0.82rem; }
 .q-rec .rec-spark { display: block; margin-top: 2px; }
@@ -826,7 +766,6 @@ a.activity-row { color: inherit; text-decoration: none; }
 .fx-side-row .fx-input, .fx-side-row .fx-result { flex: 1 1 0; }
 
 /* Help, in the top-right like every Quadra app. */
-.help-button { display: inline-grid; place-items: center; font-weight: 800; font-size: 16px; text-decoration: none; color: var(--q-text-2); }
 
 /* The broker's featured offers: a row of bright cards at the top of 市場. */
 

@@ -24,8 +24,8 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
-  APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, accountButton, accountSheet, recordAffinity, affinityPatch, activityPatch,
-  affinity, helpUrl, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId, paydayFor, PLUS, plusMonths, plusCard, openPlus
+  APPS, ECONOMY, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, accountSheet, recordAffinity, affinityPatch, activityPatch,
+  affinity, notify, notifyOn, schedulePush, ask, translate, randomId as quadraId, paydayFor, PLUS, plusMonths, plusCard, openPlus
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -2753,21 +2753,13 @@ function renderStatus() {
   notice.textContent = state.error && !state.loaded ? t('noticeNoData') : '';
 }
 
+const TAB_ICONS = { markets: 'home', portfolio: 'wallet', fx: 'exchange', history: 'history' };
+const tabNav = tabBar({ tabs: TABS.map(id => ({ id, label: t(`tab_${id}`), icon: TAB_ICONS[id] })), onSelect: (tab, { again }) => !again && showTab(tab) });
 function renderTabs() {
-  for (const tab of TABS) {
-    const button = $(`tab-${tab}`);
-    button.setAttribute('aria-selected', String(state.tab === tab));
-    button.querySelector('.tab-label').textContent = t(`tab_${tab}`);
-    $(`panel-${tab}`).hidden = state.tab !== tab;
-  }
-  const open = state.account?.orders.filter(o => o.status === 'open').length || 0;
-  const badge = $('tab-history').querySelector('.tab-badge');
-  badge.hidden = !open;
-  badge.textContent = open;
+  tabNav.select(state.tab);
+  tabNav.badge('history', state.account?.orders.filter(o => o.status === 'open').length || 0, { tone: 'warn' });
   const v = state.account && state.loaded ? valuation() : null;
-  const alert = $('tab-fx').querySelector('.tab-badge');
-  alert.hidden = !(v && v.margin !== 'ok');
-  alert.textContent = '!';
+  tabNav.badge('fx', v && v.margin !== 'ok' ? '!' : '', { tone: 'warn' });
 }
 
 function render() {
@@ -2808,10 +2800,6 @@ function refreshDetailLive() {
 
 function showTab(tab) {
   state.tab = tab;
-  try {
-    history.replaceState(null, '', `#${tab}`);
-  } catch {}
-  window.scrollTo({ top: 0 });
   render();
   if (tab === 'markets' || tab === 'guide') refresh();
 }
@@ -2821,7 +2809,6 @@ function renderStatic() {
   document.title = t('appName');
   for (const el of document.querySelectorAll('[data-t]')) el.textContent = t(el.dataset.t);
   $('search').placeholder = t('searchPlaceholder');
-  $('refresh').setAttribute('aria-label', t('refresh'));
 }
 
 // ---- Events ---------------------------------------------------------------------------------
@@ -3231,31 +3218,12 @@ $('detail').addEventListener('click', event => {
   if (event.target === $('detail')) closeDetail();
 });
 
-for (const button of document.querySelectorAll('#tabs .tab')) button.addEventListener('click', () => showTab(button.dataset.tab));
-$('refresh').addEventListener('click', () => refresh({ list: true }));
 {
   const fromHash = location.hash.slice(1);
   if (TABS.includes(fromHash)) state.tab = fromHash;
 }
-
-// Phones: the status and refresh button move to a slim row at the top (the
-// tabs are at the bottom).
 // The same top-right in every Quadra app: help, refresh, then the account.
-const helpLink = Object.assign(document.createElement('a'), { className: 'icon-button help-button', href: helpUrl('stock'), textContent: '?' });
-helpLink.addEventListener('click', e => (e.preventDefault(), q.go('vocab', 'help=stock')));
-helpLink.setAttribute('aria-label', locale === 'en' ? 'Help' : '說明');
-{
-  const phone = matchMedia('(max-width: 720px)');
-  const place = () => {
-    if (phone.matches) $('mobile-bar').append($('status'), helpLink, $('refresh'), $('account-slot'));
-    else {
-      document.querySelector('.brand-text').append($('status'));
-      document.querySelector('.appbar-inner').append(helpLink, $('refresh'), $('account-slot'));
-    }
-  };
-  place();
-  phone.addEventListener('change', place);
-}
+topActions(q, { refresh: () => refresh({ list: true }), extra: settingsEl });
 
 // Big numbers shrink (to 60% at most) to stay on one line.
 const FIT_SELECTOR = '.stat-value, .big-price, .hero-value';
@@ -3302,7 +3270,6 @@ watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.co
 applySettings();
 loadQuotes();
 renderStatic();
-$('account-slot').append(accountButton(q, { extra: settingsEl }));
 // Quadra Plus: the months paid for, from the wallet, into the ledger's perks.
 function syncPlus(wallet) {
   const months = plusMonths(wallet);

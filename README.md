@@ -39,6 +39,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
 ### 市場 Markets
 
 - **The home:** your total and today's change at the top (a tap opens 資產), what's for you, and today's movers (top five up and down, side by side). No promotions, no nudges.
+- **Buying power** under the account strip: NT$ cash plus what margin lends right now.
 - **Search:** by Chinese name, English name or ticker. Chinese finds the curated lists; Latin letters also search Yahoo Finance, which reaches almost any listed stock, ETF or fund worldwide (`7203.T`, `0700.HK`, `SAP.DE`, `PETR4.SA` …).
 - **World markets strip:** TAIEX, S&P 500, Nasdaq, SOX, Nikkei, Hang Seng, Bitcoin, USD/TWD, the gold passbook, the US 10-year yield.
 - **Lists** (`public/lib/catalog.mjs`, about 300 items with Chinese names): Taiwan stocks (TWSE and TPEx), Taiwan ETFs (0050, 0056, 00878, leveraged and inverse ones …), US stocks, US ETFs, government bonds (see below), bond ETFs (Taiwan's bond ETFs, US Treasury and corporate bond ETFs, and Treasury yields to watch), crypto, forex (18 currency pairs), gold and commodities, Japan, Hong Kong and China A-shares, Korea, Europe, US mutual funds, more markets (Canada, Australia, Singapore, India), and indexes. There's a watchlist (☆ on any item) too. A list opens on its first 15 rows; the rest are a tap away.
@@ -56,6 +57,7 @@ Five tabs: a bottom bar on phones, the top bar on desktop.
   - quick sizes: max affordable, 1/100 shares, 1 lot (1,000 shares in Taiwan), or ¼, ½ and all of a holding;
   - a preview of the price, amount, commission, taxes, exchange fees and total, in NT$ too.
   - **Short of a currency?** One tap exchanges exactly the NT$ needed.
+  - **Short of cash?** 融資買進 borrows the rest in the order's currency (at the loan rate, repay any time) and places the order in one tap; 融資最大 sizes a buy to cash plus margin room.
 - **Price alert** (🔔): tell me when it rises or falls to a price. Checked on every refresh and, for the time the page was closed, against the price bars since (reported with when it happened). With notifications turned on in the account sheet (the kit's notices, once per device), it notifies when the app is in the background; filled orders do too.
 - **Monthly plan** (📅 定期定額): buy NT$X on day N of every month. Each month buys at the first price after 00:00 Taiwan time on its day, as many units as the money covers after costs (a foreign one exchanges only the NT$ it needs, at that moment's rate). Missed months are bought from the price history when the page opens again; a month without enough NT$ is skipped and recorded.
 - **Time machine** link: what buying this years ago would be worth now.

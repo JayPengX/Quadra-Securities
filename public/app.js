@@ -764,6 +764,12 @@ function recRow(title, cards, { sub = '', cat = '' } = {}) {
     <div class="q-recs">${cards.join('')}</div>
   </section>`;
 }
+// What can be bought right now: NT$-counted cash plus what margin lends.
+function buyingPower(v) {
+  const cashTWD = v.cash.reduce((sum, c) => sum + Math.max(0, c.twd || 0), 0);
+  return Math.max(0, cashTWD + (v.margin === 'ok' ? v.capacity : 0));
+}
+
 // The markets home: your money at a glance, what's for you, today's movers.
 // The full lists stay below, by category.
 function renderHomeRows() {
@@ -778,7 +784,8 @@ function renderHomeRows() {
     ? `<button class="acct-strip" type="button" data-action="goto" data-tab="portfolio">
         <span class="acct-main"><small>${h(t('netWorth'))}${plusAt() ? ' <b class="acct-plus">✦ PLUS</b>' : ''}</small><strong class="num">${h(money(v.netWorth, BASE))}</strong></span>
         <span class="acct-day ${dirClass(v.dayChange)}"><small>${h(t('today'))}</small><strong class="num">${h(money(v.dayChange, BASE, { sign: true }))}</strong><em class="num">${base ? h(pct(v.dayChange / base)) : '—'}</em></span>
-      </button>`
+      </button>
+      <div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span><small>${h(t('buyingPowerSub'))}</small></div>`
     : '';
   const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}"><span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
   const up = movers(state.quotes, { up: true }).slice(0, 5);
@@ -1495,6 +1502,17 @@ function ticketInfo() {
     const pay = amountFor(BASE, q.currency, short, state.rates, state.fxOpen);
     if (pay) topUp = { need: pay, get: short, enough: (avail.cash[BASE] || 0) >= pay, have: avail.cash[BASE] || 0 };
   }
+  // Still short (or buying in NT$): borrow it on margin, in the order's
+  // currency, done with the order in one tap. Also how big a buy margin allows.
+  const v0 = d.side === 'buy' ? valuation() : null;
+  const rateCur = q.currency === BASE ? 1 : state.rates[q.currency];
+  const capCur = v0 && v0.margin === 'ok' && rateCur ? (v0.capacity / rateCur) * 0.98 : 0;
+  const marginBuy = short > 0 && !topUp?.enough && capCur >= short ? { amount: Math.min(capCur, short * 1.01), rate: loanRateAt(q.currency) } : null;
+  let maxMargin = 0;
+  if (d.side === 'buy' && capCur > 0 && ref > 0) {
+    const perUnit = dealPrice(q.market, 'buy', ref) * (1 + ((MARKETS[q.market] || MARKETS.INTL).commission.rate || 0) + 0.006) * 1.03;
+    maxMargin = roundQty((Math.max(0, cash) + capCur) / perUnit, q.kind);
+  }
   // How much can be sold short on top of what's held.
   let shortRoom = 0;
   if (d.side === 'sell' && isShortable(q.kind) && state.rates[q.currency]) {
@@ -1502,7 +1520,7 @@ function ticketInfo() {
     const room = Math.max(0, (v.assets - 1.5 * (v.debtTWD + v.shortTWD)) / 0.5);
     shortRoom = v.margin === 'ok' ? roundQty(room / (q.price * state.rates[q.currency]), q.kind) : 0;
   }
-  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need };
+  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, maxMargin };
 }
 
 function renderTicket() {
@@ -1513,7 +1531,7 @@ function renderTicket() {
     box.innerHTML = `<div class="card ticket"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
     return;
   }
-  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need } = ticketInfo();
+  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, maxMargin } = ticketInfo();
   const open = isOpen(q);
   const unit = unitOf(d.symbol);
   const presets =
@@ -1528,6 +1546,8 @@ function renderTicket() {
         : q.market === 'TW'
           ? [[t('max'), max], ['1', 1], ['100', 100], [t('oneLot'), 1000]]
           : [[t('max'), max], ['1', 1], ['10', 10], ['100', 100]];
+  // With margin room: the most a buy can be, borrowing the rest.
+  if (d.side === 'buy' && q.kind !== 'govbond' && maxMargin > max) presets.splice(1, 0, [t('maxMargin'), maxMargin]);
   const typeHint = d.type === 'limit' ? t(d.side === 'buy' ? 'limitBuyHint' : 'limitSellHint') : d.type === 'stop' ? t(d.side === 'buy' ? 'stopBuyHint' : 'stopSellHint') : t('marketHint');
   const lines = est
     ? [
@@ -1542,7 +1562,7 @@ function renderTicket() {
   const shorting = d.side === 'sell' && qty > shares + 1e-9;
   if (shorting && !isShortable(q.kind)) problems.push(t('notEnoughShares', { have: fmtQty(shares) }));
   else if (shorting && qty > shares + shortRoom + 1e-9) problems.push(t('shortTooBig', { max: fmtQty(shares + shortRoom) }));
-  if (short > 0 && !topUp?.enough) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));
+  if (short > 0 && !topUp?.enough && !marginBuy) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));
   if (d.qty && Math.abs(roundQty(qty, q.kind) - qty) > qtyStep(q.kind) * 1e-3) problems.push(t('err_qtyStep'));
   // The exchange's rules for the price typed.
   const typed = d.type === 'limit' ? Number(d.limit) : d.type === 'stop' ? Number(d.stop) : null;
@@ -1568,7 +1588,7 @@ function renderTicket() {
       ${d.type === 'limit' ? `<label class="field"><span>${h(t('limitPrice'))} (${h(q.currency)})</span><input id="t-limit" inputmode="decimal" autocomplete="off" value="${h(d.limit)}" /></label>` : ''}
       ${d.type === 'stop' ? `<label class="field"><span>${h(t('stopPrice'))} (${h(q.currency)})</span><input id="t-stop" inputmode="decimal" autocomplete="off" value="${h(d.stop)}" /></label>` : ''}
     </div>
-    <div class="qty-presets">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}">${h(label)}${label === t('max') || label === t('all') ? ` <small>${h(fmtQty(v))}</small>` : ''}</button>`).join('')}</div>
+    <div class="qty-presets">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}">${h(label)}${label === t('max') || label === t('all') || label === t('maxMargin') ? ` <small>${h(fmtQty(v))}</small>` : ''}</button>`).join('')}</div>
     ${d.type !== 'market' && (band || tickSize(q.market, q.kind, q.price)) ? `<p class="muted">${h([band ? t('limitBand', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }) : '', tickSize(q.market, q.kind, q.price) ? t('tickIs', { tick: num(tickSize(q.market, q.kind, q.price), 4, 0) }) : ''].filter(Boolean).join(' · '))}</p>` : ''}
     <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' ? ` · ${h(t('lotNote'))}` : ''}</p>
     ${
@@ -1583,6 +1603,7 @@ function renderTicket() {
     ${shorting && isShortable(q.kind) && !problems.length ? `<p class="note">${h(t('shortNote', { qty: fmtQty(qty - shares), unit, fee: rateText(SHORT_FEE) }))}</p>` : ''}
     ${problems.map(p => `<p class="warn">${h(p)}</p>`).join('')}
     ${topUp?.enough ? `<p class="note">${h(t('autoFxLine', { pay: money(topUp.need, BASE), get: money(topUp.get, q.currency) }))}</p>` : ''}
+    ${marginBuy ? `<p class="note margin-line">${h(t('marginLine', { v: money(marginBuy.amount, q.currency), rate: pct(marginBuy.rate, { digits: 2, sign: false }) }))}</p>` : ''}
     ${!open ? `<p class="note">${h(q.kind === 'metal' ? t('closedMetal') : t('closedQueue'))}</p>` : ''}
     ${qty > 0 && isOddLot(q.market, q.kind, qty) ? `<p class="note">${h(open && !oddLotOpen(Date.now()) ? t('oddLotWait') : t('oddLotNote'))}</p>` : ''}
     ${d.type !== 'limit' && est ? `<p class="note">${h(t('spreadNote', { price: fmtPrice(ref, q.currency), last: fmtPrice(last, q.currency) }))}</p>` : ''}
@@ -1590,6 +1611,8 @@ function renderTicket() {
     ${
       topUp?.enough && est && !problems.length
         ? `<button class="primary-button place ${d.side}" type="button" data-action="place-fx" data-need="${topUp.need}" ${pricesLive() ? '' : 'disabled'}>${h(t('autoFx'))}</button>`
+        : marginBuy && est && !problems.length
+        ? `<button class="primary-button place ${d.side}" type="button" data-action="place-margin" data-amount="${marginBuy.amount}" ${pricesLive() ? '' : 'disabled'}>${h(t('marginBuy'))}</button>`
         : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
     }
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
@@ -2347,7 +2370,6 @@ function statsHtml() {
         </div>
         <ul class="facts">
           ${best ? `<li>${h(t('bestTrade'))}: <button class="link" type="button" data-action="open" data-symbol="${h(best.symbol)}">${h(nameOf(best.symbol))}</button> <strong class="num ${dirClass(best.realized)}">${h(money(best.realized, BASE, { sign: true }))} (${h(pct(best.pct))})</strong></li>` : ''}
-          ${worst && worst !== best ? `<li>${h(t('worstTrade'))}: <button class="link" type="button" data-action="open" data-symbol="${h(worst.symbol)}">${h(nameOf(worst.symbol))}</button> <strong class="num ${dirClass(worst.realized)}">${h(money(worst.realized, BASE, { sign: true }))} (${h(pct(worst.pct))})</strong></li>` : ''}
         </ul>`
             : `<p class="empty">${h(t('noClosed'))}</p>`
         }
@@ -2816,6 +2838,19 @@ document.addEventListener('click', event => {
       }
       commit(r.account);
       toast(t('autoFxDone', { pay: money(r.event.amount, BASE), get: money(r.event.received, r.event.to) }), 'good');
+      placeFromTicket();
+      break;
+    }
+    case 'place-margin': {
+      const cur = state.quotes.get(d.symbol)?.currency;
+      const r = borrow(state.account, { currency: cur, amount: Number(el.dataset.amount) }, { valuation: valuation(), rates: { ...state.rates, [BASE]: 1 }, now: Date.now() });
+      if (r.error) {
+        d.msg = { kind: 'bad', text: errorText(r) };
+        renderTicket();
+        break;
+      }
+      commit(r.account);
+      toast(t('marginDone', { v: money(r.event.amount, cur) }), 'good');
       placeFromTicket();
       break;
     }

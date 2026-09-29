@@ -38,8 +38,11 @@ import {
   qtyStep,
   roundCash,
   roundQty,
-  tradeCosts
+  tradeCosts,
+  lotProblem,
+  localDayOf
 } from './markets.mjs';
+import { nextTradingStart } from './holidays.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
 import { ECONOMY } from './quadra.mjs';
 
@@ -303,10 +306,10 @@ export function withdrawable(account, s, now = Date.now()) {
 // ---- Orders ------------------------------------------------------------------
 
 // What a trade of `qty` at `price` costs or brings in, all in.
-export function estimate({ market, kind, currency, side, qty, price, t = Date.now() }) {
+export function estimate({ market, kind, currency, side, qty, price, t = Date.now(), dayTrade = false }) {
   const deal = dealPrice(market, side, price);
   const gross = roundCash(deal * qty, currency);
-  const costs = tradeCosts({ market, side, kind, gross, currency, discount: plusAt(t) ? plus.commission : 1 });
+  const costs = tradeCosts({ market, side, kind, gross, currency, discount: plusAt(t) ? plus.commission : 1, oddLot: isOddLot(market, kind, qty), dayTrade });
   const total = side === 'buy' ? gross + costs.total : gross - costs.total;
   return { price: deal, gross, ...costs, costs: costs.total, total };
 }
@@ -343,6 +346,26 @@ function checkQty(qty, kind) {
   return null;
 }
 
+// Good-till-cancelled orders last this long (brokers' 長效單: a month).
+export const GTC_DAYS = 30;
+// When a day order placed now ends: the close of the session it's for (the
+// one under way, or the next one when the market is shut).
+export function dayOrderEnd(quote, now = Date.now()) {
+  const s = quote?.session;
+  if (!s || !(s.end > s.start)) return now + 86_400_000;
+  if (now < s.end && s.start - now < 20 * 3_600_000) return s.end;
+  const start = nextTradingStart(quote.market, s.start, quote.tz, now);
+  return start + (s.end - s.start);
+}
+// Orders past their end: expired, their cash or shares free again.
+export function expireOrders(account, now = Date.now()) {
+  const due = account.orders.filter(o => o.status === 'open' && o.expires && now >= o.expires && !o.forced);
+  if (!due.length) return { account, expired: [] };
+  let next = account;
+  for (const o of due) next = updateOrder(next, { ...o, status: 'expired', rev: o.rev + 1, done: o.expires });
+  return { account: next, expired: due };
+}
+
 // A new order. Fills at once when its market is open and its price is met;
 // otherwise it waits (and holds its cash or shares) until it fills or is
 // cancelled. Returns { account, order, fill } or { error }.
@@ -368,6 +391,16 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (band && type === 'limit' && (req.limit > band.up + EPS || req.limit < band.down - EPS)) return { error: 'priceLimit', ...band };
   const s = replay(account, now);
   const avail = available(account, s);
+  // Board lots (Japan 100, China's buys 100, Hong Kong each stock's own).
+  const lot = lotProblem(quote.market, quote.symbol, quote.kind, side, qty, Math.max(0, avail.qty[quote.symbol] || 0));
+  if (lot) return { error: 'lot', lot: lot.lot };
+  // China's T+1: shares bought today can be sold from the next trading day.
+  if (side === 'sell' && quote.market === 'CN') {
+    const today = localDayOf(now, 'CN');
+    const boughtToday = account.events.filter(e => e.type === 'fill' && e.symbol === quote.symbol && e.side === 'buy' && e.t <= now && localDayOf(e.t, 'CN') === today).reduce((sum, e) => sum + e.qty, 0);
+    const can = Math.max(0, (avail.qty[quote.symbol] || 0) - boughtToday);
+    if (qty > can + EPS) return { error: 'tPlus1', can };
+  }
   const order = {
     id,
     symbol: quote.symbol,
@@ -385,6 +418,11 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (type === 'limit') order.limit = Number(req.limit);
   if (type === 'stop') order.stop = Number(req.stop);
   if (req.forced) order.forced = true;
+  // How long it lasts: a day order ends with its session (what exchanges
+  // and brokers do by default); good-till-cancelled lasts GTC_DAYS. Crypto
+  // and currency pairs never close, so theirs are GTC.
+  order.tif = req.tif === 'gtc' || quote.kind === 'crypto' || quote.kind === 'fx' ? 'gtc' : 'day';
+  order.expires = order.tif === 'gtc' ? now + GTC_DAYS * 86_400_000 : dayOrderEnd(quote, now);
   if (side === 'sell') {
     const have = Math.max(0, avail.qty[quote.symbol] || 0);
     const short = qty - have;
@@ -444,7 +482,9 @@ function fillOrder(account, order, price, rates, now, at = now) {
   const quote = price;
   if (order.type !== 'limit') price = marketFill(order.market, order.kind, order.side, price);
   else price = order.side === 'buy' ? Math.min(price, order.limit) : Math.max(price, order.limit);
-  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at });
+  // A Taiwan stock sold the day it was bought pays the day-trade tax.
+  const dayTrade = order.side === 'sell' && order.market === 'TW' && account.events.some(e => e.type === 'fill' && e.symbol === order.symbol && e.side === 'buy' && e.t <= at && localDayOf(e.t, 'TW') === localDayOf(at, 'TW'));
+  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at, dayTrade });
   // A fill found in the past must have fitted the cash (or shares) at that
   // moment and still fit today's.
   const moments = at < now ? [at, now] : [now];
@@ -501,7 +541,7 @@ export function processOrders(account, quotes, rates, now = Date.now()) {
   let next = account;
   const filled = [];
   const rejected = [];
-  for (const order of account.orders.filter(o => o.status === 'open').sort(byTime)) {
+  for (const order of account.orders.filter(o => o.status === 'open' && !(o.expires && now >= o.expires && !o.forced)).sort(byTime)) {
     const quote = quotes.get(order.symbol);
     if (!quote || !rates?.[order.currency]) continue;
     const price = triggerPrice(order, quote, now);
@@ -521,6 +561,7 @@ export function processOrders(account, quotes, rates, now = Date.now()) {
 export function backfillPrice(order, bars) {
   const odd = isOddLot(order.market, order.kind, order.qty);
   for (const b of bars) {
+    if (order.expires && b.t >= order.expires) break;
     if (b.t < order.t || !Number.isFinite(b.o)) continue;
     if (odd && !oddLotOpen(b.t)) continue;
     const buy = order.side === 'buy';

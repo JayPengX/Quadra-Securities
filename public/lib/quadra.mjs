@@ -1296,7 +1296,7 @@ export function showNewPass(s, passcode) {
 
 export const notifyOn = () => readStore(KEY.notify) === '1' && globalThis.Notification?.permission === 'granted';
 
-const PUSH_URL = PROXY_URL.replace(/\/sports-proxy$/, '/push');
+const PUSH_URL = ECO_URL.replace(/\/eco$/, '/push');
 async function pushPost(s, path, body) {
   const token = await s.ensureToken?.().catch(() => s.token || '');
   if (!token) return null;

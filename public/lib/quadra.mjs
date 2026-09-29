@@ -542,7 +542,22 @@ function makeSession(app, { lang, heartbeat }) {
   const login = code => signIn(DEVICE_CODE_PATTERN.test(cleanCode(code)) ? { op: 'pair-redeem', code: cleanCode(code) } : { op: 'login', passcode: cleanCode(code) });
   const create = () => signIn({ op: 'create' });
   // A session from the device's refresh token (claim: make this app live).
-  async function refresh({ claim = false, data = false } = {}) {
+  // One at a time: a data fetch that needs a token while the start's sign-in
+  // is on its way waits for that one (not a second call to the Worker).
+  let refreshing = null;
+  function refresh(opts) {
+    const p = refreshOnce(opts);
+    refreshing = p;
+    const done = () => refreshing === p && (refreshing = null);
+    p.then(done, done);
+    return p;
+  }
+  // A usable token: the one held, the sign-in already on its way, or a new one.
+  async function freshToken() {
+    if (refreshing) await refreshing.catch(() => {});
+    if (!token || Date.now() - tokenAt > 15 * 60_000) await (refreshing || refresh({ claim: false }));
+  }
+  async function refreshOnce({ claim = false, data = false } = {}) {
     const ref = readStore(KEY.refresh);
     if (!ref) return signedOut();
     try {
@@ -567,7 +582,7 @@ function makeSession(app, { lang, heartbeat }) {
   }
   // Every call with the session token: a fresh one on expiry, once.
   async function withToken(fn) {
-    if (!token || Date.now() - tokenAt > 15 * 60_000) await refresh({ claim: false });
+    await freshToken();
     if (!token) {
       const error = new Error('not live');
       error.code = 'ECO_SESSION_MOVED';
@@ -629,7 +644,7 @@ function makeSession(app, { lang, heartbeat }) {
   // The data proxy, signed in.
   s.proxy = (url, extra = '') => `${PROXY_URL}?url=${encodeURIComponent(url)}${extra}${token ? `&qt=${encodeURIComponent(token)}` : ''}`;
   s.ensureToken = async () => {
-    if (!token || Date.now() - tokenAt > 15 * 60_000) await refresh({ claim: false });
+    await freshToken();
     return token;
   };
 

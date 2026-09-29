@@ -771,7 +771,17 @@ function renderHomeRows() {
   const held = Object.keys(snap()?.positions || {});
   const recs = forYou({ quotes: state.quotes, held, watched: watched(state.account), wallet: state.wallet, aff: affinityMap(), n: 10 });
   const pick = (id, n = 10) => (CATEGORIES.find(c => c.id === id)?.items || []).map(i => i[0]).filter(sym => state.quotes.has(sym)).slice(0, n);
+  // The broker's featured offers first: borrowing, monthly plans, US stocks, crypto.
+  const promo = (icon, title, subText, action, color) =>
+    `<button class="promo-card" type="button" ${action} style="--promo:${color}"><span class="promo-icon" aria-hidden="true">${icon}</span><strong>${h(title)}</strong><small>${h(subText)}</small><span class="promo-go">${h(t('promoGo'))} ›</span></button>`;
+  const promos = `<section class="q-section home-row promo-row"><div class="q-section-head"><h2>${h(t('promoTitle'))}</h2></div><div class="promo-strip">${[
+    promo('💰', t('promoLoan'), t('promoLoanSub'), 'data-action="goto" data-tab="fx"', '#d97706'),
+    promo('📅', t('promoPlan'), t('promoPlanSub'), 'data-action="open" data-symbol="0050.TW"', '#0f766e'),
+    promo('🇺🇸', t('promoUs'), t('promoUsSub'), 'data-action="cat" data-id="us"', '#2563eb'),
+    promo('₿', t('promoCrypto'), t('promoCryptoSub'), 'data-action="cat" data-id="crypto"', '#7c3aed')
+  ].join('')}</div></section>`;
   box.innerHTML = [
+    promos,
     recRow(t('forYou'), recs.map(r => recCard(r.symbol, r.why)), { sub: t('forYouSub') }),
     recRow(t('moversUp'), movers(state.quotes, { up: true }).map(q => recCard(q.symbol))),
     recRow(t('moversDown'), movers(state.quotes, { up: false }).map(q => recCard(q.symbol))),
@@ -974,7 +984,6 @@ function renderDetail() {
     ${q ? toolsHtml(d.symbol, q) : ''}
     ${q ? aboutHtml(d.symbol, q) : ''}
     ${ownTradesHtml(d.symbol)}
-    ${q && !BONDS[d.symbol] ? `<div class="button-row tools-row"><button class="ghost-button" type="button" data-action="tm-open" data-symbol="${h(d.symbol)}">⏳ ${h(t('tmFromDetail'))}</button></div>` : ''}
   `;
   renderChart();
   if (q && isTradable(q.kind)) renderTicket();
@@ -1382,7 +1391,6 @@ function targetHtml(f, q) {
     <p>${h(t('targetLine', { n: tg.analysts || '?', mean: fmtPrice(tg.mean, cur), pct: pct(tg.mean / q.price - 1, { digits: 0 }) }))}${rating ? ` · ${h(t('ratingIs', { rating }))}` : ''}</p>
     <div class="target-bar"><span class="target-range" style="left:${x(tg.low)};right:calc(100% - ${x(tg.high)})"></span><i class="target-mean" style="left:${x(tg.mean)}" title="${h(t('targetMean'))}"></i><i class="target-now" style="left:${x(q.price)}" title="${h(t('targetNow'))}"></i></div>
     <div class="target-scale num"><span>${h(t('targetLow'))} ${h(fmtPrice(tg.low, cur))}</span><span>${h(t('targetNow'))} ${h(fmtPrice(q.price, cur))}</span><span>${h(t('targetHigh'))} ${h(fmtPrice(tg.high, cur))}</span></div>
-    <p class="note">${h(t('targetNote'))}</p>
   </div>`;
 }
 
@@ -2231,7 +2239,7 @@ function renderHistory() {
     box.innerHTML = `<div class="empty"><div class="spinner"></div></div>`;
     return;
   }
-  const views = ['activity', 'orders', 'stats', 'tm'];
+  const views = ['activity', 'orders', 'stats'];
   const tabs = `<div class="segmented history-tabs" role="group">${views.map(x => `<button type="button" data-action="hview" data-view="${x}" aria-pressed="${state.historyView === x}">${h(t(`hview_${x}`))}</button>`).join('')}</div>`;
   if (state.historyView === 'tm') {
     box.innerHTML = `${tabs}${tmHtml()}`;
@@ -2297,17 +2305,6 @@ function statsHtml() {
   const wins = closed.filter(c => c.realized > 0);
   const best = closed.reduce((b, c) => (!b || c.realized > b.realized ? c : b), null);
   const worst = closed.reduce((b, c) => (!b || c.realized < b.realized ? c : b), null);
-  const costs = [
-    ['commission', v.paid.commission],
-    ['tax', v.paid.tax],
-    ['fee', v.paid.fee],
-    ['fx', v.paid.fx],
-    ['interest', v.paid.interest],
-    ['withheld', v.paid.withheld],
-    ['nhi', v.paid.nhi],
-    ['borrow', v.paid.borrow]
-  ];
-  const costTotal = costs.reduce((sum, [, x]) => sum + x, 0);
   const byMarket = {};
   for (const c of closed) byMarket[c.market] = (byMarket[c.market] || 0) + c.realized;
   for (const p of v.positions) byMarket[p.market] = (byMarket[p.market] || 0) + p.pl;
@@ -2325,11 +2322,6 @@ function statsHtml() {
         ${kpi(t('dividendsNet'), money(v.dividends, BASE))}
       </div>
       <p class="note">${h(t('plNote'))}</p>
-    </div>
-    <div class="card">
-      <h3 class="card-title">${h(t('costsTitle'))} <span class="count num">${h(money(costTotal, BASE))}</span></h3>
-      <p class="lede">${h(t('costsIntro', { pct: v.deposits ? pct(costTotal / v.deposits, { sign: false }) : '—' }))}</p>
-      ${stackBar(costs.map(([k, x], i) => ({ label: t(`cost_${k}`), value: x, color: SERIES[i] })), { format: x => money(x, BASE, { digits: x < 100 ? 2 : 0 }) }) || `<p class="empty">${h(t('noCosts'))}</p>`}
     </div>
     <div class="two-col">
       <div class="card">
@@ -2359,11 +2351,7 @@ function statsHtml() {
         }
       </div>
     </div>
-    <div class="card">
-      <h3 class="card-title">${h(t('benchTitle'))}</h3>
-      <p class="lede">${h(t('benchIntro'))}</p>
-      <div id="bench"></div>
-    </div>`;
+`;
 }
 
 // You against simply buying one index fund with the same money on the same days.

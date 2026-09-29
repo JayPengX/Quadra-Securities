@@ -129,10 +129,10 @@ export const STRINGS = {
     missionsDone: '新手任務',
     startLesson: '從第一堂開始',
     continueLesson: '繼續：{title}',
-    allLessonsDone: '全部上完了！接下來就是在模擬帳戶裡多練習，並且定期回頭看統計分析。',
+    allLessonsDone: '全部上完了！',
     lessonsTitle: '課程',
     missionsTitle: '新手任務',
-    missionsIntro: '在模擬帳戶裡實際做做看，完成後會自動打勾。',
+    missionsIntro: '完成後會自動打勾。',
     glossaryTitle: '名詞小辭典',
     referenceTitle: '參考資料：規則、費用、設定',
     tryOpen: '看看 {name}',
@@ -141,6 +141,7 @@ export const STRINGS = {
     quizWrong: '不太對，再想想。',
     lessonDoneToast: '完成一堂課：{title}',
     newHere: 'Securities 使用說明',
+    promoTitle: '限時活動', promoLoan: '融資借款', promoLoanSub: '用持股借錢，資金放大', promoPlan: '定期定額', promoPlanSub: '每月自動買 0050，NT$1,000 起', promoUs: '美股一股就買', promoUsSub: 'NVDA、AAPL、TSLA 即時下單', promoCrypto: '加密貨幣', promoCryptoSub: '24 小時不打烊', promoGo: '立即開始',
     kind_govbond: '公債',
     bondsUnit: '張',
     toastCoupon: '{name} 付息入帳 {amount}',
@@ -272,7 +273,7 @@ export const STRINGS = {
     placeSell: '送出賣單',
     filledMsg: '已成交：{side} {qty} @ {price}，共 {total}',
     queuedMsg: '委託已送出，等待成交。',
-    needAccount: '先開一個模擬帳戶，才能交易。',
+    needAccount: '開戶後馬上就能交易。',
     openAccount: '開戶',
 
     err_funds: '錢不夠：需要 {need}，可用 {have}。',
@@ -331,7 +332,7 @@ export const STRINGS = {
     alloc_currency: '幣別',
     alloc_market: '市場',
     positions: '持倉',
-    noPositions: '還沒有持倉。到「市場」挑一檔買，或先到「學習」上幾堂課。',
+    noPositions: '還沒有持倉。今天的熱門股都在「市場」，一股就能買。',
     openOrders: '掛單中',
     noOpenOrders: '沒有掛單。',
     pastOrders: '已結束的委託',
@@ -389,7 +390,7 @@ export const STRINGS = {
     bankBuys: '銀行買',
 
     loansTitle: '融資借款',
-    loansIntro: '用持股當擔保向券商借錢，可以借任何幣別。借的錢按天計息，賠錢時要小心維持率。',
+    loansIntro: '用持股當擔保借錢，資金放大、部位加碼，任何幣別都能借，按天計息，隨借隨還。',
     collateral: '擔保價值',
     collateralSub: '持股市值打折後',
     borrowed: '已借',
@@ -460,7 +461,7 @@ export const STRINGS = {
     you: '你',
     inNtd: '新台幣計',
 
-    setupTitle: '開一個模擬帳戶',
+    setupTitle: '開戶',
     setupIntro: '決定起始資金（新台幣）。之後可以換成美元、日圓、歐元…買全世界的股票、ETF、債券、加密貨幣和黃金。',
     customAmount: '自訂金額（NT$）',
     setupRange: '起始資金可以是 {min} 到 {max}。',
@@ -507,7 +508,7 @@ export const STRINGS = {
     g_div: '股利與股票分割',
     g_div1: '持有期間配發的現金股利會自動入帳（以除息日為準，實際上發放會晚幾週）。股票分割會自動調整股數。',
     g_div2: '海外股利會被預扣稅（美股 30%、日股 15.315% …見上表）；台股單筆股利超過 {min} 要扣二代健保補充保費 {rate}。',
-    g_div3: '台股股利所得還要併入綜合所得稅，這裡沒有模擬。',
+    g_div3: '台股股利所得還要併入綜合所得稅。',
     g_metal: '黃金、白銀存摺',
     g_metal1: '以新台幣、公克計價，價格 = 國際金價（美元／盎司）× 美元匯率 ÷ 31.1035。像銀行一樣，買進價比市價高 0.6%、賣出價低 0.6%，不收手續費。',
     g_metal2: '想用美元買黃金，也可以買黃金 ETF（GLD）或台股的 00635U。',
@@ -820,7 +821,7 @@ export const STRINGS = {
     g_real3: '升降單位與漲跌停：台股限價單要掛在升降單位上（例如 1,000 元以上是 5 元一跳），而且不能超過昨收 ±10%；美股以 1 美分為單位。零股在 09:10 以後的盤中零股時段撮合。',
     g_real4: '股利：除息日持有就有權利，現金幾週後才入帳（台股約 4 週、美股約 1 週），入帳前算在總資產裡但不能用。新台幣閒錢放在交割戶，會領活存利息（約年 0.8%），每年 6/21、12/21 入帳。',
     g_real5: '你不在的時候：定期定額、掛單、股利、每月入金、利息都會照當時的價格和時間補上；有融資或放空的話，如果中間跌破斷頭線，會在那個時間點被強制處理。',
-    disclaimer: '這是教學用的模擬交易，所有的錢都是假的，不構成任何投資建議。真實投資有賠錢的風險，槓桿和加密貨幣尤其如此。'
+    disclaimer: '投資一定有風險，過去績效不代表未來表現。'
   },
   en: {
     appName: 'Quadra Securities',
@@ -963,6 +964,7 @@ export const STRINGS = {
     quizWrong: 'Not quite, try again.',
     lessonDoneToast: 'Lesson done: {title}',
     newHere: 'How Securities works',
+    promoTitle: 'Featured', promoLoan: 'Margin loans', promoLoanSub: 'Borrow against your holdings, trade bigger', promoPlan: 'Monthly plan', promoPlanSub: 'Auto-buy 0050 every month from NT$1,000', promoUs: 'US stocks from one share', promoUsSub: 'NVDA, AAPL, TSLA in real time', promoCrypto: 'Crypto', promoCryptoSub: 'Open 24/7', promoGo: 'Start now',
     kind_govbond: 'Government bond',
     bondsUnit: 'bonds',
     toastCoupon: '{name} coupon paid: {amount}',
@@ -1094,7 +1096,7 @@ export const STRINGS = {
     placeSell: 'Place sell order',
     filledMsg: 'Filled: {side} {qty} @ {price}, total {total}',
     queuedMsg: 'Order placed, waiting to fill.',
-    needAccount: 'Open a practice account to trade.',
+    needAccount: 'Open an account to start trading.',
     openAccount: 'Open account',
 
     err_funds: 'Not enough money: need {need}, have {have}.',
@@ -1153,7 +1155,7 @@ export const STRINGS = {
     alloc_currency: 'Currency',
     alloc_market: 'Market',
     positions: 'Positions',
-    noPositions: 'No positions yet. Pick something in Markets, or take a few lessons first.',
+    noPositions: 'No positions yet. Today’s hot stocks are in Markets, from a single share.',
     openOrders: 'Open orders',
     noOpenOrders: 'No open orders.',
     pastOrders: 'Past orders',
@@ -1211,7 +1213,7 @@ export const STRINGS = {
     bankBuys: 'bank buys',
 
     loansTitle: 'Margin loans',
-    loansIntro: 'Borrow from the broker against your holdings, in any currency. Interest accrues daily; watch the maintenance ratio when prices fall.',
+    loansIntro: 'Borrow against your holdings to trade bigger, in any currency. Daily interest, repay any time.',
     collateral: 'Collateral value',
     collateralSub: 'holdings after haircuts',
     borrowed: 'Borrowed',
@@ -1282,7 +1284,7 @@ export const STRINGS = {
     you: 'You',
     inNtd: 'in NT$',
 
-    setupTitle: 'Open a practice account',
+    setupTitle: 'Open an account',
     setupIntro: 'Choose your starting money in NT$. Then exchange it into dollars, yen, euros… to buy stocks, ETFs, bonds, crypto and gold worldwide.',
     customAmount: 'Custom amount (NT$)',
     setupRange: 'Starting money can be {min} to {max}.',
@@ -1642,7 +1644,7 @@ export const STRINGS = {
     g_real3: 'Ticks and limits: Taiwan limit prices must sit on the tick (5 a step from NT$1,000 up) and inside ±10% of yesterday’s close; US prices are in cents. Odd lots match from 09:10 in the intraday odd-lot session.',
     g_real4: 'Dividends: holding on the ex-date earns one, and the cash arrives weeks later (Taiwan about 4, the US about 1); until then it counts in net worth but can’t be spent. Idle NT$ in the settlement account earns the bank’s demand rate (about 0.8% a year), paid June 21 and December 21.',
     g_real5: 'While you’re away: monthly plans, waiting orders, dividends, paydays and interest are all settled at the prices and times they happened; with a loan or a short, a fall through the liquidation line meanwhile is force-closed at that moment.',
-    disclaimer: 'Educational simulation with play money; not investment advice. Real investing can lose money, with leverage and crypto especially.'
+    disclaimer: 'Investing involves risk; past performance is no guarantee of future results.'
   }
 };
 

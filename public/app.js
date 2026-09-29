@@ -6,7 +6,7 @@ import {
   benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts,
   alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends,
   applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, incomeAmount, nextPayday, startAmount, INCOME_RATE,
-  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan
+  START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, stripPool, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, coverExchanges
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, COLLATERAL, MARGIN_CALL, MARGIN_LIQUIDATE, NHI_RATE, NHI_THRESHOLD, CLOSED_FX_MULTIPLIER,
@@ -353,6 +353,10 @@ function afterPrices() {
   for (const f of r.filled) filledNotice(t('toastFilled', { side: t(f.side), qty: fmtQty(f.qty), name: nameOf(f.symbol), price: fmtPrice(f.price, f.currency) }), f);
   for (const o of r.rejected) toast(t('toastRejected', { name: nameOf(o.symbol), why: t(`err_${o.reason}`) }), 'bad');
   if (r.filled.some(f => f.forced)) account = repayAll(account, state.rates, state.fxOpen, now);
+  // Overdrawn: settled foreign money from cover sales becomes NT$.
+  const covered = coverExchanges(account, { rates: state.rates, fxOpen: state.fxOpen, now });
+  account = covered.account;
+  for (const e of covered.done) toast(t('coverFxDone', { from: money(e.amount, e.from), to: money(e.received, BASE) }), 'good');
   let v = valuate(replay(account, now), state.quotes, state.rates);
   for (const plan of liquidationPlan(account, v)) {
     const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
@@ -1678,10 +1682,31 @@ function overdraftHtml(v) {
   if (owed < 1) return '';
   const { plan, covered } = coverPlan(v, owed);
   const rows = plan.map(x => `<li><span>${h(nameOf(x.symbol))}</span><span class="num">${h(t('coverSell', { qty: fmtQty(x.qty) }))}${x.all ? ` · ${h(t('coverAll'))}` : ''}</span><strong class="num">≈ ${h(money(x.twd, BASE))}</strong></li>`).join('');
+  // Where the money to cover it stands: sales waiting for their market, and
+  // foreign money (sold, or held) that has to become NT$.
+  const now = Date.now();
+  const waiting = state.account.orders.filter(o => o.status === 'open' && o.side === 'sell');
+  const pending = unsettled(state.account, now);
+  const free = withdrawable(state.account, snap(), now);
+  const lines = [
+    ...waiting.map(o => `<li><span>${h(nameOf(o.symbol))}</span><span class="num">${h(t('coverSell', { qty: fmtQty(o.qty) }))}</span><strong>${h(t('odWaiting'))}</strong></li>`),
+    ...Object.entries(pending).filter(([c, x]) => c !== BASE && x > 0).map(([c, x]) => `<li><span>${h(t('odSettling', { cur: c }))}</span><span class="num">${h(money(x, c))}</span><strong>${h(t('odSettleOn', { date: shortDate(settleOf(c)) }))}</strong></li>`)
+  ];
+  const fxFree = Object.entries(free).filter(([c, x]) => c !== BASE && x > 0 && state.rates[c]);
+  const status = lines.length ? `<p class="od-sub-h">${h(t('odStatus'))}</p><ul class="od-plan">${lines.join('')}</ul><p class="note">${h(t('odHowItWorks'))}</p>` : '';
+  const fxButtons = fxFree.map(([c, x]) => `<button class="ghost-button block od-fx" type="button" data-action="fx-cover" data-cur="${h(c)}">${h(t('odFxGo', { v: money(x, c) }))}</button>`).join('');
   return `<div class="card overdraft-card">
     <div class="od-head"><strong>${h(t('odTitle', { v: money(owed, BASE) }))}</strong><small>${h(t('odSub'))}</small></div>
+    ${status}${fxButtons}
     ${plan.length ? `<ul class="od-plan">${rows}</ul><button class="primary-button block" type="button" data-action="cover" ${pricesLive() ? '' : 'disabled'}>${h(t(covered ? 'coverGo' : 'coverGoPart'))}</button>` : `<p class="note">${h(t('odNothing'))}</p>`}
   </div>`;
+}
+
+// When the foreign sale money still settling is free to exchange: the latest
+// settle date of the cover and other sales in that currency.
+function settleOf(cur) {
+  const now = Date.now();
+  return Math.max(0, ...state.account.events.filter(e => e.type === 'fill' && e.side === 'sell' && e.currency === cur && e.settle > now).map(e => e.settle));
 }
 
 function renderPortfolio() {
@@ -2806,6 +2831,22 @@ document.addEventListener('click', event => {
     case 'plus':
       openPlus(q);
       break;
+    case 'fx-cover': {
+      // Foreign cash that's free to move, into NT$, only up to what's owed.
+      const cur = el.dataset.cur;
+      const s0 = snap();
+      const owed = -(s0.cash[BASE] || 0);
+      const free = withdrawable(state.account, s0, Date.now())[cur] || 0;
+      const amount = Math.min(free, amountFor(cur, BASE, owed, { ...state.rates, [BASE]: 1 }, state.fxOpen) ?? free);
+      const r = exchange(state.account, { from: cur, to: BASE, amount }, { rates: { ...state.rates, [BASE]: 1 }, fxOpen: state.fxOpen, now: Date.now() });
+      if (r.error) toast(errorText(r), 'bad');
+      else {
+        commit(r.account);
+        toast(t('coverFxDone', { from: money(r.event.amount, cur), to: money(r.event.received, BASE) }), 'good');
+      }
+      render();
+      break;
+    }
     case 'cover': {
       // Sell what the plan says, at market, one order each.
       const v = valuation();
@@ -2814,7 +2855,7 @@ document.addEventListener('click', event => {
       let sold = 0;
       for (const x of plan) {
         const quote = state.quotes.get(x.symbol);
-        const r = placeOrder(account, { symbol: x.symbol, side: 'sell', type: 'market', qty: x.qty }, { quote, rates: state.rates, valuation: valuate(replay(account), state.quotes, state.rates), now: Date.now() });
+        const r = placeOrder(account, { symbol: x.symbol, side: 'sell', type: 'market', qty: x.qty, cover: true }, { quote, rates: state.rates, valuation: valuate(replay(account), state.quotes, state.rates), now: Date.now() });
         if (r.account) {
           account = r.account;
           sold++;

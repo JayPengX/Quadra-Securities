@@ -385,6 +385,8 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (type === 'limit') order.limit = Number(req.limit);
   if (type === 'stop') order.stop = Number(req.stop);
   if (req.forced) order.forced = true;
+  // A sale to cover an overdraft: its proceeds turn into NT$ once settled.
+  if (req.cover) order.cover = true;
   if (side === 'sell') {
     const have = Math.max(0, avail.qty[quote.symbol] || 0);
     const short = qty - have;
@@ -485,6 +487,7 @@ function fillOrder(account, order, price, rates, now, at = now) {
     twd: rates[order.currency]
   };
   if (order.forced) fill.forced = true;
+  if (order.cover) fill.cover = true;
   const done = { ...order, status: 'filled', rev: order.rev + 1, done: at, fillId: fill.id, price: est.price };
   const next = updateOrder({ ...account, events: [...account.events, fill] }, done);
   return { account: next, order: done, fill };
@@ -815,7 +818,11 @@ export function liquidationPlan(account, valuation) {
 export function coverPlan(valuation, owedTWD) {
   const plan = [];
   let left = owedTWD * 1.01;
-  const longs = valuation.positions.filter(p => !p.short && p.qty > 0 && p.valueTWD > 0 && isTradable(p.kind)).sort((a, b) => b.valueTWD - a.valueTWD);
+  // NT$ holdings first: their sale money counts at once. Foreign ones pay in
+  // their own currency, which becomes NT$ only once it settles.
+  const longs = valuation.positions
+    .filter(p => !p.short && p.qty > 0 && p.valueTWD > 0 && isTradable(p.kind))
+    .sort((a, b) => (a.currency === BASE ? 0 : 1) - (b.currency === BASE ? 0 : 1) || b.valueTWD - a.valueTWD);
   for (const p of longs) {
     if (left <= 0) break;
     const unit = p.valueTWD / p.qty;
@@ -823,10 +830,43 @@ export function coverPlan(valuation, owedTWD) {
     let qty = Math.min(p.qty, Math.ceil(left / unit / step) * step);
     qty = roundQty(qty, p.kind);
     if (!(qty > 0)) continue;
-    plan.push({ symbol: p.symbol, qty, twd: qty * unit, all: qty >= p.qty });
+    plan.push({ symbol: p.symbol, qty, twd: qty * unit, all: qty >= p.qty, currency: p.currency, market: p.market });
     left -= qty * unit;
   }
   return { plan, covered: left <= 0 };
+}
+
+// The cover sales' foreign proceeds, as NT$, once they settle: while NT$ cash
+// is below zero, what each cover sale brought in (in its currency, settled
+// and not yet exchanged for this) is exchanged, only up to what's owed.
+// Returns { account, done: [fx events] }.
+export function coverExchanges(account, { rates, fxOpen = true, now = Date.now() }) {
+  let next = account;
+  const done = [];
+  for (let guard = 0; guard < 8; guard++) {
+    const s = replay(next, now);
+    const owed = -(s.cash[BASE] || 0);
+    if (owed < 1) break;
+    const free = withdrawable(next, s, now);
+    let made = false;
+    for (const cur of Object.keys(free)) {
+      if (cur === BASE || !(rates?.[cur] > 0)) continue;
+      const sold = next.events.filter(e => e.type === 'fill' && e.cover && e.side === 'sell' && e.currency === cur && e.settle <= now && e.t <= now).reduce((sum, e) => sum + e.total, 0);
+      const used = next.events.filter(e => e.type === 'fx' && e.cover && e.from === cur).reduce((sum, e) => sum + e.amount, 0);
+      const need = amountFor(cur, BASE, owed, rates, fxOpen) ?? Infinity;
+      const amount = roundCash(Math.min(sold - used, free[cur] || 0, need), cur);
+      if (!(amount > 0)) continue;
+      const r = exchange(next, { from: cur, to: BASE, amount }, { rates, fxOpen, now });
+      if (!r.account) continue;
+      const event = { ...r.event, cover: true };
+      next = { ...r.account, events: [...r.account.events.slice(0, -1), event] };
+      done.push(event);
+      made = true;
+      break;
+    }
+    if (!made) break;
+  }
+  return { account: next, done };
 }
 
 // While the page was closed, a loan or a short could have fallen below the

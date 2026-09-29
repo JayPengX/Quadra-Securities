@@ -73,3 +73,31 @@ test('the economy reset lands as a negative pooled deposit: cash can go below ze
   assert.ok(Number.isFinite(v.netWorth));
   assert.equal(v.netWorth, -20_000);
 });
+
+import { coverExchanges } from '../public/lib/account.mjs';
+test('cover: NT$ holdings sold first; foreign cover proceeds become NT$ once settled, only up to the overdraft', () => {
+  const v = { positions: [
+    { symbol: 'AAPL', kind: 'stock', currency: 'USD', qty: 10, valueTWD: 80_000, short: false },
+    { symbol: '2330.TW', kind: 'stock', currency: 'TWD', qty: 100, valueTWD: 50_000, short: false }
+  ] };
+  assert.deepEqual(coverPlan(v, 20_000).plan.map(x => x.symbol), ['2330.TW']);
+
+  const T = Date.UTC(2026, 8, 29, 14);
+  const a = {
+    ...newAccount(0, T - 86_400_000),
+    events: [
+      { id: 'x:rebase', type: 'deposit', pool: true, t: T - 3600_000, currency: 'TWD', amount: -10_000 },
+      { id: 'fill:1', type: 'fill', cover: true, t: T, symbol: 'AAPL', kind: 'stock', market: 'US', currency: 'USD', side: 'sell', qty: 2, price: 250, gross: 500, commission: 0, tax: 0, fee: 0, total: 500, settle: T + 86_400_000, twd: 32 }
+    ]
+  };
+  const rates = { TWD: 1, USD: 32 };
+  // Not settled yet: nothing to exchange.
+  assert.equal(coverExchanges(a, { rates, now: T + 3600_000 }).done.length, 0);
+  // Settled: exchanged, and only what's owed.
+  const r = coverExchanges(a, { rates, now: T + 2 * 86_400_000 });
+  assert.equal(r.done.length, 1);
+  assert.ok(r.done[0].amount < 500 && r.done[0].amount > 300);
+  assert.ok(Math.abs(replay(r.account, T + 2 * 86_400_000).cash.TWD) < 40);
+  // Once covered, never again.
+  assert.equal(coverExchanges(r.account, { rates, now: T + 3 * 86_400_000 }).done.length, 0);
+});

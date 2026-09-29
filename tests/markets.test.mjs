@@ -23,7 +23,8 @@ test('abroad: minimum commissions, stamp duties and sell fees', () => {
   assert.equal(tradeCosts({ market: 'US', side: 'buy', kind: 'stock', gross: 341.07, currency: 'USD' }).commission, 3);
   const us = tradeCosts({ market: 'US', side: 'sell', kind: 'stock', gross: 100_000, currency: 'USD' });
   assert.equal(us.commission, 100);
-  assert.equal(us.fee, 2.78);
+  // The SEC fee: US$20.60 per million since 2026-04-04.
+  assert.equal(us.fee, 2.06);
   const hk = tradeCosts({ market: 'HK', side: 'buy', kind: 'stock', gross: 100_000, currency: 'HKD' });
   assert.deepEqual([hk.commission, hk.tax, hk.fee], [250, 100, 8.5]);
   assert.equal(tradeCosts({ market: 'HK', side: 'buy', kind: 'etf', gross: 100_000, currency: 'HKD' }).tax, 0);

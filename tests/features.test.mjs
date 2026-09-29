@@ -158,8 +158,9 @@ test('net worth history from daily closes', () => {
   // After the exchange, before the purchase: cash only.
   const early = netWorthSeries(a, [T0 + 1], () => 999, cur => (cur === 'USD' ? 32 : 1));
   assert.equal(early[0][1], 68_000 + 998 * 32);
-  assert.equal(series[0][1], 57_980 + 998 * 32 + 10_000);
-  assert.equal(series[2][1], 57_980 + 998 * 34 + 12_000);
+  // 100 shares is an odd lot: 0.1425% (NT$14), not the board-lot minimum of NT$20.
+  assert.equal(series[0][1], 57_986 + 998 * 32 + 10_000);
+  assert.equal(series[2][1], 57_986 + 998 * 34 + 12_000);
   assert.equal(series[0][2], 100_000);
   void processOrders;
 });

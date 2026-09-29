@@ -274,7 +274,8 @@ test('sale proceeds settle T+2 in Taiwan: they buy again at once but can’t be 
   a = placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 900 }, { quote: { ...q, marketTime: fri - DAY + 1, session: { start: fri - DAY, end: fri - DAY + 3_600_000 } }, rates: { TWD: 1 }, now: fri - DAY + 1, id: 'b' }).account;
   const sold = placeOrder(a, { side: 'sell', type: 'limit', limit: 100, qty: 900 }, { quote: q, rates: { TWD: 1 }, now: fri, id: 's' });
   a = sold.account;
-  assert.equal(new Date(sold.fill.settle + 8 * 3_600_000).toISOString().slice(0, 10), '2026-09-29');
+  // Monday 9/28 (Teacher's Day) is a Taiwan market holiday: T+2 is Wednesday.
+  assert.equal(new Date(sold.fill.settle + 8 * 3_600_000).toISOString().slice(0, 10), '2026-09-30');
   assert.ok(unsettled(a, fri + 1).TWD > 89_000);
   const rates = { TWD: 1, USD: 32 };
   assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: fri + 1 }).error, 'unsettled');
@@ -282,8 +283,9 @@ test('sale proceeds settle T+2 in Taiwan: they buy again at once but can’t be 
   assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 9000 }, { rates, now: fri + 1 }).error, undefined);
   // The proceeds buy again right away.
   assert.equal(placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 800 }, { quote: q, rates: { TWD: 1 }, now: fri + 1, id: 'b2' }).fill.qty, 800);
-  // Settled on Tuesday: free to exchange.
-  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: Date.parse('2026-09-30T09:00:00+08:00') }).error, undefined);
+  // Not yet on Tuesday; settled by Thursday: free to exchange.
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: Date.parse('2026-09-29T09:00:00+08:00') }).error, 'unsettled');
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: Date.parse('2026-10-01T09:00:00+08:00') }).error, undefined);
 });
 
 test('market orders cross the spread, limit orders never fill worse than their price', async () => {

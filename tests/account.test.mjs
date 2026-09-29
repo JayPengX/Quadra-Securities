@@ -95,7 +95,7 @@ test('buy abroad, sell later: realized profit in NT$ includes the currency move'
   const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 330, qty: 10 }, { quote: quote('AAPL', 330, { at: later }), rates: rates2, now: later, id: 's' });
   s = replay(r.account, later);
   assert.equal(s.positions.AAPL, undefined);
-  const proceeds = 3300 - 3.3 - 0.09;
+  const proceeds = 3300 - 3.3 - 0.07;
   assert.ok(Math.abs(s.cash.USD - (9980 - 3003 + proceeds)) < 1e-6);
   assert.ok(Math.abs(s.realized - (proceeds * 33 - 3003 * 32)) < 1e-6);
   assert.equal(s.closed.length, 1);

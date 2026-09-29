@@ -137,18 +137,19 @@ and worst years and a bank deposit to compare.
 | What | How |
 | --- | --- |
 | Starting money | NT$100,000 for every account |
-| Taiwan | 0.1425% commission, min NT$20; sell tax 0.3% stocks, 0.1% ETFs, 0% bond ETFs; fractions of a dollar dropped |
-| US | 0.1% sub-brokerage commission, min US$3; SEC fee 0.00278% on sells; 30% dividend withholding |
+| Taiwan | 0.1425% commission, min NT$20 (odd lots NT$1); sell tax 0.3% stocks (0.15% on a day trade: sold the day it was bought), 0.1% ETFs, 0% bond ETFs; fractions of a dollar dropped |
+| US | 0.1% sub-brokerage commission, min US$3; SEC fee US$20.60 per million on sells (from 2026-04-04); 30% dividend withholding |
 | Hong Kong | 0.25%, min HK$100; 0.1% stamp duty on stocks both ways; 0.0085% exchange fees |
 | UK, France, Italy, Spain | 0.25%, min £5/€5; stamp duty or FTT on buys of stocks (0.5%, 0.4%, 0.1%, 0.2%) |
-| China, Korea, India | 0.3%; sell tax 0.05% (China), 0.15% (Korea); 0.1% STT both ways (India) |
+| China, Korea, India | 0.3%; sell tax 0.05% (China), 0.20% (Korea, from 2026); 0.1% STT both ways and 0.015% stamp duty on buys (India) |
+| Switzerland | 0.25%; federal stamp duty 0.075% each side |
 | Japan, Germany, Netherlands, Switzerland, Denmark, Canada, Australia, Singapore | 0.25% with a local minimum |
 | Crypto | 0.1%, fractions to 8 decimals, 24/7 |
 | Gold and silver passbooks | NT$ per gram from COMEX futures × US$ rate ÷ 31.1035; buy 0.6% above, sell 0.6% below |
 | Anywhere else search finds | 0.3%, 20% withholding, its currency's rate from Yahoo (through US$ if there's no NT$ pair), 1% FX spread |
 | Dividends | Credited on the ex-date for shares held then; Yahoo's split-adjusted amounts scaled back; withholding by market; Taiwan's 2.11% NHI premium on a payment of NT$20,000+ |
 | Splits | Shares multiplied from the split date; cost unchanged |
-| Orders | Market orders fill at once while open, else at the first price after the open (holding 3% extra). Limit and stop orders stay open until they fill or are cancelled. Open orders hold their cash or shares. A buy that no longer fits the cash when it triggers is dropped |
+| Orders | Market orders fill at once while open, else at the first price after the open (holding 3% extra). Limit and stop orders are **day orders** by default: they end at the close of the session they're for (placed while shut: the next one) and expire unfilled; **長效 (GTC)** keeps one for 30 days. Crypto and currency pairs are always GTC. Open orders hold their cash or shares. A buy that no longer fits the cash when it triggers is dropped |
 | While the page is closed | On opening (and on coming back to the tab), each open order is checked against the price bars since it was placed: 5-minute bars for the last few days, 30-minute for a month, hourly for two years. It fills at the first bar that reached its price, dated then, at that moment's exchange rate; a gap through the price fills at the bar's open. Dividends, splits, coupons and maturities are credited on their own dates, and net worth history is rebuilt from daily closes |
 | Hours | Each market's own session and holidays from Yahoo; crypto always; government bonds on weekdays in the issuer's business hours |
 | Short selling | Stocks, ETFs, bond ETFs, crypto; 150% initial cover; 3% a year borrow fee; dividends charged; bought back first in a forced sale |
@@ -183,12 +184,20 @@ Two devices' copies merge by uniting their logs:
 - **Forced sales while away:** with a loan or a short, the price history since the last visit is walked (every price bar) and, where the account fell below the liquidation line, shorts are bought back and holdings sold at that moment's price, dated then, and the loans repaid; whatever the sale didn't cover is still owed.
 - **Fills found in the past** must have fitted the cash and shares at that moment, and still fit today's.
 - **The spread:** market and triggered stop orders buy at the ask and sell at the bid: half a tick at least, or a typical half-spread per market (US 0.01%, Europe and Asia 0.05%, crypto 0.02%). Limit orders fill only at their price or better. Monthly plans size their buy at the ask.
-- **Settlement:** every fill records when it settles (Taiwan T+2, US, Canada, India and China T+1, most others T+2, weekdays only). Sale money can buy again at once in its market, but can't be exchanged into another currency until it settles; wallets show what's still settling.
+- **Settlement:** every fill records when it settles (Taiwan, Japan, Hong Kong, Korea, Europe, Australia and Singapore T+2; the US, Canada, India and China T+1; the UK, the EU and Switzerland T+1 from 2027-10-11), counted in the market's own business days (weekends and its holidays skipped) and ending at 23:59 in the market's own time. Sale money can buy again at once in its market, but can't be exchanged into another currency until it settles; wallets show what's still settling.
 - **Taiwan odd lots** (not whole lots of 1,000) match only from 09:10, in the intraday odd-lot session, live and in history.
 - **Quadra Plus** (the kit's `PLUS.stock`, `usePlus` in `account.mjs`): half the commission (its minimum too), half the FX spread, 1 point off a new loan's rate, and 2% a year on NT$ cash. Each counts by when it happens: a trade by its fill time, an exchange or loan by its moment, cash interest by each Taiwan month the membership was paid for (the wallet's `eco:plus:<month>`). The ticket, the FX desk and the loan form show the member price as one quiet line.
 - **Interest on idle NT$:** the settlement account earns the bank's demand-deposit rate (0.8% a year, `CASH_RATE`; Quadra Plus 2%), accrued daily and paid June 21 and December 21, with 10% tax and the 2.11% NHI premium on a payment of NT$20,000 or more.
 - **The ledger is read as of a moment:** `replay(account, t)` ignores anything dated after `t`.
 - **Data safety:** an account with no sync code, not installed to the home screen, gets a reminder that Safari can clear site data after 7 days unopened.
+
+**Each market's own exchange rules** (`markets.mjs`, detail sheet 交易規則):
+
+- **Tick sizes** by price band: Taiwan, the US, Hong Kong (the spread table after the 2025 reduction), Japan (the TOPIX 500 table), Korea (the 2023 table; ETFs 5 won), China (0.01; funds 0.001).
+- **Daily price limits:** Taiwan ±10%, China ±10% (±20% on STAR 688xxx and ChiNext 300xxx/301xxx), Korea ±30%, Japan a yen amount by price band. Limit orders outside them are refused.
+- **Board lots:** Japan 100 shares, China buys in 100s, Hong Kong each stock's own lot (the listed ones; e.g. HSBC 400, Tencent 100). An odd remainder sells whole. Taiwan keeps its odd-lot session; Singapore has its unit-share market.
+- **Lunch breaks:** Tokyo 11:30–12:30, Hong Kong 12:00–13:00, Shanghai and Shenzhen 11:30–13:00, Singapore 12:00–13:00 (local time): no fills, shown as 午休.
+- **China A-shares** are bought from abroad through Stock Connect: they trade only on days Hong Kong is open too, and shares bought today can be sold from the next trading day (T+1).
 
 **What's still limited:**
 

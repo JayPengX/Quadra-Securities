@@ -1581,7 +1581,7 @@ function ticketInfo() {
     const room = Math.max(0, (v.assets - 1.5 * (v.debtTWD + v.shortTWD)) / 0.5);
     shortRoom = v.margin === 'ok' ? roundQty(room / (q.price * state.rates[q.currency]), q.kind) : 0;
   }
-  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, maxMargin };
+  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, maxMargin, welcome };
 }
 
 function renderTicket() {
@@ -1592,7 +1592,7 @@ function renderTicket() {
     box.innerHTML = `<div class="card ticket"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
     return;
   }
-  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, maxMargin } = ticketInfo();
+  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, maxMargin, welcome } = ticketInfo();
   const open = isOpen(q);
   const unit = unitOf(d.symbol);
   const presets =

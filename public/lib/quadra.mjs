@@ -42,9 +42,9 @@ export const appName = app => APPS[app]?.name || app;
 // Balanced so money matters (Shared-Proxy/tools/economy.mjs has the model):
 // a new pass opens with NT$30,000; the 1st of every Taiwan month pays an
 // allowance by what the account is worth (the pool plus Securities'
-// holdings): NT$6,000 under NT$40,000, 4,000 under 100,000, 2,000 under
-// 250,000, 1,000 above: the full amount to get going or back in the game,
-// less once there's plenty, never nothing (eco.js pays it). Securities is
+// holdings): NT$6,000 under NT$40,000, 3,000 under 100,000, 1,500 under
+// 250,000, 500 above: the full amount to get going or back in the game,
+// half once past the opening money, a token with plenty (eco.js pays it). Securities is
 // where it grows (the market, real costs); Play and the lottery are where it
 // goes (the house keeps about 14% of a single, a third of a treble, half of a
 // draw ticket); Rewards pays for effort, capped a day so a regular player
@@ -54,16 +54,16 @@ export const ECONOMY = {
   monthly: 6_000,
   payTiers: [
     [40_000, 6_000],
-    [100_000, 4_000],
-    [250_000, 2_000],
-    [Infinity, 1_000]
+    [100_000, 3_000],
+    [250_000, 1_500],
+    [Infinity, 500]
   ],
   // Rewards: word practice, games and missions, with their caps a Taiwan day
-  // (NT$400 at most; about NT$12 a minute).
-  vocab: { perCorrect: 2, perMastered: 15, dailyCap: 200 },
+  // (NT$330 at most; about NT$12 a minute).
+  vocab: { perCorrect: 2, perMastered: 15, dailyCap: 150 },
   gamesPerMinute: 10,
   gamesDailyCap: 120,
-  missionsDailyCap: 80
+  missionsDailyCap: 60
 };
 const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 // What the account is worth for the allowance: the pool and Securities' holdings.
@@ -89,8 +89,8 @@ function resetNotice(s) {
     icon: '⚖️',
     title: en ? 'Quadra’s new economy' : 'Quadra 經濟調整',
     body: en
-      ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. The monthly allowance now goes by what you're worth (NT$6,000 down to 1,000).${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
-      : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月津貼改為依資產發放（NT$6,000 到 1,000）。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
+      ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. The monthly allowance now goes by what you're worth (NT$6,000 down to 500).${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
+      : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月津貼改為依資產發放（NT$6,000 到 500）。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
   });
 }
 
@@ -1275,7 +1275,7 @@ export function plusPerks(lang = 'zh') {
     ['odds', en ? 'Parlay boost doubled' : '串關加成加倍', en ? 'Up to +40% on a winning parlay' : '全過最高多拿 40% 獎金'],
     ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(PLUS.odds.cashOutKeep)} instead of 5%` : `只扣 ${pct(PLUS.odds.cashOutKeep)}，一般扣 5%`],
     ['vocab', en ? 'A streak protection every month' : '每月一張連續紀錄保護卡', en ? 'Your streak survives a missed day' : '漏掉一天，連續紀錄照樣算'],
-    ['vocab', en ? 'NT$50 more word pay a day' : '單字獎勵每日上限 +NT$50', en ? 'NT$250 instead of 200' : '一般 NT$200，會員 NT$250'],
+    ['vocab', en ? 'NT$50 more word pay a day' : '單字獎勵每日上限 +NT$50', en ? `${money(ECONOMY.vocab.dailyCap + 50)} instead of ${money(ECONOMY.vocab.dailyCap)}` : `一般 ${money(ECONOMY.vocab.dailyCap)}，會員 ${money(ECONOMY.vocab.dailyCap + 50)}`],
     ['vocab', en ? 'Word packs at half price' : '單字包半價', en ? 'TOEIC, IELTS, Business English' : '多益、雅思、商務英文']
   ];
 }

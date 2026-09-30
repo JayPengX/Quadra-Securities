@@ -52,6 +52,18 @@ test('buying Taiwan stock at market: price, commission, cash and holding', () =>
   assert.equal(s.positions['2330.TW'].cost, 248_103);
 });
 
+test('the welcome offer: an account marked by the app pays no commission on its first trade, only then', async () => {
+  const { withWelcome, firstTrade } = await import('../public/lib/account.mjs');
+  const a = withWelcome(newAccount(1_000_000, T0, 'acc'));
+  assert.equal(firstTrade(a), true);
+  const r = placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100 }, { quote: quote('2330.TW', 2475), rates: RATES, now: T0, id: 'o1' });
+  assert.equal(r.fill.commission, 0);
+  assert.equal(firstTrade(r.account), false);
+  assert.equal(withWelcome(r.account), r.account);
+  const r2 = placeOrder(r.account, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100 }, { quote: quote('2330.TW', 2475), rates: RATES, now: T0 + 1, id: 'o2' });
+  assert.equal(r2.fill.commission, 353);
+});
+
 test('not enough cash, not enough shares, bad quantities', () => {
   const a = newAccount(100_000, T0, 'acc');
   const q = quote('2330.TW', 2475);

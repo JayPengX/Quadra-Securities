@@ -101,16 +101,26 @@ function resetNotice(s) {
 // first month someone ever joins is free. A month is a member's when the
 // wallet holds `eco:plus:<YYYY-MM>`, so every app reads the same answer, for
 // any past day too (Securities' daily cash interest). The perks are real
-// money each app gives up; the fee is what it earns back.
+// money each app gives up; the fee, and the play they bring, earn it back
+// (tools/economy.mjs: a regular member gets back about three times the fee,
+// a few percent of what the house keeps from them).
 export const PLUS = {
-  fee: 290,
+  fee: 390,
   // The yearly plan: twelve months for the price of ten.
-  year: 2_900,
-  // Securities: commission ×0.5, FX spread ×0.5, NT$ cash interest 2% a year
-  // (0.8% otherwise), borrowing 1 point cheaper.
-  stock: { commission: 0.5, fxSpread: 0.5, cashRate: 0.02, loanCut: 0.01 },
-  // Play: the parlay boost doubled, and cash out keeps 2% instead of 5%.
-  odds: { boost: 2, cashOutKeep: 0.02 }
+  year: 3_900,
+  // Securities: commission at 2.8折 (×0.28, a Taiwan online broker's best
+  // rate), FX spread ×0.5, NT$ cash interest 2% a year (0.8% otherwise),
+  // borrowing 1 point cheaper.
+  stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, loanCut: 0.01 },
+  // Play: the parlay boost doubled; cash out keeps 2% instead of 5%; one
+  // paid slip a Taiwan day (costing at most liftMax) wins `lift` more (+10%
+  // of its winnings: under the house's cut of about 16% on every market, so
+  // even a boosted slip keeps the house ahead); and a NT$bonusBet free bet
+  // each week (the Worker's `eco:fb:<Monday>`).
+  odds: { boost: 2, cashOutKeep: 0.02, lift: 0.1, liftMax: 1_000, bonusBet: 100 },
+  // Rewards: every word pack while a member, a streak protection a month,
+  // NT$50 more word pay a day (Rewards' shop.mjs).
+  vocab: { wordsCap: 50 }
 };
 const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
 export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
@@ -122,10 +132,59 @@ export const plusPlan = wallet => (wallet?.settings?.plus?.value?.plan === 'year
 // The last month already paid for (YYYY-MM), or null.
 export const plusUntil = wallet => [...plusMonths(wallet)].sort().at(-1) ?? null;
 
+// ---- VIP: free tiers by what's played, with cashback -----------------------------------
+//
+// A Taiwan month's gaming stakes (Play's bets and lottery and scratch
+// tickets, less refunds: `odds` entries of kind stake / lottery / refund)
+// set that month's tier, and the Worker pays the tier's share of them back
+// on the next month's first read (`eco:vip:<month>`, kind 'vip'; eco.js
+// VIP, the same table). Loyalty cashback like a real sportsbook's or
+// casino's: a sliver of the house's cut (every product keeps 14% or more;
+// the top rate is 1.5%), for the players who bring the most.
+export const VIP = {
+  from: '2026-10',
+  tiers: [
+    { id: 'bronze', min: 10_000, back: 0.005, icon: '🥉', zh: '銅卡', en: 'Bronze' },
+    { id: 'silver', min: 50_000, back: 0.008, icon: '🥈', zh: '銀卡', en: 'Silver' },
+    { id: 'gold', min: 150_000, back: 0.012, icon: '🥇', zh: '金卡', en: 'Gold' },
+    { id: 'black', min: 500_000, back: 0.015, icon: '◆', zh: '黑卡', en: 'Black' }
+  ]
+};
+// A month's (YYYY-MM, Taiwan) gaming stakes, whole NT$.
+export function vipStakes(wallet, month) {
+  let sum = 0;
+  for (const e of wallet?.entries || []) {
+    if (e.app !== 'odds' || typeof e.t !== 'number' || plusMonth(e.t) !== month) continue;
+    if (e.kind === 'stake' || e.kind === 'lottery' || e.kind === 'refund') sum -= e.amount;
+  }
+  return Math.max(0, Math.round(sum));
+}
+export const vipTier = stakes => [...VIP.tiers].reverse().find(t => stakes >= t.min) ?? null;
+// This month so far: stakes, tier, the cashback it's heading for, the next
+// tier and what's left to reach it; and last month's cashback if paid.
+export function vipStatus(wallet, now = Date.now()) {
+  const month = plusMonth(now);
+  const stakes = vipStakes(wallet, month);
+  const tier = vipTier(stakes);
+  const next = VIP.tiers.find(t => stakes < t.min) ?? null;
+  const paid = (wallet?.entries || []).filter(e => e.app === 'eco' && e.kind === 'vip').sort((a, b) => b.t - a.t)[0] ?? null;
+  return { month, stakes, tier, back: tier ? Math.floor(stakes * tier.back) : 0, next, toNext: next ? next.min - stakes : 0, paid };
+}
+export const vipName = (tier, lang = 'zh') => (tier ? `${tier.icon} ${lang === 'en' ? tier.en : tier.zh}` : '');
+
+// The welcome offer (eco.js WELCOME): the first paid bet in Play brings a
+// NT$WELCOME.bet free bet (`eco:fb:welcome`), once. Still to come?
+export const WELCOME = { bet: 200 };
+export const welcomeDue = wallet => {
+  const entries = wallet?.entries || [];
+  return !entries.some(e => e.id === 'eco:fb:welcome') && !entries.some(e => e.app === 'odds' && e.kind === 'stake' && e.amount < 0);
+};
+
 // ---- Free bets ------------------------------------------------------------------------
 //
 // A free bet is a token Rewards gives for a mission ('vocab:fb:<day>:<mission>',
-// kind 'freebet', amount 0, its value in the note): Play stakes it on one
+// kind 'freebet', amount 0, its value in the note), or Quadra Plus's weekly
+// bonus bet (the Worker's 'eco:fb:<Monday>', app 'eco'): Play stakes it on one
 // slip, and only the winnings come back, never the stake. Play marks it
 // spent with 'odds:fb-<token id>' (a fixed id: spent once). Unspent tokens
 // last FREEBET.days.
@@ -139,7 +198,7 @@ export function freeBets(wallet, now = Date.now(), spent = []) {
   const entries = wallet?.entries || [];
   const used = new Set([...spent, ...entries.filter(e => e.app === 'odds' && typeof e.id === 'string' && e.id.startsWith('odds:fb-')).map(e => e.id.slice(8))]);
   return entries
-    .filter(e => e.app === 'vocab' && e.kind === 'freebet' && typeof e.id === 'string' && e.id.startsWith('vocab:fb:') && freeBetValue(e) && !used.has(e.id))
+    .filter(e => e.kind === 'freebet' && typeof e.id === 'string' && ((e.app === 'vocab' && e.id.startsWith('vocab:fb:')) || (e.app === 'eco' && e.id.startsWith('eco:fb:'))) && freeBetValue(e) && !used.has(e.id))
     .map(e => ({ id: e.id, value: freeBetValue(e), t: e.t, until: e.t + FREEBET.days * 86_400_000 }))
     .filter(x => x.until > now)
     .sort((a, b) => a.until - b.until);
@@ -786,6 +845,9 @@ const KIND = {
   shop: ['Rewards 加值', 'Rewards purchase'],
   freeze: ['連續紀錄保護卡', 'Streak protection'],
   freebet: ['免費投注', 'Free bet'],
+  plusboost: ['✦ Plus 獎金加成', '✦ Plus boost'],
+  vip: ['VIP 投注回饋', 'VIP cashback'],
+  welcome: ['新手禮', 'Welcome offer'],
   'xfer-in': ['轉入', 'Transfer in'],
   'xfer-out': ['轉出', 'Transfer out'],
   merge: ['合併帶入', 'Carried over']
@@ -1267,17 +1329,35 @@ export function plusJoinPrice(wallet, now = Date.now()) {
 export function plusPerks(lang = 'zh') {
   const en = lang === 'en';
   const pct = x => `${Math.round(x * 1000) / 10}%`;
+  const o = PLUS.odds;
+  const zhDiscount = `${Math.round(PLUS.stock.commission * 100) / 10} 折`;
+  const words = PLUS.vocab.wordsCap;
   return [
-    ['stock', en ? 'Half-price commission' : '證券手續費 5 折', en ? 'Every market, every order' : '所有市場、每一筆委託'],
-    ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
-    ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? 'Instead of 0.8%, accrued daily' : '一般 0.8%，每日計息'],
-    ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
+    ['odds', en ? `+${pct(o.lift)} winnings, every day` : `每日獎金 +${pct(o.lift)}`, en ? `One slip a day up to ${money(o.liftMax)}` : `每天一張、${money(o.liftMax)} 以內的投注`],
+    ['odds', en ? `A ${money(o.bonusBet)} free bet every week` : `每週 ${money(o.bonusBet)} 免費投注`, en ? 'Every Monday, keep what it wins' : '每週一送，贏了獎金歸你'],
     ['odds', en ? 'Parlay boost doubled' : '串關加成加倍', en ? 'Up to +40% on a winning parlay' : '全過最高多拿 40% 獎金'],
-    ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(PLUS.odds.cashOutKeep)} instead of 5%` : `只扣 ${pct(PLUS.odds.cashOutKeep)}，一般扣 5%`],
-    ['vocab', en ? 'A streak protection every month' : '每月一張連續紀錄保護卡', en ? 'Your streak survives a missed day' : '漏掉一天，連續紀錄照樣算'],
-    ['vocab', en ? 'NT$50 more word pay a day' : '單字獎勵每日上限 +NT$50', en ? `${money(ECONOMY.vocab.dailyCap + 50)} instead of ${money(ECONOMY.vocab.dailyCap)}` : `一般 ${money(ECONOMY.vocab.dailyCap)}，會員 ${money(ECONOMY.vocab.dailyCap + 50)}`],
-    ['vocab', en ? 'Word packs at half price' : '單字包半價', en ? 'TOEIC, IELTS, Business English' : '多益、雅思、商務英文']
+    ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(o.cashOutKeep)} instead of 5%` : `只扣 ${pct(o.cashOutKeep)}，一般扣 5%`],
+    ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${zhDiscount}`, en ? 'Every market, every order' : '所有市場、每一筆委託'],
+    ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? 'Instead of 0.8%, accrued daily' : '一般 0.8%，每日計息'],
+    ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
+    ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
+    ['vocab', en ? 'Every word pack included' : '所有單字包免費', en ? 'TOEIC, IELTS, Business English' : '多益、雅思、商務英文，會員期間隨你背'],
+    ['vocab', en ? `${money(words)} more word pay a day` : `單字獎勵每日上限 +${money(words)}`, en ? `${money(ECONOMY.vocab.dailyCap + words)} instead of ${money(ECONOMY.vocab.dailyCap)}` : `一般 ${money(ECONOMY.vocab.dailyCap)}，會員 ${money(ECONOMY.vocab.dailyCap + words)}`],
+    ['vocab', en ? 'A streak protection every month' : '每月一張連續紀錄保護卡', en ? 'Your streak survives a missed day' : '漏掉一天，連續紀錄照樣算']
   ];
+}
+// What Plus gave back this Taiwan month, from the wallet: Play's boosts paid
+// (kind 'plusboost') and the bonus bets received (their face value).
+export function plusReturns(wallet, now = Date.now()) {
+  const month = plusMonth(now);
+  let boosts = 0;
+  let bets = 0;
+  for (const e of wallet?.entries || []) {
+    if (typeof e.t !== 'number' || plusMonth(e.t) !== month) continue;
+    if (e.kind === 'plusboost' && e.amount > 0) boosts += e.amount;
+    if (e.app === 'eco' && e.kind === 'freebet' && typeof e.id === 'string' && e.id.startsWith('eco:fb:')) bets += freeBetValue(e);
+  }
+  return { boosts: Math.round(boosts), bets, total: Math.round(boosts) + bets };
 }
 const PLUS_MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.6 6.9 6.9 2.6-6.9 2.6L12 21.5l-2.6-6.9L2.5 12l6.9-2.6z"/></svg>';
 function plusGlyph() {
@@ -1296,6 +1376,13 @@ export function plusCard(s, { compact = false } = {}) {
   const price = plusJoinPrice(s.wallet);
   const until = plusUntil(s.wallet);
   const untilText = until ? `${until.slice(0, 4)}/${Number(until.slice(5))}` : '';
+  const back = member ? plusReturns(s.wallet).total : 0;
+  const pct = x => `${Math.round(x * 100)}%`;
+  const pitch = member
+    ? back > 0
+      ? T(`本月會員回饋 ${money(back)}`, `Plus gave you ${money(back)} this month`)
+      : T(`每日獎金 +${pct(PLUS.odds.lift)} · 每週 ${money(PLUS.odds.bonusBet)} 免費投注`, `+${pct(PLUS.odds.lift)} winnings daily · ${money(PLUS.odds.bonusBet)} free bet weekly`)
+    : T(`每日獎金 +${pct(PLUS.odds.lift)} · 每週 ${money(PLUS.odds.bonusBet)} 免費投注 · 手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, `+${pct(PLUS.odds.lift)} winnings daily · ${money(PLUS.odds.bonusBet)} free bet weekly · ${pct(1 - PLUS.stock.commission)} off trades`);
   const status = member
     ? plusPlan(s.wallet) === 'year'
       ? T(`年繳會員 · 有效至 ${untilText}`, `Yearly member · through ${untilText}`)
@@ -1307,7 +1394,7 @@ export function plusCard(s, { compact = false } = {}) {
       : T(`年繳 ${money(PLUS.year)}，省下兩個月`, `${money(PLUS.year)} a year: two months free`);
   return node('button', { class: `q-plus-card${member ? ' member' : ''}${compact ? ' compact' : ''}`, type: 'button', onclick: () => openPlus(s) }, [
     node('span', { class: 'q-plus-top' }, [plusGlyph(), node('span', { class: 'q-plus-word', text: 'QUADRA PLUS' }), node('span', { class: 'q-plus-go', text: member ? T('管理', 'Manage') : price === 0 ? T('免費試用', 'Try free') : T('加入', 'Join') })]),
-    compact ? null : node('span', { class: 'q-plus-pitch', text: T('手續費 5 折 · 活存 2% · 串關加成加倍', 'Half-price trades · 2% on cash · double parlay boosts') }),
+    compact ? null : node('span', { class: 'q-plus-pitch', text: pitch }),
     node('span', { class: 'q-plus-status', text: status })
   ].filter(Boolean));
 }
@@ -1383,14 +1470,23 @@ export function openPlus(s) {
         node('h3', { class: 'q-sheet-h', text: title }),
         node('ul', { class: 'q-plus-perks' }, perks.filter(p => p[0] === app).map(([, a, b]) => node('li', {}, [plusGlyph(), node('span', {}, [node('strong', { text: a }), node('small', { text: b })])])))
       ]);
+    // A member sees what Plus gave back this month; anyone else, the price.
+    const back = plusReturns(s.wallet);
     body.replaceChildren(
       node('div', { class: `q-plus-hero${member ? ' member' : ''}` }, [
         node('span', { class: 'q-plus-top' }, [plusGlyph(), node('span', { class: 'q-plus-word', text: 'QUADRA PLUS' })]),
-        node('strong', { class: 'q-plus-price num', text: `${money(Math.round(PLUS.year / 12))}` }),
-        node('span', { class: 'q-plus-per', text: T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app') })
+        member
+          ? node('strong', { class: 'q-plus-price num', text: money(back.total) })
+          : node('strong', { class: 'q-plus-price num', text: `${money(Math.round(PLUS.year / 12))}` }),
+        node('span', {
+          class: 'q-plus-per',
+          text: member
+            ? T(`本月會員回饋 · 獎金加成 ${money(back.boosts)} · 免費投注 ${money(back.bets)}`, `Back to you this month · boosts ${money(back.boosts)} · free bets ${money(back.bets)}`)
+            : T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app')
+        })
       ]),
-      group('stock', 'Quadra Securities'),
       group('odds', 'Quadra Play'),
+      group('stock', 'Quadra Securities'),
       group('vocab', 'Quadra Rewards'),
       ...cta
     );

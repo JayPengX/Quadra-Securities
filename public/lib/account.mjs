@@ -311,11 +311,17 @@ export function withdrawable(account, s, now = Date.now()) {
 
 // ---- Orders ------------------------------------------------------------------
 
-// What a trade of `qty` at `price` costs or brings in, all in.
-export function estimate({ market, kind, currency, side, qty, price, t = Date.now(), dayTrade = false }) {
+// What a trade of `qty` at `price` costs or brings in, all in. `first`: the
+// account's first trade ever, which pays no commission (the welcome offer,
+// Quadra's: taxes and fees as usual). The app marks an account that hasn't
+// traded (`withWelcome`); the offer is its first fill.
+const traded = account => (account?.events || []).some(e => e.type === 'fill');
+export const withWelcome = account => (account && !traded(account) && !account.welcome ? { ...account, welcome: true } : account);
+export const firstTrade = account => account?.welcome === true && !traded(account);
+export function estimate({ market, kind, currency, side, qty, price, t = Date.now(), dayTrade = false, first = false }) {
   const deal = dealPrice(market, side, price);
   const gross = roundCash(deal * qty, currency);
-  const costs = tradeCosts({ market, side, kind, gross, currency, discount: plusAt(t) ? plus.commission : 1, oddLot: isOddLot(market, kind, qty), dayTrade });
+  const costs = tradeCosts({ market, side, kind, gross, currency, discount: first ? 0 : plusAt(t) ? plus.commission : 1, oddLot: isOddLot(market, kind, qty), dayTrade });
   const total = side === 'buy' ? gross + costs.total : gross - costs.total;
   return { price: deal, gross, ...costs, costs: costs.total, total };
 }
@@ -490,7 +496,7 @@ function fillOrder(account, order, price, rates, now, at = now) {
   else price = order.side === 'buy' ? Math.min(price, order.limit) : Math.max(price, order.limit);
   // A Taiwan stock sold the day it was bought pays the day-trade tax.
   const dayTrade = order.side === 'sell' && order.market === 'TW' && account.events.some(e => e.type === 'fill' && e.symbol === order.symbol && e.side === 'buy' && e.t <= at && localDayOf(e.t, 'TW') === localDayOf(at, 'TW'));
-  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at, dayTrade });
+  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at, dayTrade, first: firstTrade(account) });
   // A fill found in the past must have fitted the cash (or shares) at that
   // moment and still fit today's.
   const moments = at < now ? [at, now] : [now];

@@ -1,7 +1,7 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
@@ -129,7 +129,8 @@ async function oldDeviceAccount(account) {
 let saveTimer;
 let syncTimer;
 function commit(account, { sync = true } = {}) {
-  state.account = account;
+  // An account that hasn't traded has the welcome offer (its first trade pays no commission).
+  state.account = withWelcome(account);
   clearTimeout(pushTimer);
   pushTimer = setTimeout(syncPush, 3000);
   clearTimeout(saveTimer);
@@ -1288,11 +1289,14 @@ function addPlan() {
   planAddedAt = Date.now();
   // The keyboard away, so the sheet redraws with the plan in place.
   document.activeElement?.blur?.();
+  // A plan for a symbol that never had one (not an edit, not one stopped and started again).
+  const fresh = !Object.values(state.account.plans || {}).some(p => p.symbol === d.symbol);
   const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
   commit(r.account);
-  // Rewards' mission: a monthly plan set up.
-  track('plan', symbolKeys(d.symbol), 2);
+  // Rewards' mission: a new monthly plan (an edit keeps the affinity, not the mission).
+  if (fresh) track('plan', symbolKeys(d.symbol), 2);
+  else recordAffinity('stock', symbolKeys(d.symbol), 2);
   toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
   redrawDetail();
 }
@@ -1531,7 +1535,8 @@ function ticketInfo() {
   // order at the ask to buy or the bid to sell.
   const last = d.type === 'stop' ? (d.side === 'buy' ? Math.max(Number(d.stop), q.price) : Number(d.stop)) || q.price : q.price;
   const ref = d.type === 'limit' ? Number(d.limit) : marketFill(q.market, q.kind, d.side, last);
-  const est = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref }) : null;
+  const welcome = firstTrade(state.account);
+  const est = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref, first: welcome }) : null;
   const cash = Math.max(0, avail.cash[q.currency] || 0);
   const shares = Math.max(0, avail.qty[d.symbol] || 0);
   // Largest quantity whose held amount fits the cash, NT$ that could be
@@ -1660,6 +1665,7 @@ function renderTicket() {
         <div class="preview-total"><dt>${h(d.side === 'buy' ? t('totalCost') : t('totalProceeds'))}</dt><dd class="num"><strong>${h(money(est.total, q.currency))}</strong>${rate && q.currency !== BASE ? `<small>≈ ${h(money(est.total * rate, BASE))}</small>` : ''}</dd></div>
         ${req && req.buffer > 0 ? `<div class="preview-held"><dt>${h(t('heldUntilFill'))}<small>${h(t('bufferNote'))}</small></dt><dd class="num"><strong>${h(money(need, q.currency))}</strong></dd></div>` : ''}
         ${d.side === 'buy' ? `<div class="preview-have ${short > 0 ? 'short' : ''}"><dt>${h(t('youHave', { amount: '' }).trim())}</dt><dd class="num">${h(money(cash, q.currency))}</dd></div>` : ''}</dl>
+        ${welcome ? `<p class="fee-welcome">${h(t('feeWelcome'))}</p>` : ''}
         ${est.commission && !plusAt() ? `<button class="q-plus-hint fee-plus" type="button" data-action="plus">${h(t('feePlus', { v: money(q.market === 'TW' ? Math.floor(est.commission * PLUS.stock.commission) : est.commission * PLUS.stock.commission, q.currency) }))}</button>` : ''}`
         : ''
     }
@@ -3329,7 +3335,7 @@ async function boot() {
   const first = await q.start();
   state.wallet = first.wallet || q.wallet;
   syncPlus(state.wallet);
-  state.account = await loadAccount();
+  state.account = withWelcome(await loadAccount());
   // The pass's own copy, merged in (and the account made, the first time).
   if (first && !first.offline) await (syncChain = syncChain.then(() => mergeRemote(first)).catch(error => (state.sync.error = error.message)));
   const recovered = await oldDeviceAccount(state.account);

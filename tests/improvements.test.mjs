@@ -267,7 +267,7 @@ test('a fill found in the past must have fitted the cash at that moment', async 
 });
 
 test('sale proceeds settle T+2 in Taiwan: they buy again at once but can’t be exchanged until then', async () => {
-  const { placeOrder, exchange, unsettled } = await import('../public/lib/account.mjs');
+  const { placeOrder, exchange, unsettled, settlesBy } = await import('../public/lib/account.mjs');
   const fri = Date.parse('2026-09-25T10:00:00+08:00');
   const q = { symbol: '0050.TW', name: '0050', kind: 'etf', market: 'TW', currency: 'TWD', price: 100, prev: 100, session: { start: fri - 3_600_000, end: fri + 3_600_000 }, marketTime: fri };
   let a = newAccount(100_000, fri - DAY, 's');
@@ -277,6 +277,8 @@ test('sale proceeds settle T+2 in Taiwan: they buy again at once but can’t be 
   // Monday 9/28 (Teacher's Day) is a Taiwan market holiday: T+2 is Wednesday.
   assert.equal(new Date(sold.fill.settle + 8 * 3_600_000).toISOString().slice(0, 10), '2026-09-30');
   assert.ok(unsettled(a, fri + 1).TWD > 89_000);
+  assert.equal(settlesBy(a, fri + 1).TWD, sold.fill.settle);
+  assert.deepEqual(settlesBy(a, sold.fill.settle + 1), {});
   const rates = { TWD: 1, USD: 32 };
   assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: fri + 1 }).error, 'unsettled');
   // What was never invested can go.

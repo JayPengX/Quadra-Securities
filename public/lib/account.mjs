@@ -295,6 +295,13 @@ export function unsettled(account, now = Date.now()) {
   for (const e of account.events) if (e.type === 'fill' && e.side === 'sell' && e.settle > now && e.t <= now) add(out, e.currency, e.total);
   return out;
 }
+// When each currency's unsettled sale money is all settled: the latest
+// pending settle moment per currency.
+export function settlesBy(account, now = Date.now()) {
+  const out = {};
+  for (const e of account.events) if (e.type === 'fill' && e.side === 'sell' && e.settle > now && e.t <= now) out[e.currency] = Math.max(out[e.currency] || 0, e.settle);
+  return out;
+}
 export function withdrawable(account, s, now = Date.now()) {
   const cash = available(account, s).cash;
   const pending = unsettled(account, now);

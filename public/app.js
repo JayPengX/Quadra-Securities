@@ -1,7 +1,7 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
@@ -1794,6 +1794,7 @@ function renderPortfolio() {
 function cashCardHtml(v, heldTWD, unsettledNow, heldFor) {
   const settlingTWD = Object.entries(unsettledNow).reduce((sum, [c, x]) => sum + x * (state.rates[c] ?? 0), 0);
   const free = v.cashTWD - heldTWD;
+  const settleAt = settlesBy(state.account);
   return `<div class="card cash-card">
     <div class="card-head"><h3 class="card-title">💵 ${h(t('wallets'))}</h3><strong class="num cash-total">${h(money(free, BASE))}</strong></div>
     <div class="cash-chips">
@@ -1801,7 +1802,7 @@ function cashCardHtml(v, heldTWD, unsettledNow, heldFor) {
       ${settlingTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashSettling'))}</small><strong class="num">${h(money(settlingTWD, BASE))}</strong></span>` : ''}
       <span class="cash-chip"><small>${h(t('cashInterestRate'))}</small><strong class="num">${h(pct(CASH_RATE, { digits: 2, sign: false }))}</strong></span>
     </div>
-    <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0)).join('')}${v.loans.map(loanWalletRow).join('')}</div>
+    <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0, settleAt[c.currency])).join('')}${v.loans.map(loanWalletRow).join('')}</div>
     <p class="note">${h(t('poolNote'))}</p>
   </div>`;
 }
@@ -1879,13 +1880,13 @@ function positionRow(p) {
   </button>`;
 }
 
-function walletRow(c, reserved = 0, settling = 0) {
+function walletRow(c, reserved = 0, settling = 0, settleAt = 0) {
   const info = currencyInfo(c.currency);
   if (reserved > 1e-9 && c.amount) c = { ...c, amount: c.amount - reserved, twd: c.twd * (1 - reserved / c.amount) };
   return `<button class="wallet" type="button" data-action="fx-from" data-cur="${h(c.currency)}">
     <span class="wallet-flag">${info.flag}</span>
     <span class="wallet-main"><strong>${h(c.currency)}</strong><small>${h(L(info))}</small></span>
-    <span class="wallet-amt"><strong class="num">${h(money(c.amount, c.currency))}</strong>${c.currency !== BASE ? `<small class="num">≈ ${h(money(c.twd, BASE))}</small>` : ''}${reserved > 1e-9 ? `<small class="num">${h(t('reserved', { amount: money(reserved, c.currency) }))}</small>` : ''}${settling > 1e-9 ? `<small class="num">${h(t('settling', { amount: money(settling, c.currency) }))}</small>` : ''}</span>
+    <span class="wallet-amt"><strong class="num">${h(money(c.amount, c.currency))}</strong>${c.currency !== BASE ? `<small class="num">≈ ${h(money(c.twd, BASE))}</small>` : ''}${reserved > 1e-9 ? `<small class="num">${h(t('reserved', { amount: money(reserved, c.currency) }))}</small>` : ''}${settling > 1e-9 ? `<small class="num">${h(t('settling', { amount: money(settling, c.currency) }))}${settleAt ? ` · ${h(t('settleBy', { date: shortDate(settleAt) }))}` : ''}</small>` : ''}</span>
   </button>`;
 }
 
@@ -2096,7 +2097,7 @@ function exchangeHtml() {
       </dl>
       ${spread > 0 && !plusAt() ? `<button class="q-plus-hint fee-plus" type="button" data-action="plus">${h(t('fxPlus', { v: pct(spread * PLUS.stock.fxSpread, { digits: 2, sign: false }) }))}</button>` : ''}
       ${tooMuch ? `<p class="warn">${h(t('notEnoughCur', { cur: f.from, have: money(have, f.from) }))}</p>` : ''}
-      ${waiting > 0 ? `<p class="note">${h(t('unsettledNote', { amount: money(waiting, f.from) }))}</p>` : ''}
+      ${waiting > 0 ? `<p class="note">${h(t('unsettledNote', { amount: money(waiting, f.from), date: shortDate(settlesBy(state.account)[f.from]) }))}</p>` : ''}
       ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
       <button class="primary-button block" type="button" data-action="fx-go" ${q && q.received > 0 && !tooMuch && f.from !== f.to && pricesLive() ? '' : 'disabled'}>${h(q && !tooMuch ? t('fxConfirm', { from: money(amount, f.from), to: money(q.received, f.to) }) : t('doExchange'))}</button>
       <p class="note">${h(state.fxOpen ? t('fxOpenNote') : t('fxClosedNote'))}${usd?.marketTime ? ` ${h(t('asOf', { time: dateTime(usd.marketTime) }))}` : ''}</p>

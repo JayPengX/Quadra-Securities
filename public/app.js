@@ -3347,7 +3347,14 @@ async function boot() {
     .then(checkMarginHistory)
     .finally(() => {
       state.backfilled = true;
-      refresh({ list: true }).then(() => {
+      refresh({ list: true }).then(async () => {
+        // The first prices failed (the quote service busy): tried again while
+        // the loading screen stays, so the page doesn't open on empty prices,
+        // until the 8-second limit below opens it anyway.
+        while (!state.loaded && Date.now() - bootAt < BOOT_LIMIT_MS - 1_500) {
+          await new Promise(r => setTimeout(r, 1_500));
+          await refresh({ list: true });
+        }
         $('loading').hidden = true;
         checkBonds();
         checkCorporateActions();
@@ -3356,9 +3363,11 @@ async function boot() {
       });
     });
 }
+const bootAt = Date.now();
+const BOOT_LIMIT_MS = 8_000;
 if (!gated) boot();
 // Hide the loading screen after at most 8 seconds whatever happens.
-setTimeout(() => ($('loading').hidden = true), 8000);
+setTimeout(() => ($('loading').hidden = true), BOOT_LIMIT_MS);
 
 setInterval(() => {
   if (document.visibilityState === 'visible' && q.active) refresh().then(checkBonds);

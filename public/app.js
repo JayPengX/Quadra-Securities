@@ -17,7 +17,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
-  APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, recordAffinity, activityPatch, affinity, notify, notifyOn, schedulePush, ask, translate, paydayFor, PLUS, plusMonths, plusCard, openPlus, affinityPatch
+  APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, recordAffinity, activityPatch, affinity, notify, notifyOn, kindOn, schedulePush, ask, translate, paydayFor, PLUS, plusMonths, plusCard, openPlus, affinityPatch
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -30,7 +30,8 @@ const STORE = {
   sync: 'stockStudy.syncCode',
   settings: 'stockStudy.settings',
   actions: 'stockStudy.actionsChecked',
-  quotes: 'stockStudy.quotes'
+  quotes: 'stockStudy.quotes',
+  marginNotice: 'stockStudy.marginNotice'
 };
 
 const locale = detectLocale();
@@ -166,6 +167,10 @@ function syncPush() {
   for (const p of activePlans(account)) {
     const next = nextPlanRun(p, now);
     if (next) items.push({ at: next + 9 * 3_600_000, title: t('noticePlanTitle'), body: t('noticePlanDay', { name: nameOf(p.symbol), amount: money(p.amount, BASE) }), tag: `plan:${p.id}:${next}`, hash: 'portfolio', kind: 'fill' });
+  }
+  // Dividends on the way: the day each is paid.
+  for (const e of pendingDividends(account, now)) {
+    items.push({ at: e.t, title: t('noticeDivPayTitle'), body: t('noticeDivPayBody', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), tag: `div:${e.symbol}:${e.t}`, hash: 'portfolio', kind: 'income' });
   }
   schedulePush(q, items);
 }
@@ -344,24 +349,25 @@ function afterPrices() {
   // Day orders past their session end (and month-old GTC ones) lapse first.
   const ex = expireOrders(account, now);
   account = ex.account;
-  for (const o of ex.expired) toast(t('toastExpired', { name: nameOf(o.symbol) }), '');
+  for (const o of ex.expired) accountNotice('order', t('toastExpired', { name: nameOf(o.symbol) }), { tag: `order:${o.id}`, hash: 'history' });
   const r = processOrders(account, state.quotes, state.rates, now);
   account = r.account;
   for (const f of r.filled) filledNotice(t('toastFilled', { side: t(f.side), qty: fmtQty(f.qty), name: nameOf(f.symbol), price: fmtPrice(f.price, f.currency) }), f);
-  for (const o of r.rejected) toast(t('toastRejected', { name: nameOf(o.symbol), why: t(`err_${o.reason}`) }), 'bad');
+  for (const o of r.rejected) accountNotice('order', t('toastRejected', { name: nameOf(o.symbol), why: t(`err_${o.reason}`) }), { tone: 'bad', tag: `order:${o.id}`, hash: 'history' });
   if (r.filled.some(f => f.forced)) account = repayAll(account, state.rates, state.fxOpen, now);
   let v = valuate(replay(account, now), state.quotes, state.rates);
   for (const plan of liquidationPlan(account, v)) {
     const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
     if (placed.account) {
       account = placed.account;
-      toast(t('toastForced', { name: nameOf(plan.symbol) }), 'bad');
+      accountNotice('margin', t('toastForced', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `forced:${plan.symbol}:${now}`, hash: 'fx' });
     }
   }
   if (account !== state.account) {
     if (account.orders.some(o => o.forced && o.status === 'filled' && o.done === now)) account = repayAll(account, state.rates, state.fxOpen, now);
     v = valuate(replay(account, now), state.quotes, state.rates);
   }
+  if (v.margin === 'call' && !v.missingRates.length && !v.stale.length) marginCallNotice(account, v);
   if (!v.missingRates.length && !v.stale.length) account = recordSnapshot(account, now, v.netWorth, v.deposits);
   const alerts = checkAlerts(account, state.quotes, now);
   account = alerts.account;
@@ -406,8 +412,28 @@ function alertFired(a, { late = false } = {}) {
 }
 // An order filled: a toast on screen, a notice when the app is in the background.
 function filledNotice(text, fill) {
-  if (document.visibilityState === 'visible') return toast(text, 'good');
+  if (!kindOn('stock', 'fill')) return;
+  if (document.visibilityState === 'visible') return toast(text, 'good', 'history');
   notify(q, { title: t('noticeFilled'), body: t('noticeFilledBody', { side: t(fill.side), name: nameOf(fill.symbol), qty: fmtQty(fill.qty), price: fmtPrice(fill.price, fill.currency) }), tag: `fill:${fill.id}`, hash: 'history', kind: 'fill' });
+}
+// What happened in the account (an order lapsed, a forced sale, a dividend
+// in): a toast while the app is on screen (tap: where it happened), a
+// system notice when it isn't. Each has its kind of notice in the account
+// sheet (kit NOTICE_KINDS.stock); a kind turned off there shows neither.
+const NOTICE_TITLE = { fill: 'noticeFilled', order: 'noticeOrderTitle', margin: 'noticeMarginTitle', income: 'noticeIncomeTitle' };
+function accountNotice(kind, text, { tone = 'good', tag = '', hash = '' } = {}) {
+  if (!kindOn('stock', kind)) return;
+  if (document.visibilityState === 'visible') return toast(text, tone, hash);
+  notify(q, { title: t(NOTICE_TITLE[kind]), body: text, tag, hash, kind });
+}
+// Margin below 130%: told once a day (the fx tab's badge stays until it's fixed).
+function marginCallNotice(account, v) {
+  const mark = `${account.id}:${taipeiDay(Date.now())}`;
+  try {
+    if (localStorage.getItem(STORE.marginNotice) === mark) return;
+    localStorage.setItem(STORE.marginNotice, mark);
+  } catch {}
+  accountNotice('margin', t('noticeMarginBody', { ratio: `${Math.floor(v.ratio * 100)}%` }), { tone: 'bad', tag: `margin:${mark}`, hash: 'fx' });
 }
 
 // Alerts set before the page was closed: checked against the price bars
@@ -432,7 +458,7 @@ function checkIncome() {
   const i = applyCashInterest(r.account);
   if (i.account === state.account) return;
   commit(i.account);
-  for (const e of i.added) toast(t('toastInterest', { amount: money(e.net, BASE) }), 'good');
+  for (const e of i.added) accountNotice('income', t('toastInterest', { amount: money(e.net, BASE) }), { tag: `interest:${e.id || e.t}`, hash: 'portfolio' });
   if (!r.added.length) return render();
   const total = r.added.reduce((sum, e) => sum + e.amount, 0);
   toast(r.added.length > 1 ? t('toastPaydays', { n: r.added.length, amount: money(total, BASE) }) : t('toastPayday', { amount: money(total, BASE) }), 'good');
@@ -474,8 +500,8 @@ async function checkPlans() {
         const r = runPlan(state.account, plan, run, { price: bar.o, twd, at: bar.t, quote }, Date.now());
         if (r.account === state.account) continue;
         commit(r.account);
-        if (r.fill) toast(t('toastPlan', { name: nameOf(plan.symbol), qty: fmtQty(r.fill.qty), price: fmtPrice(r.fill.price, r.fill.currency), time: fmtDate(r.fill.t) }), 'good');
-        else if (r.order?.status === 'rejected') toast(t('toastPlanSkipped', { name: nameOf(plan.symbol), why: t(`err_${r.order.reason}`) }), 'bad');
+        if (r.fill) accountNotice('fill', t('toastPlan', { name: nameOf(plan.symbol), qty: fmtQty(r.fill.qty), price: fmtPrice(r.fill.price, r.fill.currency), time: fmtDate(r.fill.t) }), { tag: `plan:${plan.id}:${run.month}`, hash: 'history' });
+        else if (r.order?.status === 'rejected') accountNotice('order', t('toastPlanSkipped', { name: nameOf(plan.symbol), why: t(`err_${r.order.reason}`) }), { tone: 'bad', tag: `plan:${plan.id}:${run.month}`, hash: 'portfolio' });
       }
     }
   } finally {
@@ -494,7 +520,7 @@ function checkBonds() {
     if (!r.added.length) continue;
     commit(r.account);
     for (const e of r.added)
-      toast(e.coupon ? t('toastCoupon', { name: nameOf(symbol), amount: money(e.net, e.currency) }) : t('toastMatured', { name: nameOf(symbol), amount: money(e.total, e.currency) }), 'good');
+      accountNotice('income', e.coupon ? t('toastCoupon', { name: nameOf(symbol), amount: money(e.net, e.currency) }) : t('toastMatured', { name: nameOf(symbol), amount: money(e.total, e.currency) }), { tag: `bond:${symbol}:${e.t}`, hash: 'portfolio' });
   }
 }
 
@@ -524,7 +550,7 @@ async function backfillOrders() {
     const f = fillFromHistory(state.account, r.o.id, r.hit, r.twd, Date.now());
     if (f.account !== state.account) commit(f.account);
     if (f.fill) filledNotice(t('toastFilledAt', { side: t(f.fill.side), name: nameOf(f.fill.symbol), qty: fmtQty(f.fill.qty), price: fmtPrice(f.fill.price, f.fill.currency), time: dateTime(f.fill.t) }), f.fill);
-    else if (f.order?.status === 'rejected') toast(t('toastRejected', { name: nameOf(f.order.symbol), why: t(`err_${f.order.reason}`) }), 'bad');
+    else if (f.order?.status === 'rejected') accountNotice('order', t('toastRejected', { name: nameOf(f.order.symbol), why: t(`err_${f.order.reason}`) }), { tone: 'bad', tag: `order:${f.order.id}`, hash: 'history' });
   }
   if (state.account?.orders.some(o => o.forced && o.status === 'filled')) commit(repayAll(state.account, state.rates, state.fxOpen, Date.now()));
 }
@@ -560,7 +586,7 @@ async function checkMarginHistory() {
     const r = marginHistory(state.account, { times, priceAt: (sym, t) => last(series.get(sym), t), rateAt: (c, t) => last(rates.get(c), t) ?? state.rates[c] });
     if (!r.forced.length) return;
     commit(r.account);
-    for (const f of r.forced) toast(t('toastForcedAt', { name: nameOf(f.symbol), qty: fmtQty(f.qty), price: fmtPrice(f.price, f.currency), time: dateTime(f.t) }), 'bad');
+    for (const f of r.forced) accountNotice('margin', t('toastForcedAt', { name: nameOf(f.symbol), qty: fmtQty(f.qty), price: fmtPrice(f.price, f.currency), time: dateTime(f.t) }), { tone: 'bad', tag: `forced:${f.symbol}:${f.t}`, hash: 'history' });
     render();
   } catch {}
 }
@@ -594,9 +620,9 @@ async function checkCorporateActions() {
     localStorage.setItem(STORE.actions, JSON.stringify(checked));
   } catch {}
   for (const e of credited) {
-    if (e.type === 'div' && e.t > Date.now()) toast(t('toastDividendPending', { name: nameOf(e.symbol), amount: money(e.net, e.currency), date: fmtDate(e.t) }), 'good');
-    else if (e.type === 'div') toast(t('toastDividend', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), 'good');
-    else toast(t('toastSplit', { name: nameOf(e.symbol), ratio: num(e.ratio, 4) }), 'good');
+    if (e.type === 'div' && e.t > Date.now()) accountNotice('income', t('toastDividendPending', { name: nameOf(e.symbol), amount: money(e.net, e.currency), date: fmtDate(e.t) }), { tag: `div:${e.symbol}:${e.t}:ex`, hash: 'portfolio' });
+    else if (e.type === 'div') accountNotice('income', t('toastDividend', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), { tag: `div:${e.symbol}:${e.t}`, hash: 'portfolio' });
+    else toast(t('toastSplit', { name: nameOf(e.symbol), ratio: num(e.ratio, 4) }), 'good', 'portfolio');
   }
   if (credited.length) render();
 }
@@ -610,21 +636,27 @@ function setBusy(busy) {
 // Toasts that come together (catching up on fills, plans, interest after a
 // while away) show as one: the first two, then how many more (tap for all).
 let toastBatch = null;
-function toast(text, kind = '') {
-  if (toastBatch) return void toastBatch.push([text, kind]);
-  toastBatch = [[text, kind]];
+// `hash`: the tab a tap on it opens.
+function toast(text, kind = '', hash = '') {
+  if (toastBatch) return void toastBatch.push([text, kind, hash]);
+  toastBatch = [[text, kind, hash]];
   setTimeout(() => {
     const list = toastBatch;
     toastBatch = null;
-    if (list.length <= 2) return list.forEach(([x, k]) => showToast(x, k));
+    if (list.length <= 2) return list.forEach(([x, k, go]) => showToast(x, k, [], go));
     showToast(list[0][0], list[0][1], list.slice(1));
   }, 500);
 }
-function showToast(text, kind = '', more = []) {
+function showToast(text, kind = '', more = [], hash = '') {
   const box = $('toasts');
   const el = document.createElement('div');
-  el.className = `toast ${kind}`;
+  el.className = `toast ${kind}${hash && !more.length ? ' go' : ''}`;
   el.textContent = text;
+  if (hash && !more.length)
+    el.addEventListener('click', () => {
+      el.remove();
+      if (TABS.includes(hash) && state.tab !== hash) showTab(hash);
+    });
   let open = false;
   if (more.length) {
     const tail = document.createElement('small');
@@ -3213,6 +3245,11 @@ $('detail').addEventListener('click', event => {
   const fromHash = location.hash.slice(1);
   if (TABS.includes(fromHash)) state.tab = fromHash;
 }
+// A notice's banner (or a link) that points at a tab while the app is open.
+window.addEventListener('hashchange', () => {
+  const tab = location.hash.slice(1);
+  if (TABS.includes(tab) && tab !== state.tab) showTab(tab);
+});
 // The same top-right in every Quadra app: help, refresh, then the account.
 topActions(q, { refresh: () => refresh({ list: true }), extra: settingsEl });
 

@@ -1430,10 +1430,19 @@ dialog.q-newpass::backdrop { background: var(--q-page); }
 .q-banner-more li { display: grid; gap: 1px; }
 .q-banner-more strong { font-size: 13px; }
 @keyframes q-banner-in { from { opacity: 0; transform: translate(-50%, -16px); } }
+.q-banner-ask { cursor: default; }
+.q-banner-ask > div { flex: 1 1 auto; }
+.q-banner-go { flex: 0 0 auto; border: 0; border-radius: 999px; padding: 8px 14px; background: var(--q-accent); color: #fff; font: 700 13px/1 var(--q-font); cursor: pointer; }
+.q-banner-x { flex: 0 0 auto; border: 0; background: none; color: var(--q-muted); font-size: 20px; line-height: 1; padding: 4px; cursor: pointer; }
 
 /* ---- Notification settings (account sheet) ---- */
+.q-notice-note {
+  margin: 8px 4px 0;
+  font: 400 12.5px/1.45 var(--q-font);
+  color: var(--q-muted);
+}
 .q-notice-kinds {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .q-notice-group + .q-notice-group {
   border-top: 1px solid var(--q-divider);

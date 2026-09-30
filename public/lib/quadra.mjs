@@ -511,7 +511,10 @@ function makeSession(app, { lang, heartbeat }) {
     if (!w) return;
     wallet = w;
     cacheWallet(storedAccount(), w);
+    // The pass's notice switches (newer here: sent up).
+    adoptNotifyPrefs(w);
     emit('wallet', w);
+    setTimeout(() => syncPrefs(s), 0);
   }
   function setActive(next, where = null) {
     live = where;
@@ -673,6 +676,7 @@ function makeSession(app, { lang, heartbeat }) {
     s.first = first;
     loop();
     setTimeout(() => resetNotice(s), 1200);
+    setTimeout(() => offerNotices(s), 2500);
     // The first reply: what the app merges its own copy with (never the
     // session itself: an app that took the session for the reply saw "no
     // data" and saved over the pass).
@@ -1579,7 +1583,8 @@ export function showNewPass(s, passcode) {
 // schedulePush(s, items), and arrives as a push notice while the app is
 // closed (Shared-Proxy/push.js).
 
-export const notifyOn = () => readStore(KEY.notify) === '1' && globalThis.Notification?.permission === 'granted';
+// Notices on for the pass (every app, every device) and allowed on this one.
+export const notifyOn = () => notifyPrefs().on === true && globalThis.Notification?.permission === 'granted';
 
 const PUSH_URL = ECO_URL.replace(/\/eco$/, '/push');
 async function pushPost(s, path, body) {
@@ -1628,7 +1633,7 @@ export async function schedulePush(s, items) {
   const base = `${globalThis.location?.origin || 'https://jaypengx.github.io'}${APPS[s.app]?.path || '/'}`;
   const list = items
     .filter(x => x && Number.isFinite(x.at) && kindOn(s.app, x.kind))
-    .map(x => ({ at: Math.round(x.at), title: x.title || '', body: x.body || '', tag: `${s.app}:${x.tag || x.title}`, url: `${base}${x.hash ? `#${x.hash}` : ''}`, ...(x.check ? { check: x.check } : {}), ...(x.until ? { until: Math.round(x.until) } : {}) }))
+    .map(x => ({ at: Math.round(x.at), title: x.title || '', body: x.body || '', tag: `${s.app}:${x.tag || x.title}`, ...(x.kind ? { kind: x.kind } : {}), url: `${base}${x.hash ? `#${x.hash}` : ''}`, ...(x.check ? { check: x.check } : {}), ...(x.until ? { until: Math.round(x.until) } : {}) }))
     .sort((a, b) => a.at - b.at)
     .slice(0, 60);
   const text = JSON.stringify(list);
@@ -1638,8 +1643,9 @@ export async function schedulePush(s, items) {
 }
 
 // Every kind of notice, by app: what it is and when it comes. Each can be
-// turned off on its own (per device, `quadra.notify.kinds`); a kind that's
-// off shows neither a banner nor a system notice.
+// turned off on its own; a kind that's off shows neither a banner nor a
+// system notice, and the Worker drops it from what it sends while the app
+// is closed.
 export const NOTICE_KINDS = {
   match: [
     ['start', '比賽開打', 'A game starts', '你追蹤的球隊比賽開始時。', 'When a team you follow starts a game.'],
@@ -1655,25 +1661,114 @@ export const NOTICE_KINDS = {
   ],
   stock: [
     ['alert', '價格提醒', 'Price alert', '你設定的價格提醒到價時。', 'When a price alert you set is reached.'],
-    ['fill', '委託成交', 'Order filled', '掛單或定期定額成交時。', 'When an order or a monthly plan is filled.']
+    ['fill', '委託成交', 'Order filled', '掛單或定期定額成交時，和定期定額扣款日當天。', 'When an order or a monthly plan is filled, and on a plan’s day.'],
+    ['order', '委託未成交', 'Order not filled', '委託到期失效、被取消，或定期定額這個月跳過時。', 'When an order lapses or is dropped, or a monthly plan skips a month.'],
+    ['margin', '維持率與斷頭', 'Margin call', '維持率偏低，或融資、放空被強制處理時。', 'When margin runs low, or a loan or short is force-closed.'],
+    ['income', '股利與利息', 'Dividends and interest', '除息、股利入帳、債券配息和活存利息入帳時。', 'When a holding goes ex-dividend, and when dividends, coupons or interest arrive.']
   ],
   orbit: [['class', '上課提醒', 'Class reminder', '每堂課開始前 5 分鐘。', 'Five minutes before each class.']]
 };
+
+// The switches belong to the pass, not the device: the wallet setting
+// `notify` ({ on, off: ['stock:alert', …] }, newest wins), so every app and
+// every device follows the same ones (apps on a phone's home screen don't
+// even share storage). This device keeps a copy (`quadra.notify.prefs`, with
+// the time it was set) for when it's offline, and sends a newer one up when
+// its app is the live one. `on` is "system notices wanted"; each device (and,
+// on an iPhone, each app) still has to be allowed once by the phone.
+const PREFS_KEY = 'quadra.notify.prefs';
 const KINDS_KEY = 'quadra.notify.kinds';
-function kindPrefs() {
-  try {
-    return JSON.parse(readStore(KINDS_KEY) || '{}') || {};
-  } catch {
-    return {};
-  }
+const cleanPrefs = v => ({
+  ...(typeof v?.on === 'boolean' ? { on: v.on } : {}),
+  off: [...new Set((Array.isArray(v?.off) ? v.off : []).filter(k => typeof k === 'string' && /^[a-z]+:[a-z]+$/.test(k)))].sort()
+});
+export function notifyPrefs() {
+  const saved = readJson(PREFS_KEY, null);
+  if (saved && typeof saved === 'object') return { ...cleanPrefs(saved), t: Number(saved.t) || 0 };
+  // Before the pass kept them: this device's own switches (t 0: the pass's
+  // copy wins over them; an account without one takes them).
+  const old = readJson(KINDS_KEY, {}) || {};
+  const flag = readStore(KEY.notify);
+  return { ...(flag === '1' ? { on: true } : flag === '0' ? { on: false } : {}), off: Object.keys(old).filter(k => old[k] === false).sort(), t: 0 };
+}
+const samePrefs = (a, b) => a.on === b.on && a.off.join() === b.off.join();
+function savePrefs(next, s) {
+  const prefs = { ...cleanPrefs(next), t: Date.now() };
+  writeStore(PREFS_KEY, JSON.stringify(prefs));
+  if (s) syncPrefs(s);
+  return prefs;
 }
 // Whether notices of this kind are wanted (every kind is, until turned off).
-export const kindOn = (app, kind) => !kind || kindPrefs()[`${app}:${kind}`] !== false;
-export function setKind(app, kind, on) {
-  const prefs = kindPrefs();
-  if (on) delete prefs[`${app}:${kind}`];
-  else prefs[`${app}:${kind}`] = false;
-  writeStore(KINDS_KEY, JSON.stringify(prefs));
+export const kindOn = (app, kind) => !kind || !notifyPrefs().off.includes(`${app}:${kind}`);
+export function setKind(app, kind, on, s = null) {
+  const prefs = notifyPrefs();
+  const off = prefs.off.filter(k => k !== `${app}:${kind}`);
+  if (!on) off.push(`${app}:${kind}`);
+  return savePrefs({ ...prefs, off }, s);
+}
+export const setNotifyOn = (on, s = null) => savePrefs({ ...notifyPrefs(), on: Boolean(on) }, s);
+// The pass's copy and this device's, made one: the newer wins; a newer (or
+// never uploaded) copy here goes up when this app may write; the Worker's
+// copy (for notices sent while the app is closed) follows.
+let syncingPrefs = null;
+export function adoptNotifyPrefs(wallet) {
+  const held = wallet?.settings?.notify;
+  const mine = notifyPrefs();
+  if (!held?.value || !(Number(held.t) > mine.t)) return false;
+  writeStore(PREFS_KEY, JSON.stringify({ ...cleanPrefs(held.value), t: Number(held.t) }));
+  return true;
+}
+export async function syncPrefs(s) {
+  if (!s?.wallet || syncingPrefs) return;
+  syncingPrefs = (async () => {
+    adoptNotifyPrefs(s.wallet);
+    const mine = notifyPrefs();
+    const held = s.wallet.settings?.notify;
+    const heldPrefs = held?.value ? cleanPrefs(held.value) : null;
+    const worth = mine.on !== undefined || mine.off.length;
+    if (s.active && worth && (!heldPrefs || (mine.t > (Number(held.t) || 0) && !samePrefs(mine, heldPrefs)))) {
+      const t = mine.t || Date.now();
+      const { t: _, ...value } = mine;
+      await s.write({ wallet: { settings: { notify: { value, t } } } }).catch(() => null);
+      if (!mine.t) writeStore(PREFS_KEY, JSON.stringify({ ...mine, t }));
+    }
+    // The Worker's copy, once per change.
+    const now = notifyPrefs();
+    const text = JSON.stringify({ on: now.on !== false, off: now.off });
+    if (readStore('quadra.push.prefs') !== text && (await pushPost(s, 'prefs', JSON.parse(text)))) writeStore('quadra.push.prefs', text);
+  })().finally(() => (syncingPrefs = null));
+  return syncingPrefs;
+}
+
+// Notices were turned on for the pass (on another device or in another
+// app), but the phone hasn't been asked here yet: a banner offers it (the
+// phone asks only after a tap). Not again for a week once closed.
+function offerNotices(s) {
+  if (typeof document === 'undefined' || !s.pass || !('Notification' in globalThis)) return;
+  if (notifyPrefs().on !== true || Notification.permission !== 'default') return;
+  const last = Number(readStore('quadra.notify.offered')) || 0;
+  if (Date.now() - last < 7 * 86_400_000) return;
+  const T = (zh, e) => (s.lang === 'en' ? e : zh);
+  bannerEl?.remove();
+  const el = node('div', { class: 'q-banner q-banner-ask', role: 'dialog', 'aria-label': T('開啟通知', 'Turn on notices'), style: `--q-accent:${APPS[s.app].color}` }, [
+    node('img', { src: './favicon.svg', alt: '' }),
+    node('div', {}, [node('strong', { text: T('在這裡也開啟通知？', 'Notices here too?') }), node('span', { text: T(`你的 Quadra Pass 開啟了通知，${APPS[s.app].short} 在這台裝置還需要允許一次。`, `Your Quadra Pass has notices on; ${APPS[s.app].short} on this device needs allowing once.`) })]),
+    node('button', { class: 'q-banner-go', type: 'button', text: T('允許', 'Allow') }),
+    node('button', { class: 'q-banner-x', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×' })
+  ]);
+  const gone = () => {
+    writeStore('quadra.notify.offered', String(Date.now()));
+    el.classList.add('out');
+    setTimeout(() => el.remove(), 250);
+  };
+  el.querySelector('.q-banner-x').addEventListener('click', gone);
+  el.querySelector('.q-banner-go').addEventListener('click', async () => {
+    const p = await Notification.requestPermission().catch(() => 'denied');
+    if (p === 'granted') enablePush(s, true);
+    gone();
+  });
+  document.body.append(el);
+  bannerEl = el;
 }
 
 // A switch: role=switch, aria-checked.
@@ -1687,31 +1782,37 @@ function toggle(on, label, onchange) {
   return b;
 }
 
-// The account sheet's notices: this device's system notices (on, off, or
-// not allowed by the phone), then every kind of notice with what it is and
-// its own switch.
+// The account sheet's notices: system notices for the pass (on, off, or
+// not allowed yet by this phone), then every kind of notice with what it is
+// and its own switch. All of them follow the pass to every app and device.
 function notifyRows(s, note) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
   const supported = 'Notification' in globalThis;
-  const state = () => (!supported ? T('這個瀏覽器不支援', 'Not supported here') : Notification.permission === 'denied' ? T('已封鎖：請到系統設定允許', 'Blocked in system settings') : notifyOn() ? T('開啟', 'On') : T('關閉', 'Off'));
+  const state = () => {
+    if (!supported) return notifyPrefs().on ? T('已開啟；這個瀏覽器收不到通知', 'On; this browser can’t show them') : T('這個瀏覽器不支援', 'Not supported here');
+    if (Notification.permission === 'denied') return T('這台裝置封鎖了通知：請到系統設定允許', 'Blocked on this device: allow them in system settings');
+    if (notifyOn()) return T('開啟：每個 App、每台裝置', 'On: every app, every device');
+    if (notifyPrefs().on) return T('已開啟；這台裝置還沒允許，點開關允許', 'On; not allowed on this device yet: tap to allow');
+    return T('關閉', 'Off');
+  };
   const sub = node('small', { class: 'q-notice-sub', text: state() });
   const master = node('div', { class: 'q-notice-row master' }, [
     node('span', { class: 'q-notice-icon', 'aria-hidden': 'true', text: '🔔' }),
-    node('div', { class: 'q-notice-text' }, [node('strong', { text: T('系統通知（這台裝置）', 'System notices (this device)') }), sub]),
+    node('div', { class: 'q-notice-text' }, [node('strong', { text: T('系統通知', 'System notices') }), sub]),
     supported
       ? toggle(notifyOn(), T('系統通知', 'System notices'), async on => {
           if (!on) {
-            writeStore(KEY.notify, '0');
+            setNotifyOn(false, s);
             sub.textContent = state();
+            schedulePush(s, []);
             return true;
           }
           const p = await Notification.requestPermission().catch(() => 'denied');
           if (p === 'granted') {
-            writeStore(KEY.notify, '1');
+            setNotifyOn(true, s);
             enablePush(s, true);
-          }
-          else note.textContent = T('請到系統設定允許通知。', 'Allow notifications in system settings.');
+          } else note.textContent = T('請到系統設定允許通知。', 'Allow notifications in system settings.');
           sub.textContent = state();
           return p === 'granted';
         })
@@ -1725,12 +1826,16 @@ function notifyRows(s, note) {
       ...NOTICE_KINDS[app].map(([kind, zh, e, dzh, de]) =>
         node('div', { class: 'q-notice-row' }, [
           node('div', { class: 'q-notice-text' }, [node('strong', { text: T(zh, e) }), node('small', { class: 'q-notice-sub', text: T(dzh, de) })]),
-          toggle(kindOn(app, kind), T(zh, e), on => setKind(app, kind, on))
+          toggle(kindOn(app, kind), T(zh, e), on => void setKind(app, kind, on, s))
         ])
       )
     ])
   );
-  return [node('div', { class: 'q-rows' }, [master]), node('div', { class: 'q-rows q-notice-kinds' }, groups)];
+  return [
+    node('div', { class: 'q-rows' }, [master]),
+    node('p', { class: 'q-notice-note', text: T('通知設定跟著 Quadra Pass：在每個 App、每台裝置都一樣。', 'Notice settings follow your Quadra Pass: the same in every app, on every device.') }),
+    node('div', { class: 'q-rows q-notice-kinds' }, groups)
+  ];
 }
 
 const shown = new Set();

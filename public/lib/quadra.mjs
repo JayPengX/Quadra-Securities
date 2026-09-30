@@ -146,10 +146,13 @@ function v8Notice(s) {
   tell({
     lang: s.lang,
     icon: '✨',
-    title: en ? 'What’s new in Quadra' : 'Quadra 更新',
-    body: en
-      ? `Quadra Rewards now gives points (XP) instead of money: they raise your level and title, shown in every app, and buy streak cards, word boosts and word packs in Rewards. What you earned stays yours. The monthly allowance is up to ${money(ECONOMY.payTiers[0][1])}. Quadra Plus is now ${money(PLUS.fee)} a month or ${money(PLUS.year)} a year: a ${money(PLUS.odds.bonusBet)} free bet every week, ${PLUS.vocab.cards} streak cards a month, points ×${PLUS.vocab.xpBoost} and more.`
-      : `Quadra Rewards 改發積分（XP），不再發錢：積分會提升你的等級和稱號（每個 App 都看得到），也能在 Rewards 換保護卡、單字加倍和單字包；已經賺到的錢照樣是你的。每月津貼提高到最多 ${money(ECONOMY.payTiers[0][1])}。Quadra Plus 改為每月 ${money(PLUS.fee)}、年繳 ${money(PLUS.year)}：每週 ${money(PLUS.odds.bonusBet)} 免費投注、每月 ${PLUS.vocab.cards} 張保護卡、積分 ×${PLUS.vocab.xpBoost} 等等。`
+    title: en ? 'What’s new' : 'Quadra 更新了',
+    body: en ? 'What you’ve earned is still yours.' : '已經賺到的錢都還在。',
+    points: [
+      ['⭐', en ? 'Rewards gives points (XP)' : 'Rewards 改發積分', en ? 'Level up, and trade them for cards and packs' : '升等級，還能換保護卡和單字包'],
+      ['💰', en ? `Allowance up to ${money(ECONOMY.payTiers[0][1])}` : `每月津貼最多 ${money(ECONOMY.payTiers[0][1])}`, en ? 'On the 1st of every month' : '每月 1 日入帳'],
+      ['✦', en ? `Plus is ${money(PLUS.fee)} a month` : `Plus 每月 ${money(PLUS.fee)}`, en ? `A ${money(PLUS.odds.bonusBet)} free bet every week` : `每週送 ${money(PLUS.odds.bonusBet)} 免費投注`]
+    ]
   });
   return true;
 }
@@ -1283,7 +1286,9 @@ export function accountButton(s, { extra = null } = {}) {
 // ask({ title, body, ok, cancel, danger }) resolves true or false; tell({
 // title, body, ok }) resolves once closed. A centred card over the page (and
 // over an open sheet), Esc or a tap outside cancels.
-export function ask({ title, body = '', ok = '', cancel = '', danger = false, icon = '', lang = detectLang(), alertOnly = false } = {}) {
+// `points`: short rows ([icon, title, line]) under the body, instead of a
+// paragraph that says the same.
+export function ask({ title, body = '', points = [], ok = '', cancel = '', danger = false, icon = '', lang = detectLang(), alertOnly = false } = {}) {
   const en = lang === 'en';
   return new Promise(resolve => {
     const dialog = node('dialog', { class: `q-ask${danger ? ' danger' : ''}`, 'aria-labelledby': 'q-ask-title' });
@@ -1304,6 +1309,9 @@ export function ask({ title, body = '', ok = '', cancel = '', danger = false, ic
       icon ? node('div', { class: 'q-ask-icon', 'aria-hidden': 'true', text: icon }) : null,
       node('h2', { id: 'q-ask-title', class: 'q-ask-title', text: title }),
       body ? node('p', { class: 'q-ask-body', text: body }) : null,
+      points.length
+        ? node('ul', { class: 'q-ask-points' }, points.map(([mark, head, line]) => node('li', {}, [node('span', { class: 'q-ask-mark', 'aria-hidden': 'true', text: mark }), node('span', {}, [node('strong', { text: head }), line ? node('small', { text: line }) : null].filter(Boolean))])))
+        : null,
       node('div', { class: 'q-ask-actions' }, [
         alertOnly ? null : node('button', { class: 'q-btn', type: 'button', text: cancel || (en ? 'Cancel' : '取消'), onclick: () => finish(false) }),
         okBtn
@@ -1469,7 +1477,7 @@ export function plusNotices(s, now = Date.now()) {
   const date = `${next.getUTCMonth() + 1}/1`;
   notify(s, {
     title: trial ? T(`✦ Plus 免費試用到本月底，${date} 起 ${money(fee)}`, `✦ Your free Plus month ends; ${money(fee)} from ${date}`) : T(`✦ Plus 將在 ${date} 續訂 ${money(fee)}`, `✦ Plus renews on ${date} for ${money(fee)}`),
-    body: T(`本月回饋 ${money(back.total)}。不想續訂：帳戶 › Quadra Plus › 管理會員。`, `It gave you ${money(back.total)} this month. To stop: account › Quadra Plus › Manage membership.`),
+    body: T(`本月回饋 ${money(back.total)} · 可在 Plus › 管理會員取消`, `${money(back.total)} back this month · stop under Plus › Manage`),
     tag: key,
     kind: 'plus'
   });
@@ -1570,10 +1578,12 @@ export function openPlus(s) {
     const leave = async () => {
       const month = plusReturns(s.wallet);
       const ever = plusReturns(s.wallet, Date.now(), { all: true });
-      const keep = T('已付月份照常使用，持有的保護卡和買過的單字包都留著。', 'Paid months stay, and so do the cards you hold and the packs you bought.');
-      const stops = T(`之後沒有每週 ${money(PLUS.odds.bonusBet)} 免費投注、每月 ${PLUS.vocab.cards} 張保護卡和積分 ×${PLUS.vocab.xpBoost}。`, `After that, no ${money(PLUS.odds.bonusBet)} weekly free bet, ${PLUS.vocab.cards} cards a month or points ×${PLUS.vocab.xpBoost}.`);
-      const body = T(`本月回饋 ${money(month.total)}，加入以來 ${money(ever.total)}。`, `Plus gave you ${money(month.total)} this month, ${money(ever.total)} since you joined. `) + keep + stops;
-      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消續訂？', 'Stop renewing?'), body, ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
+      const points = [
+        ['✓', T('會保留', 'You keep'), T('已付月份、保護卡、買過的單字包', 'Paid months, your cards, packs you bought')],
+        ['✕', T('之後沒有', 'You lose'), T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注、保護卡、積分 ×${PLUS.vocab.xpBoost}`, `The ${money(PLUS.odds.bonusBet)} weekly free bet, cards, points ×${PLUS.vocab.xpBoost}`)]
+      ];
+      const body = T(`本月回饋 ${money(month.total)} · 累計 ${money(ever.total)}`, `${money(month.total)} back this month · ${money(ever.total)} in all`);
+      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消自動續訂？', 'Stop renewing?'), body, points, ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
       await s.plus(false);
     };
     const until = plusUntil(s.wallet);
@@ -1605,12 +1615,15 @@ export function openPlus(s) {
         member
           ? node('strong', { class: 'q-plus-price num', text: money(back.total) })
           : node('strong', { class: 'q-plus-price num', text: `${money(Math.round(PLUS.year / 12))}` }),
-        node('span', {
-          class: 'q-plus-per',
-          text: member
-            ? T(`本月回饋 · 月費 ${money(PLUS.fee)} · 免費投注 ${money(back.bets)} · 保護卡 ${money(back.cards)}（商店價）· 第 ${plusTenure(s.wallet)} 個月，累計 ${money(plusReturns(s.wallet, Date.now(), { all: true }).total)}`, `Back to you this month · fee ${money(PLUS.fee)} · free bets ${money(back.bets)} · cards ${money(back.cards)} (shop price) · month ${plusTenure(s.wallet)}, ${money(plusReturns(s.wallet, Date.now(), { all: true }).total)} in all`)
-            : T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app')
-        })
+        node('span', { class: 'q-plus-per', text: member ? T('本月回饋給你（免費投注＋保護卡）', 'Back to you this month (free bets + cards)') : T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app') }),
+        // A member's three figures: the fee, how long, everything so far.
+        member
+          ? node('div', { class: 'q-plus-stats' }, [
+              [T('月費', 'Fee'), money(PLUS.fee)],
+              [T('會員', 'Member'), T(`第 ${plusTenure(s.wallet)} 個月`, `Month ${plusTenure(s.wallet)}`)],
+              [T('累計回饋', 'In all'), money(plusReturns(s.wallet, Date.now(), { all: true }).total)]
+            ].map(([k, v]) => node('div', {}, [node('small', { text: k }), node('strong', { class: 'num', text: v })])))
+          : null
       ]),
       group('odds', 'Quadra Play'),
       group('stock', 'Quadra Securities'),

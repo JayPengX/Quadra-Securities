@@ -684,6 +684,46 @@ dialog.q-moved::backdrop {
   font-size: 14.5px;
   line-height: 1.55;
 }
+/* A dialog's short points: a mark, a bold line, a quiet one. */
+.q-ask-points {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+.q-ask-points li {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--q-sunken);
+}
+.q-ask-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--q-surface);
+  font-size: 17px;
+  font-weight: 800;
+}
+.q-ask-points strong {
+  display: block;
+  font-size: 14.5px;
+  line-height: 1.3;
+}
+.q-ask-points small {
+  display: block;
+  margin-top: 2px;
+  color: var(--q-text-2, var(--q-muted));
+  font-size: 12.5px;
+  line-height: 1.35;
+}
 .q-ask-actions {
   display: grid;
   grid-auto-flow: column;
@@ -1639,6 +1679,30 @@ html:not([data-q-keys]) :is(:focus-visible, :focus):not(input, textarea, select)
 .q-plus-per {
   font-size: 13px;
   color: rgba(245, 241, 232, 0.66);
+}
+/* A member's fee, months and total, under what came back this month. */
+.q-plus-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.q-plus-stats div {
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(245, 241, 232, 0.08);
+}
+.q-plus-stats small {
+  display: block;
+  font-size: 11.5px;
+  color: rgba(245, 241, 232, 0.6);
+}
+.q-plus-stats strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 14px;
+  color: #f5f1e8;
+  white-space: nowrap;
 }
 .q-plus-body {
   display: grid;

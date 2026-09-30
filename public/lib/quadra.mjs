@@ -125,13 +125,18 @@ export const AVATARS = [
   { id: 'rainbow', glyph: '🌈', xp: 1_500 },
   { id: 'fire', glyph: '🔥', xp: 3_000 },
   { id: 'gem', glyph: '💎', xp: 5_000 },
-  { id: 'star', glyph: '✦', plus: true }
+  { id: 'star', glyph: '✦', plus: true },
+  // The streak's milestones (the longest streak ever, so they stay).
+  { id: 'tiger', glyph: '🐯', streak: 7 },
+  { id: 'eagle', glyph: '🦅', streak: 30 },
+  { id: 'trophy', glyph: '🏆', streak: 100 }
 ];
 export const avatarBought = (wallet, id) => (wallet?.entries || []).some(e => e.app === 'vocab' && e.id === `vocab:xs:avatar:${id}`);
 export function avatarOwned(wallet, id, now = Date.now()) {
   const a = AVATARS.find(x => x.id === id);
   if (!a) return false;
   if (a.plus) return plusMember(wallet, now);
+  if (a.streak) return longestStreakOf(wallet) >= a.streak;
   if (a.level) return xpLevel(xpEarned(wallet)).level >= a.level;
   return avatarBought(wallet, id);
 }
@@ -139,6 +144,48 @@ export function avatarOf(wallet, now = Date.now()) {
   const id = setting(wallet, 'avatar', null)?.id;
   return id && avatarOwned(wallet, id, now) ? AVATARS.find(a => a.id === id) : null;
 }
+// ---- The streak: days in a row with word practice or a game in Rewards ----------------------
+//
+// A day counts with any word practice or finished game (points or not, flash
+// cards too), or when a protection card covered it ('vocab:fz:<day>').
+// Today counts once something is done; until then the streak is yesterday's.
+// It raises every point (+STREAK.perDay a day, up to +STREAK.max), and the
+// longest ever unlocks an avatar and a protection card at each milestone.
+export const STREAK = { perDay: 0.02, max: 0.3, milestones: [7, 30, 100] };
+const STREAK_KINDS = new Set(['words', 'reward', 'game']);
+export function activeDaySet(wallet) {
+  const days = new Set();
+  for (const e of wallet?.entries || []) {
+    if (e.app !== 'vocab' || typeof e.t !== 'number') continue;
+    if (STREAK_KINDS.has(e.kind)) days.add(taipeiDay(e.t));
+    else if (typeof e.id === 'string' && e.id.startsWith('vocab:fz:')) days.add(e.id.slice(9));
+  }
+  return days;
+}
+const dayBefore = d => new Date(Date.parse(`${d}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+export function streakOf(wallet, now = Date.now()) {
+  const days = activeDaySet(wallet);
+  let d = taipeiDay(now);
+  if (!days.has(d)) d = dayBefore(d);
+  let n = 0;
+  while (days.has(d)) (n++, (d = dayBefore(d)));
+  return n;
+}
+export function longestStreakOf(wallet) {
+  const days = [...activeDaySet(wallet)].sort();
+  let best = 0;
+  let run = 0;
+  for (let i = 0; i < days.length; i++) {
+    run = i && dayBefore(days[i]) === days[i - 1] ? run + 1 : 1;
+    best = Math.max(best, run);
+  }
+  return best;
+}
+// The points bonus for a streak of `days` (0.1 = +10%).
+export const streakBonus = days => Math.min(STREAK.max, Math.max(0, days) * STREAK.perDay);
+// Protection cards the longest streak has earned (one a milestone).
+export const streakCards = longest => STREAK.milestones.filter(m => longest >= m).length;
+
 // Level rewards: a streak protection card at level 5, 15, 25… (Rewards
 // counts them with the ones bought and Plus's), and the level avatars.
 export const levelCards = level => Math.max(0, Math.floor((level + 5) / 10));
@@ -995,12 +1042,23 @@ export const taipeiDay = (t = Date.now()) => new Date(t + TPE).toISOString().sli
 //   act:<app>  today's counts of what was done ({ day, n: { trade: 2 } })
 //   aff:<app>  the app's affinity map: what the person is into (below)
 
+// Counts only go up in a day, so the pass's copy and this device's are
+// merged by the larger of each, and the device keeps the latest: two steps
+// in a row (a bet, then its parlay) each add to the other instead of the
+// later write replacing the earlier one's count.
 export function activityPatch(wallet, app, action, by = 1, now = Date.now()) {
   const day = taipeiDay(now);
+  const key = `quadra.act.${app}`;
   const had = setting(wallet, `act:${app}`, null);
-  const n = had?.day === day ? { ...had.n } : {};
+  const mine = readJson(key, null);
+  const n = {};
+  for (const src of [had, mine]) if (src?.day === day) for (const [k, v] of Object.entries(src.n || {})) n[k] = Math.max(n[k] || 0, Number(v) || 0);
   n[action] = (n[action] || 0) + by;
-  return settingPatch(`act:${app}`, { day, n });
+  // Each newer than the last (two in the same millisecond too), so the
+  // Worker keeps the later, larger count whichever write it reads first.
+  const t = Math.max(Date.now(), (Number(mine?.t) || 0) + 1, (Number(wallet?.settings?.[`act:${app}`]?.t) || 0) + 1);
+  writeStore(key, JSON.stringify({ day, n, t }));
+  return { settings: { [`act:${app}`]: { value: { day, n }, t } } };
 }
 // Today's counts across the apps: { stock: { trade: 2 }, … }.
 export function todayActivity(wallet, now = Date.now()) {

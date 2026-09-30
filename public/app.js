@@ -934,8 +934,13 @@ function renderSearch() {
 
 // ---- Detail sheet: chart, facts, trade ticket ------------------------------------------
 
+// Stocks opened today, each once (Rewards' mission counts different ones).
+const viewedToday = { day: '', set: new Set() };
 async function openDetail(symbol) {
-  track(null, symbolKeys(symbol), 1);
+  const day = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
+  if (viewedToday.day !== day) Object.assign(viewedToday, { day, set: new Set() });
+  track(viewedToday.set.has(symbol) ? null : 'view', symbolKeys(symbol), 1);
+  viewedToday.set.add(symbol);
   const q0 = state.quotes.get(symbol);
   const held = snap()?.positions[symbol];
   state.detail = {

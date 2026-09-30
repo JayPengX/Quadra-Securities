@@ -392,9 +392,19 @@ function levy(rules, kind) {
 // minimum included.
 // `oddLot`: a Taiwan odd-lot trade (its own, lower minimum); `dayTrade`: a
 // Taiwan stock sold the same day it was bought (half the tax).
+// Mutual funds are bought through a fund platform, not an exchange: a
+// subscription fee (申購手續費) on the amount bought, as Taiwan's online
+// fund platforms charge after their usual discount on the 3% list fee;
+// selling (redeeming) costs nothing, with no exchange fee or tax.
+export const FUND_FEE = 0.01;
+
 export function tradeCosts({ market, side, kind, gross, currency, discount = 1, oddLot = false, dayTrade = false }) {
   const m = MARKETS[market] || MARKETS.INTL;
   const round = m.floorFees ? x => Math.floor(x) : x => roundCash(x, currency);
+  if (kind === 'fund') {
+    const commission = side === 'buy' && gross > 0 ? round(gross * FUND_FEE * discount) : 0;
+    return { commission, tax: 0, fee: 0, total: commission, taxRate: 0, feeRate: 0 };
+  }
   const min = oddLot && m.commission.oddMin != null ? m.commission.oddMin : m.commission.min;
   const commission = gross > 0 && m.commission.rate > 0 ? round(Math.max(gross * m.commission.rate, min) * discount) : 0;
   const rules = levy(side === 'buy' ? m.buy : m.sell, kind);

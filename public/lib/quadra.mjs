@@ -170,9 +170,10 @@ export const PLUS = {
   // The yearly plan: twelve months for the price of ten.
   year: 4_900,
   // Securities: commission at 2.8折 (×0.28, a Taiwan online broker's best
-  // rate), FX spread ×0.5, NT$ cash interest 2% a year (0.8% otherwise),
-  // borrowing 1 point cheaper.
-  stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, loanCut: 0.01 },
+  // rate; a fund's subscription fee too), FX spread ×0.5, NT$ cash interest
+  // 2% a year on the first NT$cashCap (0.8% on the rest and otherwise, like
+  // a Taiwan digital bank's high-interest tier), borrowing 1 point cheaper.
+  stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, cashCap: 100_000, loanCut: 0.01 },
   // Play: cash out keeps 2% instead of 5%, and a NT$bonusBet free bet each
   // week (the Worker's `eco:fb:<Monday>`). `boost` multiplies the parlay
   // boost (1: the same as everyone's since v7); `lift` was +10% on one slip a
@@ -796,7 +797,8 @@ function makeSession(app, { lang, heartbeat }) {
     if (!first) first = await signInGate(s);
     s.first = first;
     loop();
-    setTimeout(() => resetNotice(s) || v8Notice(s), 1200);
+    setTimeout(() => resetNotice(s) || v8Notice(s) || plusNotices(s), 1200);
+    s.on('wallet', () => plusNotices(s));
     setTimeout(() => offerNotices(s), 2500);
     // The first reply: what the app merges its own copy with (never the
     // session itself: an app that took the session for the reply saw "no
@@ -1409,7 +1411,7 @@ export function plusPerks(lang = 'zh') {
     o.lift > 0 ? ['odds', en ? `+${pct(o.lift)} winnings, every day` : `每日獎金 +${pct(o.lift)}`, en ? `One slip a day up to ${money(o.liftMax)}` : `每天一張、${money(o.liftMax)} 以內的投注`] : null,
     ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(o.cashOutKeep)} instead of 5%` : `只扣 ${pct(o.cashOutKeep)}，一般扣 5%`],
     ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${zhDiscount}`, en ? 'Every market, every order' : '所有市場、每一筆委託'],
-    ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? 'Instead of 0.8%, accrued daily' : '一般 0.8%，每日計息'],
+    ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? `On the first ${money(PLUS.stock.cashCap)} (0.8% otherwise), accrued daily` : `前 ${money(PLUS.stock.cashCap)}（一般 0.8%），每日計息`],
     ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
     ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
     ['vocab', en ? `Word packs ${pct(1 - PLUS.vocab.packShare)} off` : `單字包 ${Math.round(PLUS.vocab.packShare * 100) / 10} 折`, en ? 'TOEIC, IELTS, Business English, yours to keep' : '多益、雅思、商務英文，買了永久保留'],
@@ -1417,18 +1419,65 @@ export function plusPerks(lang = 'zh') {
     ['vocab', en ? `Points ×${v.xpBoost}` : `積分 ×${v.xpBoost}`, en ? 'Every word, game and mission in Rewards: level up faster' : 'Rewards 的單字、遊戲、任務都算，等級升得更快']
   ].filter(Boolean);
 }
-// What Plus gave back this Taiwan month, from the wallet: Play's boosts paid
-// (kind 'plusboost') and the bonus bets received (their face value).
-export function plusReturns(wallet, now = Date.now()) {
+// What Plus gave back, at face value, from the wallet: Play's boosts paid
+// (kind 'plusboost'), the weekly bonus bets received (not the welcome
+// offer), and the streak cards granted (at the shop's price). This Taiwan
+// month, or (all) every month up to it.
+const CARD_PRICE = 300;
+export function plusReturns(wallet, now = Date.now(), { all = false } = {}) {
   const month = plusMonth(now);
+  const counts = m => (all ? m <= month : m === month);
   let boosts = 0;
   let bets = 0;
   for (const e of wallet?.entries || []) {
-    if (typeof e.t !== 'number' || plusMonth(e.t) !== month) continue;
+    if (typeof e.t !== 'number' || !counts(plusMonth(e.t))) continue;
     if (e.kind === 'plusboost' && e.amount > 0) boosts += e.amount;
-    if (e.app === 'eco' && e.kind === 'freebet' && typeof e.id === 'string' && e.id.startsWith('eco:fb:')) bets += freeBetValue(e);
+    if (e.app === 'eco' && e.kind === 'freebet' && /^eco:fb:\d{4}-/.test(e.id || '')) bets += freeBetValue(e);
   }
-  return { boosts: Math.round(boosts), bets, total: Math.round(boosts) + bets };
+  const cards = [...plusMonths(wallet)].filter(counts).length * PLUS.vocab.cards * CARD_PRICE;
+  return { boosts: Math.round(boosts), bets, cards, total: Math.round(boosts) + bets + cards };
+}
+// Months a member so far (a yearly plan's later months don't count yet).
+export const plusTenure = (wallet, now = Date.now()) => [...plusMonths(wallet)].filter(m => m <= plusMonth(now)).length;
+
+// Plus's notices, once each per device (a banner in the app; the kit's
+// notify): the week's bonus bet when it arrives, and, in the last three
+// Taiwan days before a renewal, what it will charge and what it gave back,
+// with where to stop it (the free month included, so nobody is surprised).
+export function plusNotices(s, now = Date.now()) {
+  const w = s.wallet;
+  if (!w || !plusMember(w, now)) return;
+  const en = s.lang === 'en';
+  const T = (zh, e) => (en ? e : zh);
+  const week = (w.entries || []).find(e => e.app === 'eco' && e.id === `eco:fb:${taipeiDay(weekMonday(now))}`);
+  if (week && readStore('quadra.seen.fb') !== week.id) {
+    writeStore('quadra.seen.fb', week.id);
+    notify(s, { title: T(`✦ 本週 ${money(freeBetValue(week))} 免費投注到了`, `✦ Your ${money(freeBetValue(week))} free bet is here`), body: T('在 Play 的投注單上點一下就能用，7 天內有效。', 'Tap it on a slip in Play; it lasts 7 days.'), tag: week.id, kind: 'plus' });
+  }
+  const month = plusMonth(now);
+  const next = new Date(nextPayday(now) + TPE);
+  const daysLeft = Math.ceil((nextPayday(now) - now) / 86_400_000);
+  const yearly = plusPlan(w) === 'year';
+  // A yearly plan renews after its last paid month; a monthly one every month.
+  const due = plusRenewing(w) && daysLeft <= 3 && (!yearly || plusUntil(w) === month);
+  const key = `quadra.seen.renew:${month}`;
+  if (!due || readStore(key)) return;
+  writeStore(key, '1');
+  const fee = yearly ? PLUS.year : PLUS.fee;
+  const back = plusReturns(w, now);
+  const trial = (w.entries || []).some(e => e.id === `eco:plus:${month}` && e.note === 'trial');
+  const date = `${next.getUTCMonth() + 1}/1`;
+  notify(s, {
+    title: trial ? T(`✦ Plus 免費試用到本月底，${date} 起 ${money(fee)}`, `✦ Your free Plus month ends; ${money(fee)} from ${date}`) : T(`✦ Plus 將在 ${date} 續訂 ${money(fee)}`, `✦ Plus renews on ${date} for ${money(fee)}`),
+    body: T(`本月回饋 ${money(back.total)}。不想續訂：帳戶 › Quadra Plus › 管理會員。`, `It gave you ${money(back.total)} this month. To stop: account › Quadra Plus › Manage membership.`),
+    tag: key,
+    kind: 'plus'
+  });
+}
+// The Monday (Taiwan) a moment's week starts.
+function weekMonday(t) {
+  const d = new Date(t + TPE);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7)) - TPE;
 }
 const PLUS_MARK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5l2.6 6.9 6.9 2.6-6.9 2.6L12 21.5l-2.6-6.9L2.5 12l6.9-2.6z"/></svg>';
 function plusGlyph() {
@@ -1516,8 +1565,15 @@ export function openPlus(s) {
         node('small', { text: sub })
       ].filter(Boolean))
     ));
+    // Stopping is one confirmation away, with what it gave back and what
+    // stays or stops, so the choice is an informed one.
     const leave = async () => {
-      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消續訂？', 'Stop renewing?'), body: T('已付月份照常使用，之後不再扣款。', 'Paid months stay; no more charges.'), ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
+      const month = plusReturns(s.wallet);
+      const ever = plusReturns(s.wallet, Date.now(), { all: true });
+      const keep = T('已付月份照常使用，持有的保護卡和買過的單字包都留著。', 'Paid months stay, and so do the cards you hold and the packs you bought.');
+      const stops = T(`之後沒有每週 ${money(PLUS.odds.bonusBet)} 免費投注、每月 ${PLUS.vocab.cards} 張保護卡和積分 ×${PLUS.vocab.xpBoost}。`, `After that, no ${money(PLUS.odds.bonusBet)} weekly free bet, ${PLUS.vocab.cards} cards a month or points ×${PLUS.vocab.xpBoost}.`);
+      const body = T(`本月回饋 ${money(month.total)}，加入以來 ${money(ever.total)}。`, `Plus gave you ${money(month.total)} this month, ${money(ever.total)} since you joined. `) + keep + stops;
+      if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消續訂？', 'Stop renewing?'), body, ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
       await s.plus(false);
     };
     const until = plusUntil(s.wallet);
@@ -1552,7 +1608,7 @@ export function openPlus(s) {
         node('span', {
           class: 'q-plus-per',
           text: member
-            ? T(`本月會員回饋 · 獎金加成 ${money(back.boosts)} · 免費投注 ${money(back.bets)}`, `Back to you this month · boosts ${money(back.boosts)} · free bets ${money(back.bets)}`)
+            ? T(`本月回饋 · 月費 ${money(PLUS.fee)} · 免費投注 ${money(back.bets)} · 保護卡 ${money(back.cards)}（商店價）· 第 ${plusTenure(s.wallet)} 個月，累計 ${money(plusReturns(s.wallet, Date.now(), { all: true }).total)}`, `Back to you this month · fee ${money(PLUS.fee)} · free bets ${money(back.bets)} · cards ${money(back.cards)} (shop price) · month ${plusTenure(s.wallet)}, ${money(plusReturns(s.wallet, Date.now(), { all: true }).total)} in all`)
             : T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app')
         })
       ]),
@@ -1820,7 +1876,8 @@ export const NOTICE_KINDS = {
   ],
   odds: [
     ['slip', '投注單結算', 'Slip settled', '投注單的比賽全部結束、算好派彩時。', 'When every game on a slip is over and it’s paid.'],
-    ['ticket', '彩券中獎', 'Lottery win', '電腦彩券開獎、你的彩券中獎時。', 'When a draw is out and your ticket won.']
+    ['ticket', '彩券中獎', 'Lottery win', '電腦彩券開獎、你的彩券中獎時。', 'When a draw is out and your ticket won.'],
+    ['plus', 'Plus 免費投注與續訂', 'Plus free bet and renewal', 'Plus 每週免費投注入帳，和續訂前三天的提醒。', 'When Plus’s weekly free bet arrives, and three days before it renews.']
   ],
   vocab: [
     ['ready', '積分可以領', 'Points to claim', '每日任務或每週目標完成、可以領積分時。', 'When a mission or weekly goal is done and ready to claim.'],

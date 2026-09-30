@@ -95,30 +95,36 @@ const add = (map, key, amount) => (map[key] = (map[key] || 0) + amount);
 // a trade, exchange or loan by the moment it's made, cash interest by each
 // Taiwan month the membership was paid for. The app keeps `months` current
 // from the wallet (usePlus); with none, nothing here changes anything.
-const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, cashRate: CASH_RATE, loanCut: 0 };
+const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, cashRate: CASH_RATE, cashCap: 0, loanCut: 0 };
 let plus = PLUS_NONE;
 export function usePlus(settings) {
   plus = settings ? { ...PLUS_NONE, ...settings } : PLUS_NONE;
 }
 export const plusAt = (t = Date.now()) => plus.months.has(taipeiDay(t).slice(0, 7));
-// NT$ cash interest between two moments, month by month: rate × time.
+// NT$ cash interest between two moments, month by month, as rate × time:
+// `base` on all the cash, and Plus's `extra` rate on the first cashCap only
+// (like a Taiwan digital bank's high-interest tier).
 function cashYield(from, to) {
-  if (!plus.months.size) return CASH_RATE * (to - from);
-  let sum = 0;
+  const out = { base: CASH_RATE * (to - from), extra: 0 };
+  if (!plus.months.size) return out;
   for (let a = from; a < to; ) {
     const d = new Date(a + 8 * 3_600_000);
     const b = Math.min(to, Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 8 * 3_600_000);
-    sum += (plusAt(a) ? plus.cashRate : CASH_RATE) * (b - a);
+    if (plusAt(a)) out.extra += Math.max(0, plus.cashRate - CASH_RATE) * (b - a);
     a = b;
   }
-  return sum;
+  return out;
 }
 
 // ---- Replay ------------------------------------------------------------------
 
 function accrue(s, t) {
   // NT$ cash earns the demand-deposit rate (Quadra Plus: more).
-  if (t > s.cashLast && (s.cash[BASE] || 0) > 0) s.cashInterest += ((s.cash[BASE] || 0) * cashYield(s.cashLast, t)) / YEAR_MS;
+  const cash = s.cash[BASE] || 0;
+  if (t > s.cashLast && cash > 0) {
+    const y = cashYield(s.cashLast, t);
+    s.cashInterest += (cash * y.base + Math.min(cash, plus.cashCap) * y.extra) / YEAR_MS;
+  }
   s.cashLast = Math.max(s.cashLast, t);
   for (const p of Object.values(s.positions)) {
     if (p.qty < 0 && t > p.feeLast) p.borrowFee += (-p.cost * SHORT_FEE * (t - p.feeLast)) / YEAR_MS;

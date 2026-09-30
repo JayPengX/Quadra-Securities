@@ -140,6 +140,7 @@ and worst years and a bank deposit to compare.
 | Starting money | NT$100,000 for every account |
 | Taiwan | 0.1425% commission, min NT$20 (odd lots NT$1); sell tax 0.3% stocks (0.15% on a day trade: sold the day it was bought), 0.1% ETFs, 0% bond ETFs; fractions of a dollar dropped |
 | US | 0.1% sub-brokerage commission, min US$3; SEC fee US$20.60 per million on sells (from 2026-04-04); 30% dividend withholding |
+| Mutual funds | through a fund platform, not the exchange: a 1% subscription fee (申購手續費, `FUND_FEE`) on buying, the Plus discount applies; nothing on redeeming (no commission, fee or tax) |
 | Hong Kong | 0.25%, min HK$100; 0.1% stamp duty on stocks both ways; 0.0085% exchange fees |
 | UK, France, Italy, Spain | 0.25%, min £5/€5; stamp duty or FTT on buys of stocks (0.5%, 0.4%, 0.1%, 0.2%) |
 | China, Korea, India | 0.3%; sell tax 0.05% (China), 0.20% (Korea, from 2026); 0.1% STT both ways and 0.015% stamp duty on buys (India) |

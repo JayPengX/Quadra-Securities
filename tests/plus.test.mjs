@@ -5,7 +5,7 @@ import { newAccount, replay, estimate, quoteExchange, usePlus, plusAt, loanRateA
 
 const OCT = Date.UTC(2026, 9, 10, 2);
 const NOV = Date.UTC(2026, 10, 10, 2);
-const plus = { months: new Set(['2026-10']), commission: 0.5, fxSpread: 0.5, cashRate: 0.02, loanCut: 0.01 };
+const plus = { months: new Set(['2026-10']), commission: 0.5, fxSpread: 0.5, cashRate: 0.02, cashCap: 100_000, loanCut: 0.01 };
 
 test('Plus: half the commission and FX spread, a cheaper loan, only in a paid month', () => {
   const buy = t => estimate({ market: 'TW', kind: 'stock', currency: 'TWD', side: 'buy', qty: 1000, price: 1000, t }).commission;
@@ -39,6 +39,10 @@ test('Plus: NT$ cash earns 2% in member months, 0.8% otherwise', () => {
     // November isn't paid for: the plain rate.
     const nov = replay(a, Date.UTC(2026, 11, 1) - 8 * 3_600_000).cashInterest - member;
     assert.ok(Math.abs(nov / (normal * 30 / 31) - 1) < 1e-6);
+    // Above cashCap the plain rate: NT$300,000 earns 2% on 100,000, 0.8% on 200,000.
+    const big = newAccount(300_000, Date.UTC(2026, 9, 1) - 8 * 3_600_000);
+    const got = replay(big, end).cashInterest;
+    assert.ok(Math.abs(got / normal - (0.02 * 100_000 + 0.008 * 200_000) / (0.008 * 100_000)) < 1e-6);
   } finally {
     usePlus(null);
   }
@@ -72,4 +76,13 @@ test('the economy reset lands as a negative pooled deposit: cash can go below ze
   const v = valuateAcct(s, new Map(), { TWD: 1 });
   assert.ok(Number.isFinite(v.netWorth));
   assert.equal(v.netWorth, -20_000);
+});
+
+import { tradeCosts, FUND_FEE } from '../public/lib/markets.mjs';
+test('mutual funds: a subscription fee on buying (Plus discount too), nothing on selling', () => {
+  assert.equal(tradeCosts({ market: 'US', side: 'buy', kind: 'fund', gross: 1_000, currency: 'USD' }).total, 1_000 * FUND_FEE);
+  assert.equal(tradeCosts({ market: 'US', side: 'buy', kind: 'fund', gross: 1_000, currency: 'USD', discount: 0.28 }).commission, 2.8);
+  assert.deepEqual(tradeCosts({ market: 'US', side: 'sell', kind: 'fund', gross: 1_000, currency: 'USD' }), { commission: 0, tax: 0, fee: 0, total: 0, taxRate: 0, feeRate: 0 });
+  // A US stock still pays the broker's commission and the SEC fee on sale.
+  assert.ok(tradeCosts({ market: 'US', side: 'sell', kind: 'stock', gross: 1_000, currency: 'USD' }).fee > 0);
 });

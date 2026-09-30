@@ -498,6 +498,10 @@ dialog.q-moved::backdrop {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+.q-avatar {
+  font-size: 20px;
+  line-height: 1;
+}
 .q-account-dot {
   position: absolute;
   right: 1px;

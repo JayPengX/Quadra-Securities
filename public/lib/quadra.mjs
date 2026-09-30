@@ -103,6 +103,46 @@ export function xpLevel(xp, lang = 'zh') {
 }
 const xpNum = v => `${Math.round(v).toLocaleString('en-US')} XP`;
 
+// ---- Avatars and level rewards: what points are for, in every app ------------------------
+//
+// The account button wears an avatar. Some come with a level, some cost
+// points in Rewards ('vocab:xs:avatar:<id>', the Worker's REWARDS_XP.avatar
+// has the prices), one comes with Plus. The one worn is the wallet setting
+// `avatar` ({ id }); one not owned (Plus ended, say) shows the person again.
+export const AVATARS = [
+  { id: 'sprout', glyph: '🌱', level: 1 },
+  { id: 'fox', glyph: '🦊', level: 5 },
+  { id: 'panda', glyph: '🐼', level: 10 },
+  { id: 'lion', glyph: '🦁', level: 15 },
+  { id: 'dragon', glyph: '🐉', level: 20 },
+  { id: 'unicorn', glyph: '🦄', level: 30 },
+  { id: 'crown', glyph: '👑', level: 50 },
+  { id: 'cat', glyph: '🐱', xp: 300 },
+  { id: 'dog', glyph: '🐶', xp: 300 },
+  { id: 'frog', glyph: '🐸', xp: 600 },
+  { id: 'penguin', glyph: '🐧', xp: 600 },
+  { id: 'rocket', glyph: '🚀', xp: 1_500 },
+  { id: 'rainbow', glyph: '🌈', xp: 1_500 },
+  { id: 'fire', glyph: '🔥', xp: 3_000 },
+  { id: 'gem', glyph: '💎', xp: 5_000 },
+  { id: 'star', glyph: '✦', plus: true }
+];
+export const avatarBought = (wallet, id) => (wallet?.entries || []).some(e => e.app === 'vocab' && e.id === `vocab:xs:avatar:${id}`);
+export function avatarOwned(wallet, id, now = Date.now()) {
+  const a = AVATARS.find(x => x.id === id);
+  if (!a) return false;
+  if (a.plus) return plusMember(wallet, now);
+  if (a.level) return xpLevel(xpEarned(wallet)).level >= a.level;
+  return avatarBought(wallet, id);
+}
+export function avatarOf(wallet, now = Date.now()) {
+  const id = setting(wallet, 'avatar', null)?.id;
+  return id && avatarOwned(wallet, id, now) ? AVATARS.find(a => a.id === id) : null;
+}
+// Level rewards: a streak protection card at level 5, 15, 25… (Rewards
+// counts them with the ones bought and Plus's), and the level avatars.
+export const levelCards = level => Math.max(0, Math.floor((level + 5) / 10));
+
 const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 // What the account is worth for the allowance: the pool and Securities' holdings.
 export const worthOf = wallet => poolBalance(wallet) + finiteOr0(wallet?.snap?.stock?.holdings);
@@ -1269,9 +1309,14 @@ function hideMoved() {
 const PERSON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5c1.2-4 4.2-6 7.5-6s6.3 2 7.5 6"/></svg>';
 export function accountButton(s, { extra = null } = {}) {
   const btn = node('button', { class: 'q-account', type: 'button', 'aria-label': s.lang === 'en' ? 'Quadra Pass' : 'Quadra Pass 帳戶', title: BRAND.pass });
-  btn.innerHTML = PERSON_SVG;
-  btn.append(node('span', { class: 'q-account-dot', 'aria-hidden': 'true' }));
+  const dot = node('span', { class: 'q-account-dot', 'aria-hidden': 'true' });
+  // The avatar worn (points bought it or a level unlocked it), else the person.
   const paint = () => {
+    const a = avatarOf(s.wallet);
+    btn.replaceChildren();
+    if (a) btn.append(node('span', { class: 'q-avatar', 'aria-hidden': 'true', text: a.glyph }));
+    else btn.innerHTML = PERSON_SVG;
+    btn.append(dot);
     btn.classList.toggle('signed', Boolean(s.wallet));
     btn.classList.toggle('plus', plusMember(s.wallet));
   };
@@ -1380,7 +1425,7 @@ function detailsCard(s) {
     ]),
     // The level from Rewards' points (every app shows it here).
     node('div', { class: 'q-month' }, [
-      node('div', {}, [node('small', { text: T('Quadra 等級', 'Quadra level') }), node('strong', { text: `Lv ${lv.level} · ${lv.title}` })]),
+      node('div', {}, [node('small', { text: T('Quadra 等級', 'Quadra level') }), node('strong', { text: `${avatarOf(s.wallet)?.glyph || ''} Lv ${lv.level} · ${lv.title}`.trim() })]),
       node('div', {}, [node('small', { text: T('可用積分', 'Points to spend') }), node('strong', { class: 'num', text: xpNum(xpBalance(s.wallet)) })])
     ]),
     overdraft(s.wallet) > 0 ? node('p', { class: 'q-overdraft', text: T(`帳戶透支 ${money(overdraft(s.wallet))}：透支每月計息 1%，到 Quadra Securities 賣出持股補足。`, `Overdrawn by ${money(overdraft(s.wallet))}: 1% a month until it's covered. Sell some holdings in Quadra Securities.`) }) : null,

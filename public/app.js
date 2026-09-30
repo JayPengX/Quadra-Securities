@@ -2649,7 +2649,7 @@ async function runTimeMachine() {
 // Signing in is required (quadra.mjs shows the sign-in screen). The account
 // is this app's data on the pass; the pass's wallet is the one Quadra money
 // pool, which this account's NT$ cash shows: the other apps' money (Play's
-// bets and winnings, Rewards' earnings, Quadra's own pay, transfers)
+// bets and winnings, Rewards' shop, Quadra's own pay, transfers)
 // arrives as pool deposits, and this account's own NT$ goes back to the
 // wallet as its figure.
 

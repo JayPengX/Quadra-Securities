@@ -5,7 +5,7 @@
 //   Quadra Securities   stock   the financial powerhouse: where money lives and grows
 //   Quadra Play         odds    a place to play: sports betting and the lottery
 //   Quadra Fixtures     match   the sports data centre, and the way into Play
-//   Quadra Rewards      vocab   the centre of Quadra: earning, goals and every app's guide
+//   Quadra Rewards      vocab   the centre of Quadra: points, goals and every app's guide
 //   Orbit Class         orbit   a related add-on: the class schedule
 //
 // One account works everywhere: the Quadra Pass, a 10-character code for
@@ -31,7 +31,7 @@ export const APPS = {
   stock: { name: 'Quadra Securities', short: 'Securities', path: '/Quadra-Securities/', color: '#0d9488', role: { zh: '投資與理財', en: 'Invest and grow' } },
   odds: { name: 'Quadra Play', short: 'Play', path: '/Quadra-Play/', color: '#2563eb', role: { zh: '運彩與彩券', en: 'Sports bets and lottery' } },
   match: { name: 'Quadra Fixtures', short: 'Fixtures', path: '/Quadra-Fixtures/', color: '#ea580c', role: { zh: '賽事資料中心', en: 'Every sport, every stat' } },
-  vocab: { name: 'Quadra Rewards', short: 'Rewards', path: '/Quadra-Rewards/', color: '#7c3aed', role: { zh: '賺錢、目標與說明', en: 'Earn, goals and help' } },
+  vocab: { name: 'Quadra Rewards', short: 'Rewards', path: '/Quadra-Rewards/', color: '#7c3aed', role: { zh: '積分、目標與說明', en: 'Points, goals and help' } },
   orbit: { name: 'Orbit Class', short: 'Orbit Class', tile: 'Orbit', path: '/Orbit-Class/', color: '#0ea5e9', related: true, role: { zh: '課表', en: 'Class schedule' } }
 };
 export const FAMILY = ['stock', 'odds', 'match', 'vocab'];
@@ -42,28 +42,27 @@ export const appName = app => APPS[app]?.name || app;
 // Balanced so money matters (Shared-Proxy/tools/economy.mjs has the model):
 // a new pass opens with NT$30,000; the 1st of every Taiwan month pays an
 // allowance by what the account is worth (the pool plus Securities'
-// holdings): NT$6,000 under NT$40,000, 3,000 under 100,000, 1,500 under
+// holdings): NT$8,000 under NT$40,000, 4,000 under 100,000, 1,500 under
 // 250,000, 500 above: the full amount to get going or back in the game,
-// half once past the opening money, a token with plenty (eco.js pays it). Securities is
-// where it grows (the market, real costs); Play and the lottery are where it
-// goes (the house keeps about 14% of a single, a third of a treble, half of a
-// draw ticket); Rewards pays for effort, capped a day so a regular player
-// needs a little of it to keep level and nobody can grind past the house.
+// half once past the opening money, a token with plenty (eco.js pays it).
+// Those two are the only money Quadra gives (v7). Securities is where it
+// grows (the market, real costs); Play and the lottery are where it goes
+// (the house keeps about 14% of a single, a third of a treble, half of a
+// draw ticket). Rewards pays points (XP) for effort, never money: its shop
+// is the only money it moves, and that only out of the pool.
 export const ECONOMY = {
   start: 30_000,
-  monthly: 6_000,
+  monthly: 8_000,
   payTiers: [
-    [40_000, 6_000],
-    [100_000, 3_000],
+    [40_000, 8_000],
+    [100_000, 4_000],
     [250_000, 1_500],
     [Infinity, 500]
   ],
-  // Rewards: word practice, games and missions, with their caps a Taiwan day
-  // (NT$330 at most; about NT$12 a minute).
-  vocab: { perCorrect: 2, perMastered: 15, dailyCap: 150 },
-  gamesPerMinute: 10,
-  gamesDailyCap: 120,
-  missionsDailyCap: 60
+  // Rewards' points: a right answer, a word mastered the first time, and a
+  // game's minute (about).
+  vocab: { perCorrect: 2, perMastered: 15 },
+  gamesPerMinute: 10
 };
 const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 // What the account is worth for the allowance: the pool and Securities' holdings.
@@ -92,6 +91,27 @@ function resetNotice(s) {
       ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. The monthly allowance now goes by what you're worth (NT$6,000 down to 500).${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
       : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月津貼改為依資產發放（NT$6,000 到 500）。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
   });
+  return true;
+}
+
+// Once per device, for an account made before v7: Rewards pays points, not
+// money; the allowance is higher; Plus costs more from its next renewal.
+const V7_SEEN = 'quadra.seen.v7';
+// 2026-10-01 in Taiwan.
+export const V7_AT = Date.UTC(2026, 8, 30, 16);
+function v7Notice(s) {
+  if (!(s.wallet?.created < V7_AT) || readStore(V7_SEEN)) return;
+  writeStore(V7_SEEN, '1');
+  const en = s.lang === 'en';
+  tell({
+    lang: s.lang,
+    icon: '✨',
+    title: en ? 'What’s new in Quadra' : 'Quadra 更新',
+    body: en
+      ? `Quadra Rewards now gives points (XP) for words, games and missions instead of money, and missions no longer give free bets; what you earned stays yours. The monthly allowance is up to ${money(ECONOMY.payTiers[0][1])}. Quadra Plus is ${money(PLUS.fee)} a month or ${money(PLUS.year)} a year from its next renewal (a yearly plan already paid runs to its end).`
+      : `Quadra Rewards 的單字、遊戲和任務改為發積分（XP），不再發錢，任務也不再送免費投注；已經賺到的錢照樣是你的。每月津貼提高到最多 ${money(ECONOMY.payTiers[0][1])}。Quadra Plus 下次續訂起為每月 ${money(PLUS.fee)}、年繳 ${money(PLUS.year)}（已繳的年費用到期滿）。`
+  });
+  return true;
 }
 
 // ---- Quadra Plus ---------------------------------------------------------------------
@@ -101,26 +121,27 @@ function resetNotice(s) {
 // first month someone ever joins is free. A month is a member's when the
 // wallet holds `eco:plus:<YYYY-MM>`, so every app reads the same answer, for
 // any past day too (Securities' daily cash interest). The perks are real
-// money each app gives up; the fee, and the play they bring, earn it back
-// (tools/economy.mjs: a regular member gets back about three times the fee,
-// a few percent of what the house keeps from them).
+// money each app gives up, and the fee covers them for every kind of member
+// (tools/economy.mjs, v7: NT$990, was 390; the parlay boost is no longer
+// doubled and the daily lift covers a slip up to NT$500).
 export const PLUS = {
-  fee: 390,
+  fee: 990,
   // The yearly plan: twelve months for the price of ten.
-  year: 3_900,
+  year: 9_900,
   // Securities: commission at 2.8折 (×0.28, a Taiwan online broker's best
   // rate), FX spread ×0.5, NT$ cash interest 2% a year (0.8% otherwise),
   // borrowing 1 point cheaper.
   stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, loanCut: 0.01 },
-  // Play: the parlay boost doubled; cash out keeps 2% instead of 5%; one
-  // paid slip a Taiwan day (costing at most liftMax) wins `lift` more (+10%
-  // of its winnings: under the house's cut of about 16% on every market, so
-  // even a boosted slip keeps the house ahead); and a NT$bonusBet free bet
-  // each week (the Worker's `eco:fb:<Monday>`).
-  odds: { boost: 2, cashOutKeep: 0.02, lift: 0.1, liftMax: 1_000, bonusBet: 100 },
-  // Rewards: every word pack while a member, a streak protection a month,
-  // NT$50 more word pay a day (Rewards' shop.mjs).
-  vocab: { wordsCap: 50 }
+  // Play: cash out keeps 2% instead of 5%; one paid slip a Taiwan day
+  // (costing at most liftMax) wins `lift` more (+10% of its winnings: under
+  // the house's cut of about 16% on every market, so even a boosted slip
+  // keeps the house ahead); and a NT$bonusBet free bet each week (the
+  // Worker's `eco:fb:<Monday>`). `boost` multiplies the parlay boost (1: the
+  // same as everyone's since v7).
+  odds: { boost: 1, cashOutKeep: 0.02, lift: 0.1, liftMax: 500, bonusBet: 100 },
+  // Rewards: word packs at `packShare` of the price, a streak protection a
+  // month (Rewards' shop.mjs).
+  vocab: { packShare: 0.5 }
 };
 const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
 export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
@@ -182,9 +203,11 @@ export const welcomeDue = wallet => {
 
 // ---- Free bets ------------------------------------------------------------------------
 //
-// A free bet is a token Rewards gives for a mission ('vocab:fb:<day>:<mission>',
-// kind 'freebet', amount 0, its value in the note), or Quadra Plus's weekly
-// bonus bet (the Worker's 'eco:fb:<Monday>', app 'eco'): Play stakes it on one
+// A free bet is a token from Quadra: Plus's weekly bonus bet or the welcome
+// offer (the Worker's 'eco:fb:…', app 'eco', kind 'freebet', amount 0, its
+// value in the note). Rewards' missions gave them before v7
+// ('vocab:fb:<day>:<mission>'; the last expire within FREEBET.days, and the
+// Worker takes no new ones). Play stakes one on one
 // slip, and only the winnings come back, never the stake. Play marks it
 // spent with 'odds:fb-<token id>' (a fixed id: spent once). Unspent tokens
 // last FREEBET.days.
@@ -734,7 +757,7 @@ function makeSession(app, { lang, heartbeat }) {
     if (!first) first = await signInGate(s);
     s.first = first;
     loop();
-    setTimeout(() => resetNotice(s), 1200);
+    setTimeout(() => resetNotice(s) || v7Notice(s), 1200);
     setTimeout(() => offerNotices(s), 2500);
     // The first reply: what the app merges its own copy with (never the
     // session itself: an app that took the session for the reply saw "no
@@ -837,6 +860,7 @@ const KIND = {
   prize: ['彩券獎金', 'Lottery prize'],
   game: ['遊戲', 'Game'],
   reward: ['單字獎勵', 'Word practice'],
+  words: ['單字練習', 'Word practice'],
   mission: ['任務獎勵', 'Mission reward'],
   plus: ['Quadra Plus 月費', 'Quadra Plus'],
   rebase: ['經濟調整', 'Economy reset'],
@@ -1269,6 +1293,8 @@ export function paydayText(lang, now = Date.now(), wallet = null) {
 
 // The account at a glance: its number, since when, this month's money in
 // and out, and the latest entries (every app's, like a bank statement).
+// An entry that moved money (Rewards' points and free bet tokens are amount 0).
+const moved = e => e.amount !== 0;
 export function accountDetails(wallet, lang = 'zh', now = Date.now()) {
   const entries = [...(wallet?.entries || [])].sort((a, b) => b.t - a.t);
   const month = taipeiDay(now).slice(0, 7);
@@ -1278,8 +1304,8 @@ export function accountDetails(wallet, lang = 'zh', now = Date.now()) {
     created: Number.isFinite(wallet?.created) ? wallet.created : null,
     in: sum(thisMonth.filter(e => e.amount > 0)),
     out: sum(thisMonth.filter(e => e.amount < 0)),
-    count: thisMonth.length,
-    recent: entries.slice(0, 8).map(e => ({ t: e.t, amount: e.amount, text: describeEntry(e, lang), app: e.app }))
+    count: thisMonth.filter(moved).length,
+    recent: entries.filter(moved).slice(0, 8).map(e => ({ t: e.t, amount: e.amount, text: describeEntry(e, lang), app: e.app }))
   };
 }
 const accountNumber = id => (id ? `QP ${id.slice(0, 4).toUpperCase()} ${id.slice(4, 8).toUpperCase()} ${id.slice(8, 12).toUpperCase()}` : '');
@@ -1331,18 +1357,15 @@ export function plusPerks(lang = 'zh') {
   const pct = x => `${Math.round(x * 1000) / 10}%`;
   const o = PLUS.odds;
   const zhDiscount = `${Math.round(PLUS.stock.commission * 100) / 10} 折`;
-  const words = PLUS.vocab.wordsCap;
   return [
     ['odds', en ? `+${pct(o.lift)} winnings, every day` : `每日獎金 +${pct(o.lift)}`, en ? `One slip a day up to ${money(o.liftMax)}` : `每天一張、${money(o.liftMax)} 以內的投注`],
     ['odds', en ? `A ${money(o.bonusBet)} free bet every week` : `每週 ${money(o.bonusBet)} 免費投注`, en ? 'Every Monday, keep what it wins' : '每週一送，贏了獎金歸你'],
-    ['odds', en ? 'Parlay boost doubled' : '串關加成加倍', en ? 'Up to +40% on a winning parlay' : '全過最高多拿 40% 獎金'],
     ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(o.cashOutKeep)} instead of 5%` : `只扣 ${pct(o.cashOutKeep)}，一般扣 5%`],
     ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${zhDiscount}`, en ? 'Every market, every order' : '所有市場、每一筆委託'],
     ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? 'Instead of 0.8%, accrued daily' : '一般 0.8%，每日計息'],
     ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
     ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
-    ['vocab', en ? 'Every word pack included' : '所有單字包免費', en ? 'TOEIC, IELTS, Business English' : '多益、雅思、商務英文，會員期間隨你背'],
-    ['vocab', en ? `${money(words)} more word pay a day` : `單字獎勵每日上限 +${money(words)}`, en ? `${money(ECONOMY.vocab.dailyCap + words)} instead of ${money(ECONOMY.vocab.dailyCap)}` : `一般 ${money(ECONOMY.vocab.dailyCap)}，會員 ${money(ECONOMY.vocab.dailyCap + words)}`],
+    ['vocab', en ? `Word packs ${pct(1 - PLUS.vocab.packShare)} off` : `單字包 ${Math.round(PLUS.vocab.packShare * 100) / 10} 折`, en ? 'TOEIC, IELTS, Business English, yours to keep' : '多益、雅思、商務英文，買了永久保留'],
     ['vocab', en ? 'A streak protection every month' : '每月一張連續紀錄保護卡', en ? 'Your streak survives a missed day' : '漏掉一天，連續紀錄照樣算']
   ];
 }
@@ -1752,7 +1775,7 @@ export const NOTICE_KINDS = {
     ['ticket', '彩券中獎', 'Lottery win', '電腦彩券開獎、你的彩券中獎時。', 'When a draw is out and your ticket won.']
   ],
   vocab: [
-    ['ready', '獎勵可以領', 'Reward to claim', '每日任務或每週目標完成、可以領錢時。', 'When a mission or weekly goal is done and ready to claim.'],
+    ['ready', '積分可以領', 'Points to claim', '每日任務或每週目標完成、可以領積分時。', 'When a mission or weekly goal is done and ready to claim.'],
     ['streak', '連續紀錄快斷了', 'Streak ending', '今天還沒玩，連續天數今晚就會歸零時。', 'When you haven’t played today and your streak ends tonight.']
   ],
   stock: [

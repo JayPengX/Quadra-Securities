@@ -1689,7 +1689,7 @@ function renderTicket() {
         ? `<button class="primary-button place ${d.side}" type="button" data-action="place-fx" data-need="${topUp.need}" ${pricesLive() ? '' : 'disabled'}>${h(t('autoFx'))}</button>`
         : marginBuy && est && !problems.length
         ? `<button class="primary-button place ${d.side}" type="button" data-action="place-margin" data-amount="${marginBuy.amount}" ${pricesLive() ? '' : 'disabled'}>${h(t('marginBuy'))}</button>`
-        : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() && !d.busy ? '' : 'disabled'}>${h(d.busy ? t('checkingPrice') : d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
+        : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
     }
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
   </div>`;
@@ -1699,7 +1699,7 @@ function placeFromTicket() {
   const d = state.detail;
   const q = state.quotes.get(d.symbol);
   if (!q || !state.account || !pricesLive()) return;
-  const req = { symbol: d.symbol, side: d.side, type: d.type, qty: Number(d.qty) };
+  const req = { symbol: d.symbol, side: d.side, type: d.type, qty: Number(d.qty), fresh: true };
   if (d.type === 'limit') req.limit = Number(d.limit);
   if (d.type === 'stop') req.stop = Number(d.stop);
   if (d.type !== 'market' && d.tif === 'gtc') req.tif = 'gtc';
@@ -1724,41 +1724,28 @@ function placeFromTicket() {
   render();
 }
 
-// Every order goes through at the price now: the quote is read again first
-// (and waited for), never the figure the screen showed a while ago. If it
-// moved more than PRICE_MOVED since the person said yes, they're asked again
-// at the new one; no fresh price, no order.
-const PRICE_MOVED = 0.01;
+// Every order goes in at once and is held as a 委託單 until a fresh price
+// comes in (placeOrder's `fresh`): it fills at that, never at the figure the
+// screen showed. The quote is read now, again a few times if that fails;
+// the usual refresh fills it after that.
 async function atFreshPrice(place) {
-  const d = state.detail;
-  if (!d || d.busy) return;
-  const before = state.quotes.get(d.symbol)?.price;
-  d.busy = true;
-  d.msg = { kind: '', text: t('checkingPrice') };
-  renderTicket();
-  let ok = false;
-  try {
-    const got = await Promise.race([fetchQuotes([d.symbol]), new Promise((_, no) => setTimeout(() => no(new Error('slow')), 15_000))]);
-    ok = got.has(d.symbol) && got.get(d.symbol).price > 0;
-    absorb(got);
-  } catch {}
-  d.busy = false;
-  if (state.detail !== d) return;
-  if (!ok) {
-    d.msg = { kind: 'bad', text: t('priceUnavailable') };
-    return renderTicket();
-  }
-  d.msg = null;
-  const now = state.quotes.get(d.symbol).price;
-  if (before > 0 && Math.abs(now / before - 1) > PRICE_MOVED && d.type !== 'limit') {
-    renderTicket();
-    if (!(await confirmOrder(t('priceMoved', { from: fmtPrice(before, state.quotes.get(d.symbol).currency), to: fmtPrice(now, state.quotes.get(d.symbol).currency) })))) return;
-  }
+  const symbol = state.detail?.symbol;
+  if (!symbol) return;
   place();
+  for (let i = 0; i < 6; i++) {
+    try {
+      absorb(await fetchQuotes([symbol]));
+      afterPrices();
+      render();
+      if (state.detail?.symbol === symbol) renderDetail();
+      if (!(state.account?.orders || []).some(o => o.status === 'open' && o.waitFresh && o.symbol === symbol)) return;
+    } catch {}
+    await new Promise(ok => setTimeout(ok, 5_000));
+  }
 }
 
 // Every order asks first: what it is and about what it costs, all in.
-function confirmOrder(note = '') {
+function confirmOrder() {
   const d = state.detail;
   if (!d) return Promise.resolve(false);
   const { q, est, qty } = ticketInfo();
@@ -1768,7 +1755,7 @@ function confirmOrder(note = '') {
     lang: locale,
     icon: d.side === 'buy' ? '📈' : '📉',
     title: t(d.side === 'buy' ? 'orderAskBuy' : 'orderAskSell', { name: nameOf(d.symbol, q) }),
-    body: [note, t(!total ? 'orderAskQty' : d.side === 'buy' ? 'orderAskBody' : 'orderAskBodySell', { qty: fmtQty(qty), total })].filter(Boolean).join(' '),
+    body: t(!total ? 'orderAskQty' : d.side === 'buy' ? 'orderAskBody' : 'orderAskBodySell', { qty: fmtQty(qty), total }),
     ok: t(d.side === 'buy' ? 'placeBuy' : 'placeSell'),
     cancel: t('orderAskCancel')
   });

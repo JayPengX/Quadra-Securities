@@ -436,6 +436,9 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (type === 'limit') order.limit = Number(req.limit);
   if (type === 'stop') order.stop = Number(req.stop);
   if (req.forced) order.forced = true;
+  // Held for a fresh price: it fills only at a quote read after it was
+  // placed (processOrders), never at the figure on screen.
+  if (req.fresh) order.waitFresh = now;
   // How long it lasts: a day order ends with its session (what exchanges
   // and brokers do by default); good-till-cancelled lasts GTC_DAYS. Crypto
   // and currency pairs never close, so theirs are GTC.
@@ -467,7 +470,7 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     order.reserve = reserve;
   }
   let next = { ...account, orders: [...(account.orders || []), order] };
-  const price = triggerPrice(order, quote, now);
+  const price = order.waitFresh ? null : triggerPrice(order, quote, now);
   if (price === null) return { account: next, order, fill: null };
   const filled = fillOrder(next, order, price, rates, now);
   return { account: filled.account, order: filled.order, fill: filled.fill, error: filled.error, need: filled.need, have: filled.have };
@@ -483,7 +486,7 @@ export function requiredCash(order, quote, now = Date.now()) {
   const last = order.type === 'stop' ? Math.max(Number(order.stop), quote.price) : quote.price;
   const ref = order.type === 'limit' ? Number(order.limit) : marketFill(quote.market, quote.kind, 'buy', last);
   const est = estimate({ market: quote.market, kind: quote.kind, currency: quote.currency, side: 'buy', qty: order.qty, price: ref });
-  const fillsNow = triggerPrice({ ...order, side: 'buy', t: now }, quote, now) !== null;
+  const fillsNow = !order.waitFresh && triggerPrice({ ...order, side: 'buy', t: now }, quote, now) !== null;
   const reserve = roundCash(fillsNow || order.type === 'limit' ? est.total : est.total * (1 + RESERVE_BUFFER), quote.currency);
   return { est, reserve, buffer: Math.max(0, reserve - est.total), fillsNow, ref };
 }
@@ -562,6 +565,7 @@ export function processOrders(account, quotes, rates, now = Date.now()) {
   for (const order of account.orders.filter(o => o.status === 'open' && !(o.expires && now >= o.expires && !o.forced)).sort(byTime)) {
     const quote = quotes.get(order.symbol);
     if (!quote || !rates?.[order.currency]) continue;
+    if (order.waitFresh && !(quote.got >= order.waitFresh)) continue;
     const price = triggerPrice(order, quote, now);
     if (price === null) continue;
     const r = fillOrder(next, order, price, rates, now);

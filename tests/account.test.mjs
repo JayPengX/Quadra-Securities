@@ -52,6 +52,19 @@ test('buying Taiwan stock at market: price, commission, cash and holding', () =>
   assert.equal(s.positions['2330.TW'].cost, 248_103);
 });
 
+test('an order held for a fresh price waits as a 委託單, then fills at the newer quote', () => {
+  const a = newAccount(1_000_000, T0, 'acc');
+  const r = placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100, fresh: true }, { quote: { ...quote('2330.TW', 2475), got: T0 - 60_000 }, rates: RATES, now: T0, id: 'h1' });
+  assert.equal(r.order.status, 'open');
+  assert.equal(r.fill, null);
+  // The old quote (read before it was placed) doesn't fill it; a newer one does, at its price.
+  const old = processOrders(r.account, new Map([['2330.TW', { ...quote('2330.TW', 2475), got: T0 - 60_000 }]]), RATES, T0 + 1_000);
+  assert.equal(old.filled.length, 0);
+  const fresh = processOrders(r.account, new Map([['2330.TW', { ...quote('2330.TW', 2480), got: T0 + 2_000 }]]), RATES, T0 + 2_000);
+  assert.equal(fresh.filled.length, 1);
+  assert.equal(fresh.filled[0].quote, 2480);
+});
+
 test('the welcome offer: an account marked by the app pays no commission on its first trade, only then', async () => {
   const { withWelcome, firstTrade } = await import('../public/lib/account.mjs');
   const a = withWelcome(newAccount(1_000_000, T0, 'acc'));

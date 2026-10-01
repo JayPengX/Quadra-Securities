@@ -168,6 +168,9 @@ export async function fetchQuotes(symbols, { range = '1d', interval = '5m' } = {
     if (q) out.set(s, q);
   }
   if (failed && failed === batches.length) throw new Error('quotes unavailable');
+  // When it was read (an order waiting for a fresh price checks it).
+  const got = Date.now();
+  for (const q of out.values()) q.got = got;
   return out;
 }
 

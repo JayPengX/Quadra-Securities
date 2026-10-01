@@ -288,6 +288,45 @@ export const levelCards = level => Math.max(0, Math.floor((level + 5) / 10));
 const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 // What the account is worth: the pool and Securities' holdings.
 export const worthOf = wallet => poolBalance(wallet) + finiteOr0(wallet?.snap?.stock?.holdings);
+// 財富等級: what the account is worth (worthOf) puts it on a level; the
+// first time it reaches one, Quadra's economy pays the level's reward once
+// (eco.js RANKS, the same table: `eco:rank:<id>`).
+export const WEALTH_RANKS = [
+  { id: 'start', min: 0, reward: 0, icon: '🌱' },
+  { id: 'saver', min: 50_000, reward: 1_000, icon: '🪙' },
+  { id: 'steady', min: 100_000, reward: 2_000, icon: '💼' },
+  { id: 'comfort', min: 250_000, reward: 3_000, icon: '🏡' },
+  { id: 'wealthy', min: 500_000, reward: 5_000, icon: '💎' },
+  { id: 'rich', min: 1_000_000, reward: 8_000, icon: '🏦' },
+  { id: 'multi', min: 5_000_000, reward: 15_000, icon: '👑' },
+  { id: 'tycoon', min: 20_000_000, reward: 30_000, icon: '🚀' }
+];
+export const rankRewarded = (wallet, id) => (wallet?.entries || []).some(e => e.id === `eco:rank:${id}` && e.app === 'eco');
+// Where the money came from and went (all time, NT$): what the system gave
+// (opening money, pay, level rewards, resets), what Quadra took from the
+// account (Play's net, Plus, Rewards' purchases, overdraft interest), and the
+// account's own result on top (worth less the first plus the second).
+export function moneySides(wallet) {
+  const gave = { start: 0, pay: 0, rank: 0, other: 0 };
+  let took = 0;
+  let play = 0;
+  for (const e of wallet?.entries || []) {
+    const a = Number(e.amount) || 0;
+    if (e.app === 'eco') {
+      if (e.kind === 'start' || e.kind === 'grant') gave.start += a;
+      else if (e.kind === 'pay') gave.pay += a;
+      else if (e.kind === 'rank') gave.rank += a;
+      else if (e.kind === 'rebase' || e.kind === 'vip') gave.other += a;
+      else if (e.kind === 'plus' || e.kind === 'od') took -= a;
+    } else if (e.app === 'odds') play += a;
+    else if (e.app === 'vocab' && a < 0) took -= a;
+  }
+  // Play: what the house kept (its edge, over every bet), or 0 if the account came out ahead.
+  if (play < 0) took -= play;
+  const given = gave.start + gave.pay + gave.rank + gave.other;
+  const worth = worthOf(wallet);
+  return { gave, given, took, worth, own: worth - given + took, playNet: play };
+}
 // The monthly pay: fixed, whatever the account holds (eco.js PAY_MONTH).
 export const payFor = () => ECONOMY.monthly;
 export const paydayFor = () => payFor();
@@ -1176,6 +1215,7 @@ const KIND = {
   mission: ['任務獎勵', 'Mission reward'],
   plus: ['Quadra Plus 月費', 'Quadra Plus'],
   rebase: ['經濟調整', 'Economy reset'],
+  rank: ['財富等級獎勵', 'Wealth level reward'],
   od: ['透支利息', 'Overdraft interest'],
   cashout: ['提前兌現', 'Cash out'],
   shop: ['Rewards 加值', 'Rewards purchase'],

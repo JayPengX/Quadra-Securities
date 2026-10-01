@@ -145,16 +145,3 @@ test('margin lends what brokers lend: Taiwan 60% (OTC 50%), Reg T 50% elsewhere,
   for (let i = 0; i < 200; i++) loan += Math.max(0, 0.6 * (own + loan) - loan);
   assert.ok(Math.abs(loan - 150) < 1e-6);
 });
-
-test('a loan is kept out of the pool only while it may still be cash; never counted twice', async () => {
-  const { borrowedCash } = await import('../public/lib/account.mjs');
-  const loan = amount => ({ TWD: { currency: 'TWD', balance: amount } });
-  // A cash loan not spent: it stays here.
-  assert.equal(borrowedCash({ cash: { TWD: 150_000 }, loans: loan(50_000), positions: {} }), 50_000);
-  // 融資 (the position's financed): the loan bought shares, the cash left is one's own.
-  assert.equal(borrowedCash({ cash: { TWD: 60_000 }, loans: loan(60_000), positions: { '2330.TW': { currency: 'TWD', financed: 60_000 } } }), 0);
-  // A loan from before 融資 was tied to purchases, spent on shares: only the cash still there.
-  assert.equal(borrowedCash({ cash: { TWD: 22, USD: 0 }, loans: loan(46_708.64), positions: { '0050.TW': { currency: 'TWD', financed: 0 } } }), 22);
-  // A loan in dollars, cash in dollars.
-  assert.equal(borrowedCash({ cash: { USD: 100 }, loans: { USD: { currency: 'USD', balance: 300 } }, positions: {} }, { USD: 32 }), 3_200);
-});

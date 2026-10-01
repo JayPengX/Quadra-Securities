@@ -1724,20 +1724,6 @@ export function applyPool(account, wallet) {
   return { account: { ...account, events: [...account.events, ...added] }, added };
 }
 
-// Borrowed money that may still be sitting as cash, in NT$: loans not tied
-// to a purchase (融資 is: the position's `financed`), up to the cash there.
-// It stays here for the market, out of the pool, and the holdings sent to
-// the wallet add it back (they're net of every loan), so a loan is never
-// counted twice. Before 2026-10-01 a 融資 buy borrowed the shortfall as a
-// plain cash loan, spent at once on the stock: those count as spent.
-export function borrowedCash(s, rates = {}) {
-  const twd = cur => (cur === BASE ? 1 : rates[cur] || 0);
-  const owed = Object.values(s.loans || {}).reduce((sum, l) => sum + Math.max(0, l.balance) * twd(l.currency), 0);
-  const financed = Object.values(s.positions || {}).reduce((sum, p) => sum + Math.max(0, p.financed || 0) * twd(p.currency), 0);
-  const cash = Object.entries(s.cash || {}).reduce((sum, [cur, v]) => sum + v * twd(cur), 0);
-  return Math.max(0, Math.min(cash, owed - financed));
-}
-
 // This account's own part of the pool: spendable NT$ (open orders' cash
 // held back) less what came from the other apps.
 export function ownCash(account, s, now = Date.now()) {

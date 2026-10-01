@@ -1,7 +1,7 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, borrowedCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import { TD_TERMS, TD_MIN, TD_EARLY, tdInterest, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, lendFee, lendable } from './lib/savings.mjs';
 import {
@@ -2986,19 +2986,20 @@ async function mergeRemote(remote, { pull = false } = {}) {
     account = state.account;
   }
   account = applyPool(account, wallet).account;
-  // NT$ cash for the other apps to spend: what's its own, less borrowed
-  // money still sitting as cash (it stays here, for the market; it never
-  // becomes money to bet or buy with elsewhere). Money already spent on
-  // shares is in the holdings, net of the loan.
+  // NT$ cash for the other apps to spend: what's its own, as it is. A loan
+  // is never cash here: 融資 lends only as a purchase fills, straight into
+  // the shares, and the loan comes off the holdings below (and is
+  // Securities' own to watch: margin calls, interest). Before, every loan
+  // came off this figure too, so it was counted twice and an account with
+  // 融資 showed the whole loan as an overdraft.
   const sAll = replay(account);
-  const borrowed = borrowedCash(sAll, state.rates);
-  const figure = Math.max(0, Math.round((ownCash(account, sAll) - borrowed) * 100) / 100);
-  // What the holdings are worth (less loans and shorts, plus the borrowed
-  // cash kept out of the figure), for the account's worth across apps: sent
-  // once prices are in, again when it moves 2% (or NT$1,000).
+  const figure = Math.max(0, Math.round(ownCash(account, sAll) * 100) / 100);
+  // What the holdings are worth (less loans and shorts), for the account's
+  // worth across apps: sent once prices are in, again when it moves 2% (or
+  // NT$1,000).
   const prev = wallet?.snap?.stock;
   const v = state.loaded ? valuate(replay(account), state.quotes, state.rates) : null;
-  const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - v.cashTWD + borrowed) : prev?.holdings;
+  const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - v.cashTWD) : prev?.holdings;
   const moved = Number.isFinite(holdings) && !(Math.abs((prev?.holdings ?? Infinity) - holdings) < Math.max(1_000, Math.abs(holdings) * 0.02));
   const snapPatch = prev?.cash === figure && !moved ? undefined : { stock: { cash: figure, ...(Number.isFinite(holdings) ? { holdings } : {}), t: Date.now() } };
   const changed = !their || JSON.stringify(account) !== JSON.stringify(their);

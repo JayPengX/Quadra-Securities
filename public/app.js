@@ -1729,10 +1729,17 @@ function ticketInfo() {
   const est = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref, first: welcome }) : null;
   const cash = Math.max(0, avail.cash[q.currency] || 0);
   const shares = Math.max(0, avail.qty[d.symbol] || 0);
-  // Largest quantity whose held amount fits the cash, NT$ that could be
-  // exchanged for it included.
-  const fromTwd = q.currency !== BASE && state.rates[q.currency] ? quoteExchange(BASE, q.currency, Math.max(0, avail.cash[BASE] || 0), state.rates, state.fxOpen)?.received || 0 : 0;
-  const spendable = cash + fromTwd;
+  // The other currencies held and settled (what an exchange can take), NT$
+  // first then the largest: what could be exchanged into this one.
+  const free = s ? withdrawable(state.account, s) : {};
+  const spare = c => Math.max(0, Math.min(avail.cash[c] || 0, free[c] || 0));
+  const sources = Object.keys(avail.cash)
+    .filter(c => c !== q.currency && spare(c) > 0 && state.rates[c] && state.rates[q.currency])
+    .sort((a, b) => (b === BASE) - (a === BASE) || spare(b) * state.rates[b] - spare(a) * state.rates[a]);
+  // Largest quantity whose held amount fits the cash, every other currency
+  // that could be exchanged for it included.
+  const fromOthers = sources.reduce((sum, c) => sum + (quoteExchange(c, q.currency, spare(c), state.rates, state.fxOpen)?.received || 0), 0);
+  const spendable = cash + fromOthers;
   // 融資: a buy of what the broker lends against, lent its share as it fills
   // (only one's own part is needed now).
   // (Only with a credit account, and not after a default: no 融資 then, DEFAULT_BAN long.)
@@ -1753,13 +1760,11 @@ function ticketInfo() {
   const req = d.side === 'buy' && est ? requiredCash({ type: d.type, qty, limit: Number(d.limit), stop: Number(d.stop), waitFresh: 1, margin: credit ? marginRate : 0 }, q, Date.now()) : null;
   const need = req ? req.reserve : 0;
   const short = d.side === 'buy' && est ? Math.max(0, need - cash) : 0;
-  // Short of this currency but holding NT$: the exchange that covers it
-  // (spread included), done with the order in one tap.
-  let topUp = null;
-  if (short > 0 && q.currency !== BASE && state.rates[q.currency]) {
-    const pay = amountFor(BASE, q.currency, short, state.rates, state.fxOpen);
-    if (pay) topUp = { need: pay, get: short, enough: (avail.cash[BASE] || 0) >= pay, have: avail.cash[BASE] || 0 };
-  }
+  // Short of this currency: each currency held that covers it (spread
+  // included), NT$ first. The first is done with the order in one tap; any
+  // of them on its own, from its chip.
+  const covers = short > 0 ? sources.map(from => ({ from, need: amountFor(from, q.currency, short, state.rates, state.fxOpen), get: short })).filter(c => c.need && spare(c.from) >= c.need) : [];
+  const topUp = covers.length ? { ...covers[0], enough: true } : short > 0 ? { enough: false } : null;
   // 融資 is chosen on the ticket (a buy the broker lends part of); there's
   // no borrowing cash to cover a shortfall.
   const v0 = credit ? valuation() : null;
@@ -1774,7 +1779,7 @@ function ticketInfo() {
     const room = Math.max(0, (v.assets - 1.5 * (v.debtTWD + v.shortTWD)) / 0.5);
     shortRoom = v.margin === 'ok' ? roundQty(room / (q.price * state.rates[q.currency]), q.kind) : 0;
   }
-  return { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, welcome, marginRate, credit, lent, marginOk };
+  return { q, est, cash, shares, max, short, topUp, covers, sources, qty, ref, last, shortRoom, req, need, marginBuy, welcome, marginRate, credit, lent, marginOk };
 }
 
 function renderTicket() {
@@ -1785,7 +1790,7 @@ function renderTicket() {
     morph(box, `<div class="card ticket"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`);
     return;
   }
-  const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, welcome, marginRate, credit, lent, marginOk } = ticketInfo();
+  const { q, est, cash, shares, max, short, topUp, covers, sources, qty, ref, last, shortRoom, req, need, marginBuy, welcome, marginRate, credit, lent, marginOk } = ticketInfo();
   const open = isOpen(q);
   const unit = unitOf(d.symbol);
   const presets =
@@ -1857,7 +1862,8 @@ function renderTicket() {
     </div>
     <div class="qty-presets">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}">${h(label)}${label === t('max') || label === t('all') ? ` <small>${h(fmtQty(v))}</small>` : ''}</button>`).join('')}</div>
     ${d.type !== 'market' && (band || tickSize(q.market, q.kind, q.price)) ? `<p class="muted">${h([band ? t('limitBand', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }) : '', tickSize(q.market, q.kind, q.price) ? t('tickIs', { tick: num(tickSize(q.market, q.kind, q.price), 4, 0) }) : ''].filter(Boolean).join(' · '))}</p>` : ''}
-    <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' && t('lotNote') ? ` · ${h(t('lotNote'))}` : ''}</p>
+    <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' && t('lotNote') ? ` · ${h(t('lotNote'))}` : ''}${d.side === 'buy' && sources.length ? ` <button class="link-button" type="button" data-action="ticket-fx" data-from="${h(sources[0])}" data-to="${h(q.currency)}">${h(t('fxOpen'))}</button>` : ''}</p>
+    ${covers.length ? `<div class="qty-presets fx-cover">${covers.slice(0, 3).map(c => `<button class="chip small" type="button" data-action="topup" data-from="${h(c.from)}" data-cur="${h(q.currency)}" data-need="${c.need}">${h(t('fxCover', { pay: money(c.need, c.from), get: money(c.get, q.currency) }))}</button>`).join('')}</div>` : ''}
     ${d.side === 'sell' && heldMargin(d.symbol) > 0 ? `<p class="note margin-split">${h(t('sellSplit', { cash: fmtQty(Math.max(0, shares - heldMargin(d.symbol))), margin: fmtQty(heldMargin(d.symbol)), unit }))}</p>` : ''}
     ${
       est
@@ -1881,7 +1887,7 @@ function renderTicket() {
     ${pricesLive() ? '' : `<p class="warn">${h(t('waitLive'))}</p>`}
     ${
       topUp?.enough && est && !problems.length
-        ? `<button class="primary-button place ${d.side}" type="button" data-action="place-fx" data-need="${topUp.need}" ${pricesLive() ? '' : 'disabled'}>${h(t('autoFx'))}</button>`
+        ? `<button class="primary-button place ${d.side}" type="button" data-action="place-fx" data-from="${h(topUp.from)}" data-need="${topUp.need}" ${pricesLive() ? '' : 'disabled'}>${h(t('autoFx'))}</button>`
         : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
     }
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
@@ -1954,18 +1960,19 @@ function confirmOrder() {
     cancel: t('orderAskCancel')
   });
 }
-// Short of the currency: exchanged from NT$ first, then the order.
-function placeWithFx(need) {
+// Short of the currency: exchanged first (from NT$, or the currency that
+// covers it), then the order.
+function placeWithFx(need, from = BASE) {
   const d = state.detail;
   if (!d) return;
   const cur = state.quotes.get(d.symbol)?.currency;
-  const r = exchange(state.account, { from: BASE, to: cur, amount: need }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
+  const r = exchange(state.account, { from, to: cur, amount: need }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
   if (r.error) {
     d.msg = { kind: 'bad', text: errorText(r) };
     return renderTicket();
   }
   commit(r.account);
-  toast(t('autoFxDone', { pay: money(r.event.amount, BASE), get: money(r.event.received, r.event.to) }), 'good');
+  toast(t('autoFxDone', { pay: money(r.event.amount, r.event.from), get: money(r.event.received, r.event.to) }), 'good');
   placeFromTicket();
 }
 
@@ -3642,15 +3649,18 @@ document.addEventListener('click', event => {
       break;
     case 'place-fx': {
       const need = Number(el.dataset.need);
-      confirmOrder().then(ok => ok && atFreshPrice(() => placeWithFx(need)));
+      const from = el.dataset.from || BASE;
+      confirmOrder().then(ok => ok && atFreshPrice(() => placeWithFx(need, from)));
       break;
     }
     case 'topup': {
-      const r = exchange(state.account, { from: BASE, to: el.dataset.cur, amount: Number(el.dataset.need) }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
+      // A chip on the ticket: just the shortfall, from the currency it names.
+      const from = el.dataset.from || BASE;
+      const r = exchange(state.account, { from, to: el.dataset.cur, amount: Number(el.dataset.need) }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
       if (r.error) toast(errorText(r), 'bad');
       else {
         commit(r.account);
-        toast(t('fxDone', { from: money(r.event.amount, BASE), to: money(r.event.received, r.event.to) }), 'good');
+        toast(t('fxDone', { from: money(r.event.amount, from), to: money(r.event.received, r.event.to) }), 'good');
       }
       renderTicket();
       break;
@@ -3675,6 +3685,11 @@ document.addEventListener('click', event => {
       state.fx.view = 'exchange';
       showTab('fx');
       break;
+    case 'ticket-fx':
+      // From an order: the stock's sheet closes, the exchange opens on the pair.
+      $('detail').close?.();
+      state.detail = null;
+    // falls through
     case 'fx-pair':
       state.fx.from = el.dataset.from;
       state.fx.to = el.dataset.to;

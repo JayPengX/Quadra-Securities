@@ -832,8 +832,8 @@ function marketStatus(q) {
 const twSymbol = symbol => /\.TWO?$/.test(symbol);
 // Round icons for the companies whose TradingView icon is out of date and
 // whose official logo doesn't sit well in a circle (7-ELEVEN's tall sign,
-// Roblox's wide wordmark): drawn here, from the current logos.
-const OWN_ICONS = { '2912.TW': 'logos/7-eleven.svg', RBLX: 'logos/roblox.svg', MCD: brandIcon('MCD') };
+// Roblox's wide wordmark, Uber's 2016 square): drawn here, from the current logos.
+const OWN_ICONS = { '2912.TW': 'logos/7-eleven.svg', RBLX: 'logos/roblox.svg', UBER: 'logos/uber.svg', MCD: brandIcon('MCD') };
 function logoChoices(symbol, kind) {
   if (BONDS[symbol]) return [];
   if (OWN_ICONS[symbol]) return [{ urls: [OWN_ICONS[symbol]], fit: 'icon' }];

@@ -26,8 +26,8 @@ const idOf = x => (x?.logo?.style === 'pair' ? `${x.logo.logoid}|${x.logo.logoid
 // TradingView's icon is older than the company's current logo (checked by
 // eye in October 2026): left out; the app draws its own (OWN_ICONS in app.js).
 // 統一超's is 7-ELEVEN's old sign, Roblox's the 2017 grey tile, McDonald's
-// arches thinner than the real ones.
-const STALE = new Set(['2912.TW', 'RBLX', 'MCD']);
+// arches thinner than the real ones, Uber's the 2016 square.
+const STALE = new Set(['2912.TW', 'RBLX', 'MCD', 'UBER']);
 
 // Taiwan: the screener's every listing, by code (a code is on one exchange only).
 const scan = get('https://scanner.tradingview.com/taiwan/scan', { columns: ['logoid'], range: [0, 10_000] });

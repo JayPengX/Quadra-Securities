@@ -2722,7 +2722,6 @@ const OTHERS = {
   "CRM": "salesforce",
   "ADBE": "adobe",
   "PLTR": "palantir",
-  "UBER": "uber",
   "SBUX": "starbucks",
   "BA": "boeing",
   "COIN": "coinbase",

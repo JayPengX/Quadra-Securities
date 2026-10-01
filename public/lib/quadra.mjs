@@ -4,8 +4,8 @@
 //
 //   Quadra Securities   stock   the financial powerhouse: where money lives and grows
 //   Quadra Play         odds    a place to play: sports betting and the lottery
-//   Quadra Hub           vocab   an independent vocabulary, pass and money-education extension
 //   Quadra Fixtures     match   a related add-on: scores, schedules and stats
+//   Quadra Hub          vocab   a related add-on: vocabulary, the pass, and how the money works
 //   Orbit Class         orbit   a related add-on: the class schedule
 //
 // One account works everywhere: the Quadra Pass, a 10-character code for
@@ -26,131 +26,132 @@ export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev/sports-proxy
 export const SITE = 'https://jaypengx.github.io';
 export const BRAND = { name: 'Quadra', pass: 'Quadra Pass' };
 
-// `related`: an extension outside the money pool (Hub, Fixtures, Orbit Class).
+// `related`: an add-on outside the money pool (Fixtures, Hub, Orbit Class).
 export const APPS = {
   stock: { name: 'Quadra Securities', short: 'Securities', path: '/Quadra-Securities/', color: '#0d9488', role: { zh: '投資與理財', en: 'Invest and grow' } },
   odds: { name: 'Quadra Play', short: 'Play', path: '/Quadra-Play/', color: '#2563eb', role: { zh: '運彩與彩券', en: 'Sports bets and lottery' } },
-  vocab: { name: 'Quadra Hub', short: 'Hub', path: '/Quadra-Rewards/', color: '#7c3aed', related: true, role: { zh: '單字練習、Quadra Pass 與理財知識', en: 'Vocabulary, Quadra Pass and money education' } },
+  vocab: { name: 'Quadra Hub', short: 'Hub', path: '/Quadra-Hub/', color: '#7c3aed', related: true, role: { zh: '單字、帳戶與錢的真相', en: 'Words, your pass and the truth about money' } },
   match: { name: 'Quadra Fixtures', short: 'Fixtures', path: '/Quadra-Fixtures/', color: '#ea580c', related: true, role: { zh: '賽程與比分', en: 'Scores and schedules' } },
   orbit: { name: 'Orbit Class', short: 'Orbit Class', tile: 'Orbit', path: '/Orbit-Class/', color: '#0ea5e9', related: true, role: { zh: '課表', en: 'Class schedule' } }
 };
-export const FAMILY = ['stock', 'odds'];
 export const appName = app => APPS[app]?.name || app;
 
 // ---- The economy -------------------------------------------------------------------
 //
 // Balanced so money matters (Shared-Proxy/tools/economy.mjs has the model):
 // a new pass opens with NT$30,000; the 1st of every Taiwan month pays a
-// fixed NT$6,000, the same for every account, like a salary (v10; eco.js
-// pays it, back pay for months nobody came).
-// Those two are the only money Quadra gives (v7). Securities is where it
-// grows (the market, real costs); Play and the lottery are where it goes
-// (the house keeps about 14% of a single, a third of a treble, half of a
-// draw ticket). Quadra Hub pays points (XP) for vocabulary practice.
+// fixed NT$6,000, the same for every account, like a salary (eco.js pays
+// it, back pay for months nobody came). With the wealth level rewards those
+// are the only money Quadra gives. Securities is where it grows (the market,
+// real costs); Play and the lottery are where it goes (the house keeps about
+// 14% of a single, a third of a treble, half of a draw ticket).
 export const ECONOMY = {
   start: 30_000,
-  monthly: 6_000,
-  // Quadra Hub points: a right answer and a word mastered the first time.
-  vocab: { perCorrect: 2, perMastered: 15 },
-  // A day's points from vocabulary: the first `full` at the full rate,
-  // the next `full` at half (up to `half`), then `rest` (×the streak's rate):
-  // a long grind isn't the way up.
-  // Missions, weekly goals and the daily challenge aren't counted.
-  dailyXp: { full: 600, half: 1_200, rest: 0.1 }
+  monthly: 6_000
 };
 
-// ---- Points (XP): Quadra Hub's vocabulary effort, never money ----------------------------
-//
-// Hub gives points: entries of app 'vocab' with `xp` and amount 0 (before
-// v7 they paid NT$ in `amount`, and those count as points). Points earned make
-// the level and its title, shown in every app's account; points spent (a
-// Hub redemption, 'vocab:xs:<item>:<key>', kind 'redeem', its cost in the
-// note) come off what's left to spend, never off the level.
-const XP_KINDS = new Set(['words', 'reward', 'mission']);
-const retiredGameMission = id => /^vocab:m:\d{4}-\d{2}-\d{2}:(game1|games3|challenge)$/.test(id || '');
-export const xpOf = e => (e?.app === 'vocab' && !retiredGameMission(e.id) && XP_KINDS.has(e.kind) ? (e.xp > 0 ? e.xp : e.amount > 0 ? e.amount : 0) : 0);
-export const xpSpentOf = e => (e?.app === 'vocab' && e.kind === 'redeem' && Number(e.note) > 0 ? Number(e.note) : 0);
-export const xpEarned = wallet => (wallet?.entries || []).reduce((sum, e) => sum + xpOf(e), 0);
-export const xpSpent = wallet => (wallet?.entries || []).reduce((sum, e) => sum + xpSpentOf(e), 0);
-// Points expire like a card's or an airline's: each Taiwan month's points
-// at the end of the same month a year later (XP_LIFE_MONTHS), spending the
-// oldest first. Points from before v7 count as earned when v7 began. The
-// level goes by eligible vocabulary and mission XP, not the spendable balance.
-export const XP_LIFE_MONTHS = 12;
-const XP_FROM = Date.UTC(2026, 8, 30, 16);
-const xpMonthEnd = (t, n) => {
-  const d = new Date(t + 8 * 3_600_000);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n + 1, 1) - 8 * 3_600_000;
-};
-// The points still to spend at `now`, in lots oldest first: [{ amount, expires }].
-export function xpLots(wallet, now = Date.now()) {
-  const moves = [];
-  for (const e of wallet?.entries || []) {
-    const t = Math.max(XP_FROM, Number(e.t) || XP_FROM);
-    if (t > now) continue;
-    const gain = xpOf(e);
-    if (gain > 0) moves.push({ t, gain });
-    const spend = xpSpentOf(e);
-    if (spend > 0) moves.push({ t, spend });
-  }
-  moves.sort((a, b) => a.t - b.t || (a.gain ? -1 : 1));
-  const lots = [];
-  for (const m of moves) {
-    while (lots.length && lots[0].expires <= m.t) lots.shift();
-    if (m.gain) {
-      const expires = xpMonthEnd(m.t, XP_LIFE_MONTHS);
-      const last = lots.at(-1);
-      if (last && last.expires === expires) last.amount += m.gain;
-      else lots.push({ amount: m.gain, expires });
-      continue;
-    }
-    let left = m.spend;
-    while (left > 0 && lots.length) {
-      const take = Math.min(left, lots[0].amount);
-      lots[0].amount -= take;
-      left -= take;
-      if (lots[0].amount <= 0) lots.shift();
-    }
-  }
-  return lots.filter(l => l.expires > now && l.amount > 0);
-}
-export const xpBalance = (wallet, now = Date.now()) => Math.max(0, Math.round(xpLots(wallet, now).reduce((sum, l) => sum + l.amount, 0)));
-// The next points to expire within `days`: { amount, at } or null.
-export function xpExpiring(wallet, now = Date.now(), days = 60) {
-  const lot = xpLots(wallet, now)[0];
-  return lot && lot.expires - now <= days * 86_400_000 ? { amount: Math.round(lot.amount), at: lot.expires } : null;
-}
-// Level L starts at 100·(L−1)² points: 100 for level 2, 1,600 for 5, 8,100
-// for 10, 36,100 for 20, 84,100 for 30, 240,100 for 50: about a year of
-// daily practice to the top (ECONOMY.dailyXp keeps a grind from shortcutting
-// it). A title every few levels.
-export const xpForLevel = L => 100 * (L - 1) ** 2;
-export const XP_TITLES = [
-  [1, '新手', 'Rookie'],
-  [5, '學徒', 'Apprentice'],
-  [10, '好手', 'Skilled'],
-  [15, '高手', 'Expert'],
-  [20, '達人', 'Master'],
-  [30, '大師', 'Grandmaster'],
-  [40, '傳奇', 'Legend'],
-  [50, '神話', 'Mythic']
+const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+// What the account is worth: the pool and Securities' holdings.
+export const worthOf = wallet => poolBalance(wallet) + finiteOr0(wallet?.snap?.stock?.holdings);
+// 財富等級: what the account is worth (worthOf) puts it on a level; the
+// first time it reaches one, Quadra's economy pays the level's reward once
+// (eco.js RANKS, the same table: `eco:rank:<id>`).
+export const WEALTH_RANKS = [
+  { id: 'start', min: 0, reward: 0, icon: '🌱' },
+  { id: 'saver', min: 50_000, reward: 1_000, icon: '🪙' },
+  { id: 'steady', min: 100_000, reward: 2_000, icon: '💼' },
+  { id: 'comfort', min: 250_000, reward: 3_000, icon: '🏡' },
+  { id: 'wealthy', min: 500_000, reward: 5_000, icon: '💎' },
+  { id: 'rich', min: 1_000_000, reward: 8_000, icon: '🏦' },
+  { id: 'multi', min: 5_000_000, reward: 15_000, icon: '👑' },
+  { id: 'tycoon', min: 20_000_000, reward: 30_000, icon: '🚀' }
 ];
-export function xpLevel(xp, lang = 'zh') {
-  const x = Math.max(0, xp || 0);
-  let level = Math.max(1, Math.floor(1 + Math.sqrt(x / 100)));
-  while (xpForLevel(level + 1) <= x) level++;
-  while (level > 1 && xpForLevel(level) > x) level--;
-  const [, zh, en] = [...XP_TITLES].reverse().find(([min]) => level >= min);
-  const from = xpForLevel(level);
-  const to = xpForLevel(level + 1);
-  return { level, title: lang === 'en' ? en : zh, from, to, progress: (x - from) / (to - from), toNext: to - x };
+// Where the money came from and went (all time, NT$): what the system gave
+// (opening money, pay, level rewards, resets, VIP cashback), what Quadra took
+// from the account (Plus, overdraft interest, and Play's net when the
+// account is behind there), and the account's own result on top (worth less
+// the first plus the second).
+export function moneySides(wallet) {
+  const gave = { start: 0, pay: 0, rank: 0, other: 0 };
+  let took = 0;
+  let play = 0;
+  for (const e of wallet?.entries || []) {
+    const a = Number(e.amount) || 0;
+    if (e.app === 'eco') {
+      if (e.kind === 'start' || e.kind === 'grant') gave.start += a;
+      else if (e.kind === 'pay') gave.pay += a;
+      else if (e.kind === 'rank') gave.rank += a;
+      else if (e.kind === 'rebase' || e.kind === 'vip') gave.other += a;
+      else if (e.kind === 'plus' || e.kind === 'od') took -= a;
+    } else if (e.app === 'odds') play += a;
+  }
+  // Play: what the house kept (its edge, over every bet), or 0 if the account came out ahead.
+  if (play < 0) took -= play;
+  const given = gave.start + gave.pay + gave.rank + gave.other;
+  const worth = worthOf(wallet);
+  return { gave, given, took, worth, own: worth - given + took, playNet: play };
 }
-const xpNum = v => `${Math.round(v).toLocaleString('en-US')} XP`;
+// The monthly pay: fixed, whatever the account holds (eco.js PAY_MONTH).
+export const paydayFor = () => ECONOMY.monthly;
+// Below zero: an overdraft (1% a month, eco.js), fixed by selling something
+// in Securities or borrowing on margin there.
+export const OVERDRAFT_RATE = 0.01;
+export const overdraft = wallet => Math.max(0, -poolBalance(wallet));
 
-// ---- Plus-only account customization --------------------------------------------------
+// ---- Quadra Plus ---------------------------------------------------------------------
 //
-// A chosen avatar or frame is shown only while the pass has an active Plus
-// membership; the Hub manages these wallet settings.
+// The one membership across Quadra: PLUS.fee a Taiwan month from the pool,
+// billed by the Worker (eco.js: `op: 'plus'`, renewal with the payday). The
+// first month someone ever joins is free. A month is a member's when the
+// wallet holds `eco:plus:<YYYY-MM>`, so every app reads the same answer, for
+// any past day too.
+//
+// Plus is a product that earns Quadra money, the way a sportsbook's or a
+// broker's membership does: every perk makes betting or trading cheaper or
+// bigger, so a member bets and trades more, and the house's cut and the
+// broker's costs on that extra play earn back more than the perks cost
+// (a NT$200 free bet is worth well under NT$100 to the bettor on average:
+// only its winnings come back, at the house's prices). Nothing in it pays
+// for saving or holding cash. The avatar and frame (Looks, below) are its
+// one perk outside the money.
+export const PLUS = {
+  fee: 490,
+  // The yearly plan: twelve months for the price of ten.
+  year: 4_900,
+  // Play: a NT$bonusBet free bet each week (the Worker's `eco:fb:<Monday>`;
+  // free bets take every pick at 1.50 or longer: parlays), the parlay boost
+  // ×boost (Play's PARLAY_BOOST: 3+ picks, where the house's cut multiplies
+  // with every pick), and cash out keeps cashOutKeep instead of 5% (money
+  // back on the slip sooner, to bet again).
+  odds: { bonusBet: 200, boost: 1.5, cashOutKeep: 0.02 },
+  // Securities: commission at 2.8折 (×0.28, a Taiwan online broker's best
+  // rate; a fund's subscription fee too), FX spread ×0.5, margin loans
+  // loanCut a year cheaper: more trades, more currencies, more borrowed.
+  stock: { commission: 0.28, fxSpread: 0.5, loanCut: 0.01 }
+};
+const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
+export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
+export const plusMember = (wallet, t = Date.now()) => (wallet?.entries || []).some(e => e.id === `eco:plus:${plusMonth(t)}` && e.app === 'eco');
+// A charge the balance couldn't cover (eco.js `eco:plusfail:<month>`) after
+// the last paid month: the membership lapsed and won't renew until joined again.
+export const plusLapsed = wallet => {
+  const entries = wallet?.entries || [];
+  const last = [...plusMonths(wallet)].sort().at(-1);
+  return Boolean(last) && entries.some(e => e.app === 'eco' && e.id?.startsWith('eco:plusfail:') && e.id.slice(13) > last);
+};
+// Renewing next month (the member hasn't left).
+export const plusRenewing = wallet => wallet?.settings?.plus?.value?.on === true && !plusLapsed(wallet);
+export const plusTried = wallet => plusMonths(wallet).size > 0;
+export const plusPlan = wallet => (wallet?.settings?.plus?.value?.plan === 'year' ? 'year' : 'month');
+// The last month already paid for (YYYY-MM), or null.
+export const plusUntil = wallet => [...plusMonths(wallet)].sort().at(-1) ?? null;
+
+// ---- Looks: Plus's avatar and frame ----------------------------------------------------
+//
+// The account button in every app can wear an avatar (the wallet setting
+// `avatar`: { id }) and a frame around it (`frame`: { id }), chosen in
+// Quadra Hub. They're Plus's: shown only while the account is a member, and
+// back as they were if it joins again.
 export const AVATARS = [
   { id: 'sprout', glyph: '🌱' },
   { id: 'fox', glyph: '🦊' },
@@ -172,201 +173,10 @@ export const AVATARS = [
   { id: 'eagle', glyph: '🦅' },
   { id: 'trophy', glyph: '🏆' }
 ];
-export function avatarOwned(wallet, id, now = Date.now()) {
-  return Boolean(AVATARS.some(a => a.id === id) && plusMember(wallet, now));
-}
-export function avatarOf(wallet, now = Date.now()) {
-  const id = setting(wallet, 'avatar', null)?.id;
-  return id && avatarOwned(wallet, id, now) ? AVATARS.find(a => a.id === id) : null;
-}
-// Frames are also Plus-only; the worn frame is the wallet setting `frame`.
-export const FRAMES = [
-  { id: 'bronze' },
-  { id: 'silver' },
-  { id: 'jade' },
-  { id: 'gold' },
-  { id: 'neon' },
-  { id: 'aurora' },
-  { id: 'legend' },
-  { id: 'mythic' }
-];
-export function frameOwned(wallet, id, now = Date.now()) {
-  return Boolean(FRAMES.some(f => f.id === id) && plusMember(wallet, now));
-}
-export function frameOf(wallet, now = Date.now()) {
-  const id = setting(wallet, 'frame', null)?.id;
-  return id && frameOwned(wallet, id, now) ? FRAMES.find(f => f.id === id) : null;
-}
-// ---- The streak: days in a row with Hub's daily missions done --------------------------------
-//
-// From STREAK.from, a day counts when STREAK.missions of that day's
-// missions were claimed ('vocab:m:<day>:<id>'): its six daily ones (three
-// of them in Hub, so the other apps are always part of it), and the
-// bonus ones that spend money (STREAK.bonus) for up to STREAK.bonusCounts
-// of them, so spending is the easy way to it but never needed. Or when a
-// protection card covered it
-// ('vocab:fz:<day>') or points bought it back ('vocab:xs:repair:<day>').
-// Before that, vocabulary practice kept it, and those days still count.
-// Today counts once it's done; until then
-// the streak is yesterday's.
-// It raises every point (+STREAK.perDay a day, up to +STREAK.max), and the
-// longest ever unlocks an avatar and a protection card at each milestone.
-export const STREAK = { perDay: 0.02, max: 0.3, milestones: [7, 30, 100], missions: 5, bonusCounts: 2, bonus: ['invest', 'parlay3', 'scratch', 'lotto'], from: '2026-10-02' };
-const STREAK_KINDS = new Set(['words', 'reward']);
-// Missions claimed per day that count for the streak: { day: n } (the
-// bonus ones STREAK.bonusCounts at most).
-export function missionDays(wallet) {
-  const daily = {};
-  const bonus = {};
-  for (const e of wallet?.entries || []) {
-    if (e.app !== 'vocab' || typeof e.id !== 'string' || !e.id.startsWith('vocab:m:')) continue;
-    const [, , day, id] = e.id.split(':');
-    if (!day || !id) continue;
-    const to = STREAK.bonus.includes(id) ? bonus : daily;
-    to[day] = (to[day] || 0) + 1;
-  }
-  const out = {};
-  for (const day of new Set([...Object.keys(daily), ...Object.keys(bonus)])) out[day] = (daily[day] || 0) + Math.min(STREAK.bonusCounts, bonus[day] || 0);
-  return out;
-}
-export function activeDaySet(wallet) {
-  const days = new Set();
-  for (const e of wallet?.entries || []) {
-    if (e.app !== 'vocab' || typeof e.t !== 'number') continue;
-    if (STREAK_KINDS.has(e.kind) && taipeiDay(e.t) < STREAK.from) days.add(taipeiDay(e.t));
-    else if (typeof e.id === 'string' && e.id.startsWith('vocab:fz:')) days.add(e.id.slice(9));
-    // A missed day bought back with points (Hub's streak repair).
-    else if (typeof e.id === 'string' && e.id.startsWith('vocab:xs:repair:')) days.add(e.id.slice(16));
-  }
-  for (const [day, n] of Object.entries(missionDays(wallet))) if (day >= STREAK.from && n >= STREAK.missions) days.add(day);
-  return days;
-}
-const dayBefore = d => new Date(Date.parse(`${d}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-export function streakOf(wallet, now = Date.now()) {
-  const days = activeDaySet(wallet);
-  let d = taipeiDay(now);
-  if (!days.has(d)) d = dayBefore(d);
-  let n = 0;
-  while (days.has(d)) (n++, (d = dayBefore(d)));
-  return n;
-}
-export function longestStreakOf(wallet) {
-  const days = [...activeDaySet(wallet)].sort();
-  let best = 0;
-  let run = 0;
-  for (let i = 0; i < days.length; i++) {
-    run = i && dayBefore(days[i]) === days[i - 1] ? run + 1 : 1;
-    best = Math.max(best, run);
-  }
-  return best;
-}
-// The points bonus for a streak of `days` (0.1 = +10%).
-export const streakBonus = days => Math.min(STREAK.max, Math.max(0, days) * STREAK.perDay);
-// Protection cards the longest streak has earned (one a milestone).
-export const streakCards = longest => STREAK.milestones.filter(m => longest >= m).length;
-
-// Level rewards: a streak protection card at level 5, 15, 25… (Hub
-// counts them with the ones bought and Plus's), and the level avatars.
-export const levelCards = level => Math.max(0, Math.floor((level + 5) / 10));
-
-const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-// What the account is worth: the pool and Securities' holdings.
-export const worthOf = wallet => poolBalance(wallet) + finiteOr0(wallet?.snap?.stock?.holdings);
-// 財富等級: what the account is worth (worthOf) puts it on a level; the
-// first time it reaches one, Quadra's economy pays the level's reward once
-// (eco.js RANKS, the same table: `eco:rank:<id>`).
-export const WEALTH_RANKS = [
-  { id: 'start', min: 0, reward: 0, icon: '🌱' },
-  { id: 'saver', min: 50_000, reward: 1_000, icon: '🪙' },
-  { id: 'steady', min: 100_000, reward: 2_000, icon: '💼' },
-  { id: 'comfort', min: 250_000, reward: 3_000, icon: '🏡' },
-  { id: 'wealthy', min: 500_000, reward: 5_000, icon: '💎' },
-  { id: 'rich', min: 1_000_000, reward: 8_000, icon: '🏦' },
-  { id: 'multi', min: 5_000_000, reward: 15_000, icon: '👑' },
-  { id: 'tycoon', min: 20_000_000, reward: 30_000, icon: '🚀' }
-];
-export const rankRewarded = (wallet, id) => (wallet?.entries || []).some(e => e.id === `eco:rank:${id}` && e.app === 'eco');
-// Where the money came from and went (all time, NT$): what the system gave
-// (opening money, pay, level rewards, resets), what Quadra took from the
-// account (Play's net, Plus, Hub's purchases, overdraft interest), and the
-// account's own result on top (worth less the first plus the second).
-export function moneySides(wallet) {
-  const gave = { start: 0, pay: 0, rank: 0, other: 0 };
-  let took = 0;
-  let play = 0;
-  for (const e of wallet?.entries || []) {
-    const a = Number(e.amount) || 0;
-    if (e.app === 'eco') {
-      if (e.kind === 'start' || e.kind === 'grant') gave.start += a;
-      else if (e.kind === 'pay') gave.pay += a;
-      else if (e.kind === 'rank') gave.rank += a;
-      else if (e.kind === 'rebase' || e.kind === 'vip') gave.other += a;
-      else if (e.kind === 'plus' || e.kind === 'od') took -= a;
-    } else if (e.app === 'odds') play += a;
-    else if (e.app === 'vocab' && a < 0) took -= a;
-  }
-  // Play: what the house kept (its edge, over every bet), or 0 if the account came out ahead.
-  if (play < 0) took -= play;
-  const given = gave.start + gave.pay + gave.rank + gave.other;
-  const worth = worthOf(wallet);
-  return { gave, given, took, worth, own: worth - given + took, playNet: play };
-}
-// The monthly pay: fixed, whatever the account holds (eco.js PAY_MONTH).
-export const payFor = () => ECONOMY.monthly;
-export const paydayFor = () => payFor();
-// Below zero: an overdraft (1% a month, eco.js), fixed by selling something
-// in Securities or borrowing on margin there.
-export const OVERDRAFT_RATE = 0.01;
-export const overdraft = wallet => Math.max(0, -poolBalance(wallet));
-
-// The one-off "what's new" notices (economy reset, v8, v10, v11) are gone:
-// they were remembered per app on a device, so each home-screen app showed
-// them again on opening. What changed is in each app's 說明 instead.
-
-// ---- Quadra Plus ---------------------------------------------------------------------
-//
-// The one membership across Quadra: PLUS.fee a Taiwan month from the pool,
-// billed by the Worker (eco.js: `op: 'plus'`, renewal with the payday). The
-// first month someone ever joins is free. A month is a member's when the
-// wallet holds `eco:plus:<YYYY-MM>`, so every app reads the same answer, for
-// any past day too (Securities' daily cash interest). Plus earns through
-// Play and Securities, with account customization available while subscribed.
-export const PLUS = {
-  fee: 490,
-  // The yearly plan: twelve months for the price of ten.
-  year: 4_900,
-  // Securities: commission at 2.8折 (×0.28, a Taiwan online broker's best
-  // rate; a fund's subscription fee too), FX spread ×0.5, NT$ cash interest
-  // 2% a year on the first NT$cashCap (0.8% on the rest and otherwise, like
-  // a Taiwan digital bank's high-interest tier), borrowing 1 point cheaper.
-  // v11 adds: a new 定存 +tdBonus a year (on top of the posted rate, for the
-  // deposit's term), and the broker keeps lendCut of a lending fee instead
-  // of 30% (Securities' savings.mjs LEND_CUT).
-  stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, cashCap: 100_000, loanCut: 0.01, tdBonus: 0.001, lendCut: 0.2 },
-  // Play: cash out keeps 2% instead of 5%, and a NT$bonusBet free bet each
-  // week (the Worker's `eco:fb:<Monday>`). `boost` multiplies the parlay
-  // boost (1: the same as everyone's since v7); `lift` was +10% on one slip a
-  // day up to liftMax (v6-v7), 0 since v8.
-  odds: { boost: 1, cashOutKeep: 0.02, lift: 0, liftMax: 0, bonusBet: 200 },
-};
-const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
-export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
-export const plusMember = (wallet, t = Date.now()) => (wallet?.entries || []).some(e => e.id === `eco:plus:${plusMonth(t)}` && e.app === 'eco');
-// Renewing next month (the member hasn't left).
-// A charge the balance couldn't cover (eco.js `eco:plusfail:<month>`) after
-// the last paid month: the membership lapsed and won't renew until joined again.
-// A month bought with points (note 'points') isn't a payment: it doesn't
-// bring back a membership that lapsed.
-export const plusLapsed = wallet => {
-  const entries = wallet?.entries || [];
-  const last = entries.filter(e => e.app === 'eco' && e.id?.startsWith('eco:plus:') && e.note !== 'points').map(e => e.id.slice(9)).sort().at(-1);
-  return Boolean(last) && entries.some(e => e.app === 'eco' && e.id?.startsWith('eco:plusfail:') && e.id.slice(13) > last);
-};
-export const plusRenewing = wallet => wallet?.settings?.plus?.value?.on === true && !plusLapsed(wallet);
-export const plusTried = wallet => plusMonths(wallet).size > 0;
-export const plusPlan = wallet => (wallet?.settings?.plus?.value?.plan === 'year' ? 'year' : 'month');
-// The last month already paid for (YYYY-MM), or null.
-export const plusUntil = wallet => [...plusMonths(wallet)].sort().at(-1) ?? null;
+export const FRAMES = ['bronze', 'silver', 'jade', 'gold', 'neon', 'aurora', 'legend', 'mythic'].map(id => ({ id }));
+const worn = (wallet, key, list, now) => (plusMember(wallet, now) ? list.find(x => x.id === setting(wallet, key, null)?.id) ?? null : null);
+export const avatarOf = (wallet, now = Date.now()) => worn(wallet, 'avatar', AVATARS, now);
+export const frameOf = (wallet, now = Date.now()) => worn(wallet, 'frame', FRAMES, now);
 
 // ---- VIP: free tiers by what's played, with cashback -----------------------------------
 //
@@ -420,107 +230,25 @@ export const welcomeDue = wallet => {
 //
 // A free bet is a token from Quadra: Plus's weekly bonus bet or the welcome
 // offer (the Worker's 'eco:fb:…', app 'eco', kind 'freebet', amount 0, its
-// value in the note). Play stakes one on one
-// slip, and only the winnings come back, never the stake. Play marks it
-// spent with 'odds:fb-<token id>' (a fixed id: spent once). Unspent tokens
-// last FREEBET.days.
+// value in the note). Play stakes one on one slip, and only the winnings
+// come back, never the stake. Play marks it spent with 'odds:fb-<token id>'
+// (a fixed id: spent once). Unspent tokens last FREEBET.days.
 export const FREEBET = { days: 7, max: 500 };
 export const freeBetValue = e => {
   const v = Number(e?.note);
   return Number.isInteger(v) && v > 0 && v <= FREEBET.max && v % 10 === 0 ? v : 0;
 };
 // The tokens not yet spent or expired: [{ id, value, t, until }], soonest
-// to expire first. Free bets from the points catalogue ('vocab:xs:bet100:…')
-// too, on the same terms.
+// to expire first.
 export function freeBets(wallet, now = Date.now(), spent = []) {
   const entries = wallet?.entries || [];
-  const used = new Set([...spent, ...usedTokens(wallet)]);
-  const tokens = entries
+  const used = new Set(spent);
+  for (const e of entries) if (e.app === 'odds' && typeof e.id === 'string' && e.id.startsWith('odds:fb-')) used.add(e.id.slice(8));
+  return entries
     .filter(e => e.kind === 'freebet' && e.app === 'eco' && typeof e.id === 'string' && e.id.startsWith('eco:fb:') && freeBetValue(e) && !used.has(e.id))
-    .map(e => ({ id: e.id, value: freeBetValue(e), t: e.t, until: e.t + FREEBET.days * 86_400_000 }));
-  for (const item of CATALOG.filter(c => c.app === 'odds')) tokens.push(...catalogTokens(wallet, item.id, now, spent));
-  return tokens.filter(x => x.until > now).sort((a, b) => a.until - b.until);
-}
-
-// ---- The points catalogue (積分兌換) ---------------------------------------------------
-//
-// Like a card's or an airline's: points turned into Quadra's own products,
-// worth more to the person than they cost the house (a free bet's expected
-// cost is under half its face; a commission voucher brings a trade). Hub
-// redeems them:
-// 'vocab:xs:<item>:<key>', kind 'redeem', amount 0, the points in the note
-// (the Worker's HUB_XP takes no less than the listed price). Each
-// becomes a token in the app it's for, used once (Play marks it
-// 'odds:fb-<token id>', Securities 'stock:xs-<token id>') and gone at
-// `days`; what's left of a voucher is lost, as with a real one.
-//   bet100, bet500  a Play free bet (every pick FREE_MIN_ODDS or longer, no
-//                   cash out), NT$CATALOG_BETS of face a Taiwan month at most
-//   fee             up to NT$100 off one Securities trade's commission (the
-//                   next fill that pays one), 3 a month
-//   td              +0.5% a year on one new 定存 of up to NT$100,000, its
-//                   first term (broken early, the bonus goes), 1 a month
-//   plus            a month of Quadra Plus (key: the month; the Worker turns
-//                   it into `eco:plus:<month>`), one a quarter, after the
-//                   free first month; this month, or next when this one is held
-export const CATALOG = [
-  { id: 'bet100', app: 'odds', xp: 5_000, value: 100, days: 7 },
-  { id: 'bet500', app: 'odds', xp: 22_000, value: 500, days: 7 },
-  { id: 'fee', app: 'stock', xp: 4_000, value: 100, days: 30, perMonth: 3 },
-  { id: 'td', app: 'stock', xp: 12_000, rate: 0.005, cap: 100_000, days: 30, perMonth: 1 }
-];
-export const CATALOG_BETS = 1_000;
-export const catalogItem = id => CATALOG.find(c => c.id === id) ?? null;
-export const catalogCost = id => {
-  const c = catalogItem(id);
-  return c ? c.xp : null;
-};
-// Tokens used in Play or Securities (written there, read everywhere).
-function usedTokens(wallet) {
-  const out = new Set();
-  for (const e of wallet?.entries || []) {
-    if (typeof e.id !== 'string') continue;
-    if (e.app === 'odds' && e.id.startsWith('odds:fb-')) out.add(e.id.slice(8));
-    if (e.app === 'stock' && e.id.startsWith('stock:xs-')) out.add(e.id.slice(9));
-  }
-  return out;
-}
-// Every redemption of `item`, oldest first.
-export const catalogRedeemed = (wallet, item) =>
-  (wallet?.entries || []).filter(e => e.app === 'vocab' && e.kind === 'redeem' && typeof e.id === 'string' && e.id.startsWith(`vocab:xs:${item}:`)).sort((a, b) => a.t - b.t);
-// The tokens of `item` still to use: [{ id, item, value, rate, cap, t, until }].
-export function catalogTokens(wallet, item, now = Date.now(), spent = []) {
-  const c = catalogItem(item);
-  if (!c?.days) return [];
-  const used = new Set([...spent, ...usedTokens(wallet)]);
-  return catalogRedeemed(wallet, item)
-    .filter(e => !used.has(e.id) && e.t <= now)
-    .map(e => ({ id: e.id, item, value: c.value ?? 0, rate: c.rate ?? 0, cap: c.cap ?? 0, t: e.t, until: e.t + c.days * 86_400_000 }))
-    .filter(x => x.until > now);
-}
-// Whether `item` can be redeemed now: { ok, why, left }. `left`: how many
-// more this month (free bets: NT$ of face).
-export function catalogLimit(wallet, item, now = Date.now()) {
-  const c = catalogItem(item);
-  if (!c) return { ok: false, why: 'item', left: 0 };
-  const month = plusMonth(now);
-  const mine = catalogRedeemed(wallet, item);
-  if (c.app === 'odds') {
-    const face = CATALOG.filter(x => x.app === 'odds').reduce((sum, x) => sum + catalogRedeemed(wallet, x.id).filter(e => plusMonth(e.t) === month).length * x.value, 0);
-    const left = Math.max(0, CATALOG_BETS - face);
-    return { ok: left >= c.value, why: left >= c.value ? '' : 'month', left };
-  }
-  if (c.perMonth) {
-    const left = Math.max(0, c.perMonth - mine.filter(e => plusMonth(e.t) === month).length);
-    return { ok: left > 0, why: left > 0 ? '' : 'month', left };
-  }
-  return { ok: false, why: 'item', left: 0 };
-}
-// The entry that redeems `item` (null when it can't be, or the points are short).
-export function catalogEntry(wallet, item, key, now = Date.now()) {
-  const limit = catalogLimit(wallet, item, now);
-  const cost = catalogCost(item);
-  if (!limit.ok || !cost || xpBalance(wallet, now) < cost) return null;
-  return { id: `vocab:xs:${item}:${key}`, t: now, app: 'vocab', kind: 'redeem', amount: 0, note: String(cost) };
+    .map(e => ({ id: e.id, value: freeBetValue(e), t: e.t, until: e.t + FREEBET.days * 86_400_000 }))
+    .filter(x => x.until > now)
+    .sort((a, b) => a.until - b.until);
 }
 
 // ---- Language ------------------------------------------------------------------------
@@ -1162,19 +890,13 @@ const KIND = {
   refund: ['退款', 'Refund'],
   lottery: ['彩券', 'Lottery ticket'],
   prize: ['彩券獎金', 'Lottery prize'],
-  reward: ['單字獎勵', 'Word practice'],
-  words: ['單字練習', 'Word practice'],
-  mission: ['任務獎勵', 'Mission reward'],
   plus: ['Quadra Plus 月費', 'Quadra Plus'],
   rebase: ['經濟調整', 'Economy reset'],
   rank: ['財富等級獎勵', 'Wealth level reward'],
   od: ['透支利息', 'Overdraft interest'],
   cashout: ['提前兌現', 'Cash out'],
-  shop: ['Hub 加值', 'Hub purchase'],
-  freeze: ['連續紀錄保護卡', 'Streak protection'],
   freebet: ['免費投注', 'Free bet'],
-  redeem: ['積分兌換', 'Points redeemed'],
-  plusboost: ['✦ Plus 獎金加成', '✦ Plus boost'],
+  plusboost: ['✦ Plus 串關加成', '✦ Plus parlay boost'],
   vip: ['VIP 投注回饋', 'VIP cashback'],
   welcome: ['新手禮', 'Welcome offer'],
   'xfer-in': ['轉入', 'Transfer in'],
@@ -1202,42 +924,6 @@ export function money(x, { sign = false, cents = false } = {}) {
 
 const TPE = 8 * 3_600_000;
 export const taipeiDay = (t = Date.now()) => new Date(t + TPE).toISOString().slice(0, 10);
-
-// ---- Activity: what each app is used for, for missions and recommendations ---------------
-//
-// Each app keeps two small things in the wallet's settings (newest wins, one
-// key per app, so apps never overwrite each other):
-//   act:<app>  today's counts of what was done ({ day, n: { trade: 2 } })
-//   aff:<app>  the app's affinity map: what the person is into (below)
-
-// Counts only go up in a day, so the pass's copy and this device's are
-// merged by the larger of each, and the device keeps the latest: two steps
-// in a row (a bet, then its parlay) each add to the other instead of the
-// later write replacing the earlier one's count.
-export function activityPatch(wallet, app, action, by = 1, now = Date.now()) {
-  const day = taipeiDay(now);
-  const key = `quadra.act.${app}`;
-  const had = setting(wallet, `act:${app}`, null);
-  const mine = readJson(key, null);
-  const n = {};
-  for (const src of [had, mine]) if (src?.day === day) for (const [k, v] of Object.entries(src.n || {})) n[k] = Math.max(n[k] || 0, Number(v) || 0);
-  n[action] = (n[action] || 0) + by;
-  // Each newer than the last (two in the same millisecond too), so the
-  // Worker keeps the later, larger count whichever write it reads first.
-  const t = Math.max(Date.now(), (Number(mine?.t) || 0) + 1, (Number(wallet?.settings?.[`act:${app}`]?.t) || 0) + 1);
-  writeStore(key, JSON.stringify({ day, n, t }));
-  return { settings: { [`act:${app}`]: { value: { day, n }, t } } };
-}
-// Today's counts across the apps: { stock: { trade: 2 }, … }.
-export function todayActivity(wallet, now = Date.now()) {
-  const day = taipeiDay(now);
-  const out = {};
-  for (const app of Object.keys(APPS)) {
-    const a = setting(wallet, `act:${app}`, null);
-    if (a?.day === day) out[app] = a.n || {};
-  }
-  return out;
-}
 
 // ---- Recommendations: one engine for every app -------------------------------------------
 //
@@ -1537,7 +1223,7 @@ const PERSON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" 
 export function accountButton(s, { extra = null } = {}) {
   const btn = node('button', { class: 'q-account', type: 'button', 'aria-label': s.lang === 'en' ? 'Quadra Pass' : 'Quadra Pass 帳戶', title: BRAND.pass });
   const dot = node('span', { class: 'q-account-dot', 'aria-hidden': 'true' });
-  // The avatar worn (points bought it or a level unlocked it), else the person.
+  // The avatar worn (a Plus member's), else the person.
   const paint = () => {
     const a = avatarOf(s.wallet);
     const f = frameOf(s.wallet);
@@ -1608,10 +1294,10 @@ export function nextPayday(now = Date.now()) {
   const d = new Date(now + TPE);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - TPE;
 }
-export function paydayText(lang, now = Date.now(), wallet = null) {
+export function paydayText(lang, now = Date.now()) {
   const d = new Date(nextPayday(now) + TPE);
   const next = `${d.getUTCMonth() + 1}/1`;
-  const amount = money(wallet ? paydayFor(wallet) : ECONOMY.monthly);
+  const amount = money(ECONOMY.monthly);
   return lang === 'en'
     ? `Next pay ${amount} · ${next}`
     : `下次發薪 ${amount} · ${next}`;
@@ -1619,7 +1305,7 @@ export function paydayText(lang, now = Date.now(), wallet = null) {
 
 // The account at a glance: its number, since when, this month's money in
 // and out, and the latest entries (every app's, like a bank statement).
-// An entry that moved money (Hub points and free bet tokens are amount 0).
+// An entry that moved money (free bet tokens are amount 0).
 const moved = e => e.amount !== 0;
 export function accountDetails(wallet, lang = 'zh', now = Date.now()) {
   const entries = [...(wallet?.entries || [])].sort((a, b) => b.t - a.t);
@@ -1639,7 +1325,6 @@ function detailsCard(s) {
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
   const d = accountDetails(s.wallet, s.lang);
-  const lv = xpLevel(xpEarned(s.wallet), s.lang);
   const date = t => new Date(t).toLocaleDateString(en ? 'en-US' : 'zh-TW', { year: 'numeric', month: 'short', day: 'numeric' });
   const short = t => new Date(t).toLocaleDateString(en ? 'en-US' : 'zh-TW', { month: 'numeric', day: 'numeric' });
   const days = d.created ? Math.max(1, Math.round((Date.now() - d.created) / 86_400_000)) : 0;
@@ -1654,14 +1339,8 @@ function detailsCard(s) {
       node('div', {}, [node('small', { text: T('本月收入', 'In this month') }), node('strong', { class: 'num up', text: money(d.in, { sign: true }) })]),
       node('div', {}, [node('small', { text: T('本月支出', 'Out this month') }), node('strong', { class: 'num down', text: money(d.out) })])
     ]),
-    // The level from Hub's points (every app shows it here).
-    node('div', { class: 'q-month' }, [
-      node('div', {}, [node('small', { text: T('Quadra 等級', 'Quadra level') }), node('strong', { text: `${avatarOf(s.wallet)?.glyph || ''} Lv ${lv.level} · ${lv.title}`.trim() })]),
-      node('div', {}, [node('small', { text: T('可用積分', 'Points to spend') }), node('strong', { class: 'num', text: xpNum(xpBalance(s.wallet)) })])
-    ]),
-    (x => (x ? node('p', { class: 'q-overdraft', text: T(`${xpNum(x.amount)} 積分將在 ${short(x.at - 1)} 到期`, `${xpNum(x.amount)} points expire ${short(x.at - 1)}`) }) : null))(xpExpiring(s.wallet)),
     overdraft(s.wallet) > 0 ? node('p', { class: 'q-overdraft', text: T(`帳戶透支 ${money(overdraft(s.wallet))}：每月計息 1%。2 天內沒補足就是違約交割：扣 7% 違約金、賣出持股，5 年內不能融資。`, `Overdrawn by ${money(overdraft(s.wallet))}: 1% a month. Not covered within 2 days, it's a default: a 7% penalty, holdings sold, and no margin for 5 years.`) }) : null,
-    node('p', { class: 'q-payday', text: paydayText(s.lang, Date.now(), s.wallet) }),
+    node('p', { class: 'q-payday', text: paydayText(s.lang) }),
     d.recent.length
       ? node('details', { class: 'q-recent' }, [
           node('summary', { text: T(`最近明細（本月 ${d.count} 筆）`, `Latest entries (${d.count} this month)`) }),
@@ -1689,24 +1368,19 @@ export function plusPerks(lang = 'zh') {
   const en = lang === 'en';
   const pct = x => `${Math.round(x * 1000) / 10}%`;
   const o = PLUS.odds;
-  const zhDiscount = `${Math.round(PLUS.stock.commission * 100) / 10} 折`;
   return [
     ['odds', en ? `A ${money(o.bonusBet)} free bet every week` : `每週 ${money(o.bonusBet)} 免費投注`, en ? `Every Monday, keep what it wins: ${money((o.bonusBet * 52) / 12)} a month` : `每週一送，贏了獎金歸你：每月 ${money((o.bonusBet * 52) / 12)}`],
-    o.lift > 0 ? ['odds', en ? `+${pct(o.lift)} winnings, every day` : `每日獎金 +${pct(o.lift)}`, en ? `One slip a day up to ${money(o.liftMax)}` : `每天一張、${money(o.liftMax)} 以內的投注`] : null,
+    ['odds', en ? `Parlay boost ×${o.boost}` : `串關加成 ×${o.boost}`, en ? 'Every winning combination of 3 picks or more' : '3 關以上每個贏的組合'],
     ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(o.cashOutKeep)} instead of 5%` : `只扣 ${pct(o.cashOutKeep)}，一般扣 5%`],
-    ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${zhDiscount}`, en ? 'Every market, every order' : '所有市場、每一筆委託'],
-    ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? `On the first ${money(PLUS.stock.cashCap)} (0.8% otherwise), accrued daily` : `前 ${money(PLUS.stock.cashCap)}（一般 0.8%），每日計息`],
+    ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, en ? 'Every market, every order' : '所有市場、每一筆委託'],
     ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
     ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
-    ['stock', en ? `Time deposits +${pct(PLUS.stock.tdBonus)}` : `定存利率 +${pct(PLUS.stock.tdBonus)}`, en ? 'On every new deposit, on top of the posted rate' : '每筆新定存，牌告利率再加碼'],
-    ['stock', en ? `Lending: the broker keeps ${pct(PLUS.stock.lendCut)}` : `借券出借券商只抽 ${pct(PLUS.stock.lendCut)}`, en ? `Instead of 30%: more of the fee is yours` : '一般抽 30%，借券費多拿一點'],
-    ['vocab', en ? 'Avatar and frame customization while subscribed' : '會員有效期間可自訂頭像與頭像框', en ? 'Choose a look in Quadra Hub; it is hidden when Plus ends.' : '在 Quadra Hub 挑選，Plus 期滿後會隱藏。']
-  ].filter(Boolean);
+    ['looks', en ? 'Your avatar and frame' : '自訂頭像與頭像框', en ? 'Chosen in Quadra Hub, shown in every app while you’re a member' : '在 Quadra Hub 挑選，會員期間所有 App 都看得到']
+  ];
 }
-// What Plus gave back, at face value, from the wallet: Play's boosts paid
-// (kind 'plusboost'), the weekly bonus bets received (not the welcome
-// offer), and the streak cards granted (at the shop's price). This Taiwan
-// month, or (all) every month up to it.
+// What Plus gave back, at face value, from the wallet: the weekly bonus
+// bets received (not the welcome offer) and what Play's bigger parlay boost
+// added (kind 'plusboost'). This Taiwan month, or (all) every month up to it.
 export function plusReturns(wallet, now = Date.now(), { all = false } = {}) {
   const month = plusMonth(now);
   const counts = m => (all ? m <= month : m === month);
@@ -1790,8 +1464,8 @@ export function plusCard(s, { compact = false } = {}) {
   const pitch = member
     ? back > 0
       ? T(`本月會員回饋 ${money(back)}`, `Plus gave you ${money(back)} this month`)
-      : T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注 · 證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, `${money(PLUS.odds.bonusBet)} free bet weekly · ${pct(1 - PLUS.stock.commission)} off Securities commission`)
-    : T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注 · 證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折 · 會員期間可自訂頭像`, `${money(PLUS.odds.bonusBet)} free bet weekly · ${pct(1 - PLUS.stock.commission)} off Securities commission · customize while subscribed`);
+      : T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注 · 證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, `${money(PLUS.odds.bonusBet)} free bet weekly · ${pct(1 - PLUS.stock.commission)} off commission`)
+    : T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注 · 串關加成 ×${PLUS.odds.boost} · 證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, `${money(PLUS.odds.bonusBet)} free bet weekly · parlay boost ×${PLUS.odds.boost} · ${pct(1 - PLUS.stock.commission)} off commission`);
   const status = member
     ? plusPlan(s.wallet) === 'year'
       ? T(`年繳會員 · 有效至 ${untilText}`, `Yearly member · through ${untilText}`)
@@ -1871,8 +1545,8 @@ export function openPlus(s) {
       const month = plusReturns(s.wallet);
       const ever = plusReturns(s.wallet, Date.now(), { all: true });
       const points = [
-        ['✓', T('會保留', 'You keep'), T('已付會員月份、買過的單字包', 'Paid membership months and word packs you bought')],
-        ['✕', T('之後沒有', 'You lose'), T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注、會員期間的頭像與頭像框自訂權`, `The ${money(PLUS.odds.bonusBet)} weekly free bet and access to avatar/frame customization`)]
+        ['✓', T('會保留', 'You keep'), T('已付的月份、還沒用的免費投注', 'Months paid, free bets not yet used')],
+        ['✕', T('之後沒有', 'You lose'), T(`每週 ${money(PLUS.odds.bonusBet)} 免費投注、串關加成、手續費折扣、頭像與頭像框`, `The ${money(PLUS.odds.bonusBet)} weekly free bet, the parlay boost, the commission discount, your avatar and frame`)]
       ];
       const body = T(`本月回饋 ${money(month.total)} · 累計 ${money(ever.total)}`, `${money(month.total)} back this month · ${money(ever.total)} in all`);
       if (!(await ask({ lang: s.lang, icon: '✦', title: T('取消自動續訂？', 'Stop renewing?'), body, points, ok: T('取消續訂', 'Stop renewing'), cancel: T('保留會員', 'Keep Plus') }))) return;
@@ -1907,7 +1581,7 @@ export function openPlus(s) {
         member
           ? node('strong', { class: 'q-plus-price num', text: money(back.total) })
           : node('strong', { class: 'q-plus-price num', text: `${money(Math.round(PLUS.year / 12))}` }),
-        node('span', { class: 'q-plus-per', text: member ? T('本月回饋給你（免費投注＋保護卡）', 'Back to you this month (free bets + cards)') : T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app') }),
+        node('span', { class: 'q-plus-per', text: member ? T('本月回饋給你（免費投注＋串關加成）', 'Back to you this month (free bets + parlay boost)') : T('每月起 · 一個會員，所有 Quadra App', 'a month, yearly · one membership, every Quadra app') }),
         // A member's three figures: the fee, how long, everything so far.
         member
           ? node('div', { class: 'q-plus-stats' }, [
@@ -1919,7 +1593,7 @@ export function openPlus(s) {
       ]),
       group('odds', 'Quadra Play'),
       group('stock', 'Quadra Securities'),
-      group('vocab', 'Quadra Hub'),
+      group('looks', T('頭像與頭像框', 'Looks')),
       ...cta,
       node('p', { class: 'q-plus-fine', text: T('每月 1 日從 Quadra 餘額自動扣款，沒打開 App 也照扣；餘額不足扣款失敗，會員就停止。取消後用到期滿，已付不退費。價格含 5% 營業稅。', 'Charged from your Quadra balance on the 1st of every month, whether or not you open an app; a charge the balance can’t cover fails and the membership stops. Cancelling keeps what’s paid; nothing is refunded. Prices include 5% VAT.') })
     );
@@ -2029,6 +1703,7 @@ export function accountSheet(s, { extra = null } = {}) {
         await showNewPass(s, passcode);
       }),
       node('a', { class: 'q-row-btn', href: helpUrl(s.app), text: T(`${APPS[s.app].short} 使用說明`, `${APPS[s.app].short} guide`) }),
+      s.app === 'vocab' ? null : act(T('在 Quadra Hub 管理帳戶與頭像', 'Manage your pass and looks in Quadra Hub'), () => s.go('vocab', 'pass')),
       act(
         T('在這台裝置登出', 'Sign out on this device'),
         async () => {
@@ -2038,7 +1713,7 @@ export function accountSheet(s, { extra = null } = {}) {
         },
         'q-row-btn danger'
       )
-    ]),
+    ].filter(Boolean)),
     node('p', { class: 'q-sheet-sub', text: T('忘記通行碼？在已登入的裝置按「更換通行碼」。', 'Forgot your pass? Choose “Change my pass” on a signed-in device.') }),
     note
   );
@@ -2186,8 +1861,7 @@ export const NOTICE_KINDS = {
     ['plus', 'Plus 免費投注與續訂', 'Plus free bet and renewal', 'Plus 每週免費投注入帳，和續訂前三天的提醒。', 'When Plus’s weekly free bet arrives, and three days before it renews.']
   ],
   vocab: [
-    ['ready', '積分可以領', 'Points to claim', '每日任務或每週目標完成、可以領積分時。', 'When a mission or weekly goal is done and ready to claim.'],
-    ['streak', '連續紀錄快斷了', 'Streak ending', '今天還沒玩，連續天數今晚就會歸零時。', 'When you haven’t played today and your streak ends tonight.']
+    ['streak', '連續練習快斷了', 'Streak ending', '今天還沒練習單字，連續天數今晚就會歸零時。', 'When you haven’t practised today and your streak ends tonight.']
   ],
   stock: [
     ['alert', '價格提醒', 'Price alert', '你設定的價格提醒到價時。', 'When a price alert you set is reached.'],
@@ -2737,8 +2411,9 @@ export const ICONS = {
   wallet: '<rect x="3.5" y="6.5" width="17" height="13.5" rx="3"/><path d="M8 6.5V5.3A1.8 1.8 0 0 1 9.8 3.5h4.4A1.8 1.8 0 0 1 16 5.3v1.2"/><path d="M3.5 12h17"/>',
   exchange: '<path d="M4 8.5h14l-3.2-3.2"/><path d="M20 15.5H6l3.2 3.2"/>',
   book: '<path d="M5 5.5A2.5 2.5 0 0 1 7.5 3H19v14.5H7.5A2.5 2.5 0 0 0 5 20z"/><path d="M5 20a1.5 1.5 0 0 0 1.5 1.5H19v-4"/><path d="M9.5 7.5h6M9.5 11h4"/>',
-  gamepad: '<rect x="2.5" y="7" width="19" height="11.5" rx="5.2"/><path d="M7.5 10.8v3.9M5.6 12.75h3.8"/><circle cx="15.6" cy="11.6" r=".9"/><circle cx="17.9" cy="14" r=".9"/>',
-  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.6"/><circle cx="12" cy="12" r="1"/>',
+  pass: '<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="11" r="2.2"/><path d="M5.8 16.2c.6-1.6 1.8-2.4 3.2-2.4s2.6.8 3.2 2.4M14.5 10h3.5M14.5 13.5h2.5"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3.2"/>',
+  grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8"/>',
   help: '<circle cx="12" cy="12" r="9"/><path d="M9.4 9.4a2.7 2.7 0 0 1 5.2 1c0 1.8-2.6 2.3-2.6 3.9"/><circle cx="12" cy="17.2" r=".5"/>',
   refresh: '<path d="M19.5 11.5a7.5 7.5 0 1 0-2.2 5.4"/><path d="M19.5 4.5v7h-7"/>'
 };

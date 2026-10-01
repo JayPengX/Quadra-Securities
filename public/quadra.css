@@ -571,7 +571,7 @@ dialog.q-moved::backdrop {
   font-size: 20px;
   line-height: 1;
 }
-/* Frames: a ring around the account button (and their previews in Rewards). */
+/* Frames: a ring around the account button (and their previews in Quadra Hub). */
 .q-framed {
   border: 2.5px solid transparent;
   background: linear-gradient(var(--q-surface), var(--q-surface)) padding-box, var(--q-frame, var(--q-border)) border-box;

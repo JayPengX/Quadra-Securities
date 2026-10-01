@@ -132,7 +132,7 @@ export const PLUS = {
   // The yearly plan: twelve months for the price of ten.
   year: 4_900,
   // Play: a NT$bonusBet free bet each week (the Worker's `eco:fb:<Monday>`;
-  // free bets take every pick at 1.50 or longer: parlays), the parlay boost
+  // free bets take odds of 1.50 or longer, a parlay's all together), the parlay boost
   // ×boost (Play's PARLAY_BOOST: 3+ picks, where the house's cut multiplies
   // with every pick), and cash out keeps cashOutKeep instead of 5% (money
   // back on the slip sooner, to bet again).

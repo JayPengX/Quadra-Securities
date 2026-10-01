@@ -1434,7 +1434,7 @@ export function plusPerks(lang = 'zh') {
   const pct = x => `${Math.round(x * 1000) / 10}%`;
   const o = PLUS.odds;
   return [
-    ['odds', en ? `A ${money(o.bonusBet)} free bet every week` : `每週 ${money(o.bonusBet)} 免費投注`, en ? `Every Monday, keep what it wins: ${money((o.bonusBet * 52) / 12)} a month` : `每週一送，贏了獎金歸你：每月 ${money((o.bonusBet * 52) / 12)}`],
+    ['odds', en ? `A ${money(o.bonusBet)} free bet every week` : `每週 ${money(o.bonusBet)} 免費投注`, en ? `One ${money(o.bonusBet)} free bet each Monday (4 or 5 a month); keep what it wins` : `每週一送 1 張 ${money(o.bonusBet)}（一個月 4 到 5 張），贏了獎金歸你`],
     ['odds', en ? `Parlay boost ×${o.boost}` : `串關加成 ×${o.boost}`, en ? 'Every winning combination of 3 picks or more' : '3 關以上每個贏的組合'],
     ['odds', en ? 'Better cash out' : '提前兌現更划算', en ? `Keeps ${pct(o.cashOutKeep)} instead of 5%` : `只扣 ${pct(o.cashOutKeep)}，一般扣 5%`],
     ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, en ? 'Every market, every order' : '所有市場、每一筆委託'],

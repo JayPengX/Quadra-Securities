@@ -396,7 +396,7 @@ function afterPrices() {
       if (!account.od) {
         account = { ...account, od: { since: now } };
         accountNotice('margin', t('odWarn', { v: money(owed, BASE), date: fmtDate(now + OD_GRACE) }), { tone: 'bad', tag: `od:${now}`, hash: 'portfolio' });
-      } else if (now - account.od.since >= OD_GRACE && !account.orders.some(o => o.status === 'open' && o.cover)) {
+      } else if (now - account.od.since >= OD_GRACE && !account.orders.some(o => o.status === 'open' && o.cover) && !coverPending(v, account)) {
         // A default: 違約金 on what's owed (it's sold for too), on the record;
         // time deposits are broken against it (the bank's set-off, at the
         // early rate) and lent shares called back to be sold. Once per
@@ -1007,7 +1007,7 @@ function renderHomeRows() {
         <span class="acct-main"><small>${h(t('netWorth'))}${plusAt() ? ' <b class="acct-plus">✦ PLUS</b>' : ''}</small><strong class="num">${h(money(v.netWorth, BASE))}</strong></span>
         <span class="acct-day ${dirClass(v.dayChange)}"><small>${h(t('today'))}</small><strong class="num">${h(money(v.dayChange, BASE, { sign: true }))}</strong><em class="num">${base ? h(pct(v.dayChange / base)) : '—'}</em></span>
       </button>
-      ${overdrawnBy(v) >= 1 ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span></div>`}`
+      ${overdrawnBy(v) >= 1 && !coverPending(v) ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span></div>`}`
     : '';
   const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}">${symbolBadge(q.symbol, q)}<span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
   const up = movers(state.quotes, { up: true }).slice(0, 5);
@@ -2013,6 +2013,14 @@ function errorText(r) {
 // NT$ cash below zero: the Quadra pool is overdrawn (1% a month, charged by
 // the Worker). What it takes to cover it, and the sales that would.
 const overdrawnBy = v => Math.max(0, -(v.cash.find(c => c.currency === BASE)?.amount ?? 0));
+// What the open sell orders of holdings would bring in (NT$, at today's
+// prices): an overdraft they cover is being dealt with (placed while the
+// market is shut, say), so it isn't asked for again.
+function pendingSales(v, account = state.account) {
+  const unit = new Map(v.positions.filter(p => !p.short && p.qty > 0).map(p => [p.symbol, p.valueTWD / p.qty]));
+  return (account?.orders || []).filter(o => o.status === 'open' && o.side === 'sell' && !o.short).reduce((sum, o) => sum + (unit.get(o.symbol) || 0) * (o.qty || 0), 0);
+}
+const coverPending = (v, account) => overdrawnBy(v) >= 1 && pendingSales(v, account) >= overdrawnBy(v) * 0.99;
 // How long an overdraft can stand before holdings are sold for it (T+2).
 const OD_GRACE = 2 * 86_400_000;
 function overdraftHtml(v) {
@@ -2022,7 +2030,7 @@ function overdraftHtml(v) {
   const rows = plan.map(x => `<li><span>${h(nameOf(x.symbol))}</span><span class="num">${h(t('coverSell', { qty: fmtQty(x.qty) }))}${x.all ? ` · ${h(t('coverAll'))}` : ''}</span><strong class="num">≈ ${h(money(x.twd, BASE))}</strong></li>`).join('');
   return `<div class="card overdraft-card">
     <div class="od-head"><strong>${h(t('odTitle', { v: money(owed, BASE) }))}</strong><small>${h(state.account.od ? t('odDeadline', { date: fmtDate(state.account.od.since + OD_GRACE) }) : t('odSub'))}</small></div>
-    ${plan.length ? `<ul class="od-plan">${rows}</ul><button class="primary-button block" type="button" data-action="cover" ${pricesLive() ? '' : 'disabled'}>${h(t(covered ? 'coverGo' : 'coverGoPart'))}</button>` : `<p class="note">${h(t('odNothing'))}</p>`}
+    ${coverPending(v) ? `<p class="note">${h(t('odPending'))}</p>` : plan.length ? `<ul class="od-plan">${rows}</ul><button class="primary-button block" type="button" data-action="cover" ${pricesLive() ? '' : 'disabled'}>${h(t(covered ? 'coverGo' : 'coverGoPart'))}</button>` : `<p class="note">${h(t('odNothing'))}</p>`}
   </div>`;
 }
 

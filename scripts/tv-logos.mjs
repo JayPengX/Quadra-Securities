@@ -24,7 +24,7 @@ const plain = s => String(s || '').replace(/<\/?em>/g, '');
 const idOf = x => (x?.logo?.style === 'pair' ? `${x.logo.logoid}|${x.logo.logoid2}` : x?.logo?.logoid || x?.logoid || null);
 
 // TradingView's icon is older than the company's current logo (checked by
-// eye in October 2026): left out, so the official one (brands.mjs) shows.
+// eye in October 2026): left out; the app draws its own (OWN_ICONS in app.js).
 // 統一超's is 7-ELEVEN's old sign, Roblox's the 2017 grey tile, McDonald's
 // arches thinner than the real ones.
 const STALE = new Set(['2912.TW', 'RBLX', 'MCD']);

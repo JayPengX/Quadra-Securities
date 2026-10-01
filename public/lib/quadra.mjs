@@ -71,14 +71,22 @@ export const WEALTH_RANKS = [
 // from the account (Plus, overdraft interest, and Play's net when the
 // account is behind there), and the account's own result on top (worth less
 // the first plus the second).
+// An account older than the shared wallet opened with NT$110,000 in the
+// apps' own books (Securities' NT$100,000 deposit, Play's NT$10,000), not as
+// an `eco:start` entry; the reset (`eco:rebase:v3`, −80,000) brought it to
+// the NT$30,000 everyone opens with. Both count as the opening money.
+const OLD_OPENING = 110_000;
+const RESET_ID = 'eco:rebase:v3';
 export function moneySides(wallet) {
   const gave = { start: 0, pay: 0, rank: 0, other: 0 };
   let took = 0;
   let play = 0;
-  for (const e of wallet?.entries || []) {
+  const entries = wallet?.entries || [];
+  if (entries.some(e => e.id === RESET_ID) && !entries.some(e => e.id === 'eco:start')) gave.start += OLD_OPENING;
+  for (const e of entries) {
     const a = Number(e.amount) || 0;
     if (e.app === 'eco') {
-      if (e.kind === 'start' || e.kind === 'grant') gave.start += a;
+      if (e.kind === 'start' || e.kind === 'grant' || e.id === RESET_ID) gave.start += a;
       else if (e.kind === 'pay') gave.pay += a;
       else if (e.kind === 'rank') gave.rank += a;
       else if (e.kind === 'rebase' || e.kind === 'vip') gave.other += a;

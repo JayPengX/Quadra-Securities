@@ -54,7 +54,7 @@ test('融券 in Taiwan: a 90% deposit and the sale money held, 0.08% handling, n
 });
 
 test('short selling elsewhere: proceeds in cash, owed at market, a yearly borrowing fee', () => {
-  let a = newAccount(1_000_000, T0, 'acc');
+  let a = withCredit(newAccount(1_000_000, T0, 'acc'));
   const q = quote('X', 2000, { market: 'US', currency: 'TWD' });
   let v = val(a, T0, [['X', q]]);
   const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 2000, qty: 100 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' });
@@ -69,7 +69,7 @@ test('short selling elsewhere: proceeds in cash, owed at market, a yearly borrow
 });
 
 test('shorts elsewhere need 150% cover to open, get called and bought back when the price runs up', () => {
-  let a = newAccount(100_000, T0, 'acc');
+  let a = withCredit(newAccount(100_000, T0, 'acc'));
   const q = quote('X', 100, { market: 'US', currency: 'TWD' });
   const v = val(a, T0, [['X', q]]);
   const big = placeOrder(a, { side: 'sell', qty: 3000 }, { quote: q, rates: RATES, valuation: v, now: T0 });

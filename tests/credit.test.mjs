@@ -8,7 +8,7 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const tpe = (d, hm) => Date.parse(`${d}T${hm}:00+08:00`);
 const RATES = { TWD: 1, USD: 32 };
-// After the credit rules (accounts made from 2026-10-02 need a credit account).
+// Every account needs a credit account for margin and short selling.
 const T0 = tpe('2028-03-01', '10:00'); // Wednesday
 const quote = (symbol, price, at = T0, over = {}) => ({
   symbol, name: symbol, kind: 'stock', market: 'TW', currency: 'TWD', price, prev: price, pct: 0, dayHigh: price, dayLow: price,
@@ -122,4 +122,22 @@ test('fees: the minimum applies after the discount; free is free', () => {
   // Odd lots: NT$1 minimum.
   assert.equal(tradeCosts({ market: 'TW', side: 'buy', kind: 'stock', gross: 500, currency: 'TWD', oddLot: true }).commission, 1);
   assert.equal(tradeCosts({ market: 'TW', side: 'buy', kind: 'stock', gross: 1_000_000, currency: 'TWD', discount: 0 }).commission, 0);
+});
+
+test('no credit account: no margin or borrowed shorts in any market, and the broker closes any it holds', () => {
+  const a = newAccount(1_000_000, T0, 'acc');
+  const us = quote('AAPL', 200, T0, { market: 'US', currency: 'USD', session: { start: T0 - HOUR, end: T0 + 5 * HOUR } });
+  const v = val(a, T0, [['AAPL', us]]);
+  assert.equal(placeOrder(a, { side: 'buy', qty: 10, margin: true }, { quote: us, rates: RATES, valuation: v, now: T0 }).error, 'creditNeeded');
+  assert.equal(placeOrder(a, { side: 'sell', qty: 10 }, { quote: us, rates: RATES, valuation: v, now: T0 }).error, 'creditNeeded');
+  // A currency pair sold is no borrowing: still allowed.
+  const pair = quote('EURUSD=X', 1.1, T0, { kind: 'fx', market: 'FX', currency: 'USD', session: null });
+  assert.notEqual(placeOrder(a, { side: 'sell', qty: 1000 }, { quote: pair, rates: RATES, valuation: val(a, T0, [['EURUSD=X', pair]]), now: T0 }).error, 'creditNeeded');
+  // 融資 held without a credit account (bought while it had one, an event later gone): sold.
+  const opened = { ...a, events: [...a.events, { id: 'credit:x', type: 'credit', t: T0, limit: 5_000_000 }] };
+  const q = quote('2330.TW', 1000);
+  const bought = placeOrder(opened, { side: 'buy', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: val(opened, T0, [['2330.TW', q]]), now: T0, id: 'm' }).account;
+  const without = { ...bought, events: bought.events.filter(e => e.type !== 'credit') };
+  assert.deepEqual(closeOutPlan(without, val(without, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR).map(p => [p.symbol, p.side, p.qty, p.reason]), [['2330.TW', 'sell', 1000, 'noCredit']]);
+  assert.deepEqual(closeOutPlan(bought, val(bought, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR), []);
 });

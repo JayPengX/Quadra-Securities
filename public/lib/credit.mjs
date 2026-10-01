@@ -3,8 +3,10 @@
 // extend it), and day trading (現股當沖). Pure functions over the account
 // log; account.mjs applies them to orders and fills.
 //
-// Only Taiwan's market (TW) works this way. Margin elsewhere (the US's
-// Reg T and the like) stays the plain margin account in account.mjs.
+// The credit account gates margin and borrowed shorts in every market (as
+// a Taiwan broker's 複委託 would); the limit, the terms and 融券's deposit
+// are Taiwan's own. Margin elsewhere is lent and called by account.mjs's
+// rules (the US's Reg T and the like). A currency pair sold borrows nothing.
 import { addMonths } from './savings.mjs';
 import { localDayOf } from './markets.mjs';
 import { isTradingDay } from './holidays.mjs';
@@ -120,12 +122,21 @@ export function extendTerm(account, valuation, symbol, now = Date.now()) {
 export const termDue = (since, extensions = 0) => addMonths(since, TERM_MONTHS * (1 + extensions));
 
 // Positions past their term, or day-trade shorts left after their day's
-// close: the orders that close them (forced, at market).
+// close: the orders that close them (forced, at market). Without a credit
+// account, every 融資 and every borrowed short goes (reason 'noCredit'):
+// margin and short selling are the credit account's.
 export function closeOutPlan(account, valuation, now = Date.now()) {
   if (account.orders.some(o => o.status === 'open' && o.forced)) return [];
   const plan = [];
+  if (!creditAccount(account, now).open) {
+    for (const p of valuation.positions) {
+      if (!p.short && p.financed > 0 && p.qty > 0) plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true, reason: 'noCredit' });
+      else if (p.short && !p.dayShort && p.kind !== 'fx') plan.push({ symbol: p.symbol, side: 'buy', type: 'market', qty: -p.qty, forced: true, reason: 'noCredit' });
+    }
+  }
+  const closing = new Set(plan.map(x => x.symbol));
   for (const t of terms(valuation, now)) {
-    if (now < t.due) continue;
+    if (now < t.due || closing.has(t.symbol)) continue;
     const p = valuation.positions.find(x => x.symbol === t.symbol);
     if (!p) continue;
     plan.push(t.side === 'loan' ? { symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true, reason: 'due' } : { symbol: p.symbol, side: 'buy', type: 'market', qty: -p.qty, forced: true, reason: 'due' });

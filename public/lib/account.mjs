@@ -530,10 +530,11 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     const rate = collateralRate(quote.kind, quote.market, quote.symbol);
     if (!(rate > 0)) return { error: 'notMarginable' };
     if (!valuation || valuation.margin !== 'ok' || account.call) return { error: 'margin' };
-    // Taiwan's 融資: through the credit account, within its limit.
+    // 融資 in any market needs the credit account (as a broker's 複委託
+    // does); Taiwan's is also within its limit.
+    const credit = creditAccount(account, now);
+    if (!credit.open) return { error: 'creditNeeded' };
     if (quote.market === 'TW') {
-      const credit = creditAccount(account, now);
-      if (!credit.open) return { error: 'creditNeeded' };
       const loan = quote.price * qty * rate;
       const room = credit.limit - creditUsed(valuation).loan;
       if (loan > room + EPS) return { error: 'creditLimit', room: Math.max(0, Math.floor(room)), limit: credit.limit };
@@ -564,6 +565,9 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
       if (!valuation) return { error: 'noValuation' };
       if (valuation.margin !== 'ok') return { error: 'margin' };
       if (defaulted(account, now)) return { error: 'defaulted' };
+      // Elsewhere, borrowing to sell needs the credit account too (a
+      // currency pair borrows nothing: selling it is taking its other side).
+      if (quote.market !== 'TW' && quote.kind !== 'fx' && !creditAccount(account, now).open) return { error: 'creditNeeded' };
       // Taiwan: 融券 through the credit account (a 90% deposit, within its
       // limit), or else a day trade sold first (現股當沖) that must be bought
       // back by the close.

@@ -374,13 +374,14 @@ function afterPrices() {
       accountNotice('margin', t('toastForced', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `forced:${plan.symbol}:${now}`, hash: 'fx' });
     }
   }
-  // Taiwan's 融資 and 融券 past their six months (not extended), and day
-  // trades sold first and not bought back by the close: closed for the account.
+  // 融資 and 融券 past their six months (not extended), any of them without
+  // a credit account, and day trades sold first and not bought back by the
+  // close: closed for the account.
   for (const plan of closeOutPlan(account, v, now)) {
     const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, valuation: v, now });
     if (placed.account) {
       account = placed.account;
-      accountNotice('margin', t(plan.reason === 'due' ? 'toastTermDue' : 'toastDayCover', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `closeout:${plan.symbol}:${now}`, hash: 'fx' });
+      accountNotice('margin', t({ due: 'toastTermDue', noCredit: 'toastNoCredit' }[plan.reason] || 'toastDayCover', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `closeout:${plan.symbol}:${now}`, hash: 'fx' });
     }
   }
   if (account !== state.account) {
@@ -1745,8 +1746,9 @@ function ticketInfo() {
   const spendable = cash + fromTwd;
   // 融資: a buy of what the broker lends against, lent its share as it fills
   // (only one's own part is needed now).
-  // (Not after a default: no 融資 then, DEFAULT_BAN long.)
-  const marginRate = d.side === 'buy' && !defaulted(state.account) ? collateralRate(q.kind, q.market, q.symbol) : 0;
+  // (Only with a credit account, and not after a default: no 融資 then, DEFAULT_BAN long.)
+  const hasCredit = creditAccount(state.account, Date.now()).open;
+  const marginRate = d.side === 'buy' && hasCredit && !defaulted(state.account) ? collateralRate(q.kind, q.market, q.symbol) : 0;
   const credit = Boolean(d.credit) && marginRate > 0;
   // (Held for a fresh price, as every order from the ticket is.)
   const holdFor = n => requiredCash({ type: d.type, qty: n, limit: Number(d.limit), stop: Number(d.stop), waitFresh: 1, margin: credit ? marginRate : 0 }, q, Date.now()).reserve;
@@ -1777,7 +1779,8 @@ function ticketInfo() {
   const marginBuy = null;
   // How much can be sold short on top of what's held.
   let shortRoom = 0;
-  if (d.side === 'sell' && isShortable(q.kind) && state.rates[q.currency]) {
+  // (Borrowing shares needs the credit account; in Taiwan a day trade sold first doesn't.)
+  if (d.side === 'sell' && isShortable(q.kind) && state.rates[q.currency] && (hasCredit || q.market === 'TW' || q.kind === 'fx')) {
     const v = valuation();
     const room = Math.max(0, (v.assets - 1.5 * (v.debtTWD + v.shortTWD)) / 0.5);
     shortRoom = v.margin === 'ok' ? roundQty(room / (q.price * state.rates[q.currency]), q.kind) : 0;
@@ -1830,7 +1833,7 @@ function renderTicket() {
   const twCredit = q.market === 'TW' ? creditAccount(state.account, Date.now()).open : false;
   const twDayShort = q.market === 'TW' && !twCredit && dayTradeSellFirst(state.account, Date.now());
   if (shorting && !isShortable(q.kind)) problems.push(t('notEnoughShares', { have: fmtQty(shares) }));
-  else if (shorting && q.market === 'TW' && !twCredit && !twDayShort) problems.push(t('err_creditNeeded'));
+  else if (shorting && !twCredit && !twDayShort && (q.market === 'TW' || (q.kind !== 'fx' && !creditAccount(state.account, Date.now()).open))) problems.push(t('err_creditNeeded'));
   else if (shorting && qty > shares + shortRoom + 1e-9) problems.push(t('shortTooBig', { max: fmtQty(shares + shortRoom) }));
   if (credit && !marginOk) problems.push(t('err_margin'));
   if (short > 0 && !topUp?.enough && !marginBuy) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));

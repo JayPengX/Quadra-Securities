@@ -12,7 +12,7 @@ apps sharing one account and one money pool:
 | **Quadra Securities** | Where money lives and grows: a play-money brokerage for markets worldwide |
 | **Quadra Play** | A place to play: sports bets and the lottery |
 | **Quadra Fixtures** | The sports data centre, and the way into Play |
-| **Quadra Rewards** | The centre of Quadra: points, goals, and every app's guide |
+| **Quadra Hub** | Related add-on: words practice, the Quadra Pass and Plus, the truth about the money, every app's guide |
 | Orbit Class | A related add-on: the class schedule |
 
 - **Quadra Pass required.** The app opens on the sign-in screen until there's
@@ -24,13 +24,12 @@ apps sharing one account and one money pool:
   another Quadra app pauses this one (it stops refreshing) until you come
   back, so two apps never overwrite each other.
 - **One money pool.** This account's NT$ cash is the Quadra balance: Play's
-  bets and winnings, Rewards' shop, transfers and Quadra's own pay (a
+  bets and winnings, transfers and Quadra's own pay (a
   fixed NT$6,000 a month, like a salary, paid into the pool by the Worker) all move it. A new pass opens with
-  NT$30,000 from Quadra; those two are the only money Quadra gives (v7:
-  Rewards gives points, not money).
-- **The guide lives in Rewards.** Every explanation (fees, orders, FX,
-  bonds, loans…) is in Quadra Rewards' help centre; the account sheet links
-  to it. The lessons, quizzes and mini games were removed.
+  NT$30,000 from Quadra; those two are the only money Quadra gives.
+- **The guide lives in Quadra Hub.** Every explanation (fees, orders, FX,
+  bonds, loans…) is in Quadra Hub's help centre; the account sheet links
+  to it.
 
 ## The app
 

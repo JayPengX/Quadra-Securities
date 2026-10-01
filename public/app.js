@@ -812,9 +812,36 @@ function marketStatus(q) {
   const next = opens ? t('opensAt', { time: weekdayClock(opens) }) : t('marketClosed');
   return `<span class="mkt-status">${statusDot(q)}${h(next)} <small>(${h(t('localTime'))} ${h(clock(now, q.tz))})</small></span>`;
 }
+// A company's logo (Financial Modeling Prep's free images, by ticker: US,
+// Taiwan, Tokyo, Hong Kong…) over its ticker badge; a ticker without one
+// keeps the badge (remembered, so it isn't asked for again).
+const LOGO_MISS_KEY = 'stock.logoMiss';
+const logoMiss = (() => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(LOGO_MISS_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+})();
+document.addEventListener(
+  'error',
+  e => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains('sym-logo')) return;
+    img.remove();
+    logoMiss.add(img.dataset.symbol);
+    try {
+      localStorage.setItem(LOGO_MISS_KEY, JSON.stringify([...logoMiss].slice(-400)));
+    } catch {}
+  },
+  true
+);
+const logoUrl = symbol => `https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.png`;
 function symbolBadge(symbol, q) {
+  const kind = q?.kind || catalogInfo(symbol)?.kind || 'stock';
   const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
-  return `<span class="sym-badge k-${h(q?.kind || catalogInfo(symbol)?.kind || 'stock')}">${h(text)}</span>`;
+  const logo = (kind === 'stock' || kind === 'etf') && !BONDS[symbol] && !logoMiss.has(symbol) ? `<img class="sym-logo" src="${h(logoUrl(symbol))}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
+  return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}">${h(text)}${logo}</span>`;
 }
 
 function quoteRow(symbol, { note = '' } = {}) {
@@ -896,7 +923,11 @@ function buyingPower(v) {
 function renderHomeRows() {
   const box = $('home-rows');
   if (!box) return;
-  if (state.query) return void (box.innerHTML = '');
+  if (state.query) {
+    box.innerHTML = '';
+    if ($('home-account')) $('home-account').innerHTML = '';
+    return;
+  }
   const held = Object.keys(snap()?.positions || {});
   const recs = forYou({ quotes: state.quotes, held, watched: watched(state.account), wallet: state.wallet, aff: affinityMap(), n: 10 });
   const v = state.account ? valuation() : null;
@@ -908,7 +939,7 @@ function renderHomeRows() {
       </button>
       ${overdrawnBy(v) >= 1 ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span></div>`}`
     : '';
-  const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}"><span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
+  const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}">${symbolBadge(q.symbol, q)}<span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
   const up = movers(state.quotes, { up: true }).slice(0, 5);
   const down = movers(state.quotes, { up: false }).slice(0, 5);
   const moversHtml =
@@ -919,7 +950,9 @@ function renderHomeRows() {
             <div class="movers-col"><p class="movers-head">${h(t('moversDown'))}</p>${down.map(moverRow).join('') || `<p class="muted">—</p>`}</div>
           </div></section>`
       : '';
-  box.innerHTML = [summary, recRow(t('forYou'), recs.map(r => recCard(r.symbol, r.why)), { sub: t('forYouSub') }), moversHtml].join('');
+  const acct = $('home-account');
+  if (acct) acct.innerHTML = summary;
+  box.innerHTML = [recRow(t('forYou'), recs.map(r => recCard(r.symbol, r.why)), { sub: t('forYouSub') }), moversHtml].join('');
 }
 
 function renderMarkets() {
@@ -942,7 +975,7 @@ function renderMarkets() {
   if (state.category === 'watch' && !watch.length) state.category = 'overview';
   if (state.category === 'overview') state.category = watch.length ? 'watch' : 'tw';
   $('categories').innerHTML = chips
-    .map(c => `<button class="chip" type="button" data-action="cat" data-id="${c.id}" aria-pressed="${!state.query && state.category === c.id}"><span class="chip-icon">${c.icon}</span>${h(L(c))}</button>`)
+    .map(c => `<button class="chip" type="button" data-action="cat" data-id="${c.id}" aria-pressed="${!state.query && state.category === c.id}">${h(L(c))}</button>`)
     .join('');
 
   if (state.query) return renderSearch();
@@ -1279,14 +1312,14 @@ function alertCardHtml(symbol, q) {
   const rows = list
     .map(a =>
       a.on
-        ? `<li><span>🔔 ${h(t(a.op === 'above' ? 'alertWhenAbove' : 'alertWhenBelow', { price: fmtPrice(a.price, q.currency) }))}</span><button class="ghost-button small" type="button" data-action="alert-off" data-id="${h(a.id)}">${h(t('remove'))}</button></li>`
+        ? `<li><span>${h(t(a.op === 'above' ? 'alertWhenAbove' : 'alertWhenBelow', { price: fmtPrice(a.price, q.currency) }))}</span><button class="ghost-button small" type="button" data-action="alert-off" data-id="${h(a.id)}">${h(t('remove'))}</button></li>`
         : `<li class="muted"><span>✓ ${h(t('alertWentOff', { price: fmtPrice(a.hit.price, q.currency), time: dateTime(a.hit.t) }))}</span></li>`
     )
     .join('');
   return fold(
     '🔔',
     t('alertTitle'),
-    `<p>${h(t('alertIntro'))}</p>
+    `
     ${rows ? `<ul class="tool-list">${rows}</ul>` : ''}
     <div class="fx-amount"><label class="field grow"><span>${h(t('alertPriceLabel'))} (${h(q.currency)})</span><input id="alert-price" inputmode="decimal" autocomplete="off" value="${h(state.alertPrice)}" placeholder="${h(fmtPrice(q.price, q.currency))}" /></label></div>
     <div class="qty-presets">${presets.map(([label, v]) => `<button class="chip small" type="button" data-action="alert-preset" data-v="${v}">${h(label)}</button>`).join('')}</div>
@@ -1319,7 +1352,7 @@ function planCardHtml(symbol, q) {
   return fold(
     '📅',
     t('planTitle'),
-    `<p>${h(t('planIntro'))}</p>
+    `
     <div class="loan-form">
       <label class="field grow"><span>${h(t('planAmount'))} (NT$)</span><input id="plan-amount" inputmode="numeric" autocomplete="off" value="${h(state.plan.amount)}" /></label>
       <label class="field"><span>${h(t('planDay'))}</span><select id="plan-day">${Array.from({ length: 28 }, (_, i) => `<option value="${i + 1}" ${String(i + 1) === state.plan.day ? 'selected' : ''}>${h(t('dayOfMonth', { n: i + 1 }))}</option>`).join('')}</select></label>
@@ -1742,7 +1775,7 @@ function renderTicket() {
     </div>
     <div class="qty-presets">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}">${h(label)}${label === t('max') || label === t('all') ? ` <small>${h(fmtQty(v))}</small>` : ''}</button>`).join('')}</div>
     ${d.type !== 'market' && (band || tickSize(q.market, q.kind, q.price)) ? `<p class="muted">${h([band ? t('limitBand', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }) : '', tickSize(q.market, q.kind, q.price) ? t('tickIs', { tick: num(tickSize(q.market, q.kind, q.price), 4, 0) }) : ''].filter(Boolean).join(' · '))}</p>` : ''}
-    <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' ? ` · ${h(t('lotNote'))}` : ''}</p>
+    <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' && t('lotNote') ? ` · ${h(t('lotNote'))}` : ''}</p>
     ${
       est
         ? `<dl class="preview">${lines.map(([k, v]) => `<div><dt>${h(k)}</dt><dd class="num">${h(v)}</dd></div>`).join('')}
@@ -1925,54 +1958,64 @@ function renderPortfolio() {
   // Money held for open buy orders isn't spendable, so cash shows without it.
   const heldFor = c => Math.max(0, c.amount - (avail.cash[c.currency] ?? c.amount));
   const heldTWD = v.cash.reduce((sum, c) => sum + (c.amount ? (heldFor(c) / c.amount) * c.twd : 0), 0);
+  // What the account is made of, as one bar under the total.
+  const parts = [
+    ['cash', Math.max(0, v.cashTWD - heldTWD), '#93c5fd'],
+    ['held', heldTWD, '#c4b5fd'],
+    ['holdings', v.longTWD, '#fde68a'],
+    ['td', v.savedTWD, '#86efac'],
+    ['div', v.receivable, '#fdba74']
+  ].filter(([, x]) => x > 0.5);
+  const partsTotal = parts.reduce((a, [, x]) => a + x, 0) || 1;
+  const PART_LABEL = { cash: t('cash'), held: t('openOrders'), holdings: t('holdings'), td: t('tdTitle'), div: t('pendingDivTitle') };
+  const sort = state.posSort || 'value';
+  const positions = [...v.positions].sort((x, y) => (sort === 'pl' ? y.plPct - x.plPct : sort === 'day' ? y.dayTWD - x.dayTWD : Math.abs(y.valueTWD) - Math.abs(x.valueTWD)));
+  const dayBase = v.netWorth - v.dayChange;
   box.innerHTML = `
     <div class="card hero-card">
       <p class="hero-label">${h(t('netWorth'))}${incomplete ? ` <small>${h(t('pricesLoading'))}</small>` : ''}</p>
       <strong class="hero-value num stat-value">${h(money(v.netWorth, BASE))}</strong>
-      <div class="hero-row">
-        ${heroStat(t('today'), money(v.dayChange, BASE, { sign: true }), v.netWorth - v.dayChange ? pct(v.dayChange / (v.netWorth - v.dayChange)) : '', dirClass(v.dayChange))}
-        ${heroStat(t('totalReturn'), money(v.totalReturn, BASE, { sign: true }), pct(v.totalReturnPct), dirClass(v.totalReturn))}
-        ${heroStat(t('putIn'), money(v.deposits, BASE), t('since', { date: fmtDate(state.account.created) }))}
+      <div class="hero-lines">
+        <span>${h(t('today'))} <strong class="num ${dirClass(v.dayChange)}">${h(money(v.dayChange, BASE, { sign: true }))}${dayBase ? ` · ${h(pct(v.dayChange / dayBase))}` : ''}</strong></span>
+        <span>${h(t('totalReturn'))} <strong class="num ${dirClass(v.totalReturn)}">${h(money(v.totalReturn, BASE, { sign: true }))} · ${h(pct(v.totalReturnPct))}</strong></span>
       </div>
-      <div class="hero-split">
-        <span>${h(t('cash'))} <strong class="num">${h(money(v.cashTWD - heldTWD, BASE))}</strong></span>
-        ${heldTWD > 0.5 ? `<span>${h(t('openOrders'))} <strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
-        <span>${h(t('holdings'))} <strong class="num">${h(money(v.longTWD, BASE))}</strong></span>
-        ${v.savedTWD > 0 ? `<span>${h(t('tdTitle'))} <strong class="num">${h(money(v.savedTWD, BASE))}</strong></span>` : ''}
-        ${v.receivable > 0 ? `<span>${h(t('pendingDivTitle'))} <strong class="num">${h(money(v.receivable, BASE))}</strong></span>` : ''}
-        ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
-        ${v.debtTWD > 0 ? `<span>${h(t('loans'))} <strong class="num">−${h(money(v.debtTWD, BASE))}</strong></span>` : ''}
-      </div>
-      <p class="hero-payday">💵 ${h(t('nextPayday', { amount: money(paydayFor(state.wallet), BASE), date: fmtDate(nextPayday(Date.now())) }))}</p>
-      <div class="button-row hero-actions">
+      <div class="hero-comp" role="img" aria-label="${h(parts.map(([k, x]) => `${PART_LABEL[k]} ${money(x, BASE)}`).join(', '))}">${parts.map(([k, x, c]) => `<i style="flex-grow:${(x / partsTotal).toFixed(4)};background:${c}"></i>`).join('')}</div>
+      <div class="hero-legend">${parts.map(([k, x, c]) => `<span><i style="background:${c}"></i>${h(PART_LABEL[k])} <strong class="num">${h(compactMoney(x, BASE))}</strong></span>`).join('')}${v.debtTWD > 0 ? `<span><i class="debt"></i>${h(t('loans'))} <strong class="num">−${h(compactMoney(v.debtTWD, BASE))}</strong></span>` : ''}${v.shortTWD > 0 ? `<span><i class="debt"></i>${h(t('shorts'))} <strong class="num">−${h(compactMoney(v.shortTWD, BASE))}</strong></span>` : ''}</div>
+      <div class="hero-actions">
         <button class="hero-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button>
         <button class="hero-button" type="button" data-action="goto" data-tab="fx">${h(t('goFx'))}</button>
+        <button class="hero-button" type="button" data-action="fx-view-go" data-view="grow">${h(t('goGrow'))}</button>
       </div>
+      <p class="hero-payday">${h(t('nextPayday', { amount: money(paydayFor(state.wallet), BASE), date: fmtDate(nextPayday(Date.now())) }))} · ${h(t('putIn'))} ${h(money(v.deposits, BASE))}</p>
     </div>
     ${overdraftHtml(v)}
-    ${plusAt() ? '' : '<div id="plus-slot" class="plus-slot"></div>'}
     ${marginCardHtml(v)}
-    <div class="two-col">
-      <div class="card">
-        <h3 class="card-title">${h(t('history'))}</h3>
-        <div id="nw-chart" class="chart-box"></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h3 class="card-title">${h(t('allocation'))}</h3>
-          <div class="segmented small" role="group">${['kind', 'currency', 'market'].map(k => `<button type="button" data-action="alloc" data-alloc="${k}" aria-pressed="${state.alloc === k}">${h(t(`alloc_${k}`))}</button>`).join('')}</div>
-        </div>
-        ${allocationHtml(v)}
-      </div>
+    <div class="card nw-card">
+      <h3 class="card-title">${h(t('history'))}</h3>
+      <div id="nw-chart" class="chart-box"></div>
     </div>
     <div class="card">
-      <h3 class="card-title">${h(t('positions'))} <span class="count">${v.positions.length}</span></h3>
-      ${v.positions.length ? `<div class="positions">${v.positions.map(positionRow).join('')}</div>` : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button></div></div>`}
+      <div class="card-head"><h3 class="card-title">${h(t('positions'))} <span class="count">${v.positions.length}</span></h3>
+        ${v.positions.length > 1 ? `<div class="segmented small" role="group">${['value', 'pl', 'day'].map(k => `<button type="button" data-action="pos-sort" data-v="${k}" aria-pressed="${sort === k}">${h(t(`posSort_${k}`))}</button>`).join('')}</div>` : ''}
+      </div>
+      ${
+        v.positions.length
+          ? `<div class="pos-sum"><span>${h(t('holdings'))} <strong class="num">${h(money(v.longTWD - v.shortTWD, BASE))}</strong></span><span>${h(t('unrealized'))} <strong class="num ${dirClass(v.unrealized)}">${h(money(v.unrealized, BASE, { sign: true }))}</strong></span></div><div class="positions">${positions.map(positionRow).join('')}</div>`
+          : `<div class="empty">${h(t('noPositions'))}<div class="button-row center"><button class="ghost-button" type="button" data-action="goto" data-tab="markets">${h(t('goTrade'))}</button></div></div>`
+      }
     </div>
     ${open.length ? `<div class="card"><h3 class="card-title">${h(t('openOrders'))} <span class="count">${open.length}</span></h3>${open.map(orderRow).join('')}</div>` : ''}
+    <div class="card">
+      <div class="card-head"><h3 class="card-title">${h(t('allocation'))}</h3>
+        <div class="segmented small" role="group">${['kind', 'currency', 'market'].map(k => `<button type="button" data-action="alloc" data-alloc="${k}" aria-pressed="${state.alloc === k}">${h(t(`alloc_${k}`))}</button>`).join('')}</div>
+      </div>
+      ${allocationHtml(v)}
+    </div>
     ${cashCardHtml(v, heldTWD, unsettledNow, heldFor)}
     ${incomeCardHtml(v)}
     ${plansListHtml()}
     ${alertsListHtml()}
+    ${plusAt() ? '' : '<div id="plus-slot" class="plus-slot"></div>'}
   `;
   $('plus-slot')?.append(plusCard(q));
   renderNetWorthChart(v, s);
@@ -1985,7 +2028,7 @@ function cashCardHtml(v, heldTWD, unsettledNow, heldFor) {
   const free = v.cashTWD - heldTWD;
   const settleAt = settlesBy(state.account);
   return `<div class="card cash-card">
-    <div class="card-head"><h3 class="card-title">💵 ${h(t('wallets'))}</h3><strong class="num cash-total">${h(money(free, BASE))}</strong></div>
+    <div class="card-head"><h3 class="card-title">${h(t('wallets'))}</h3><strong class="num cash-total">${h(money(free, BASE))}</strong></div>
     <div class="cash-chips">
       ${heldTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashHeld'))}</small><strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
       ${settlingTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashSettling'))}</small><strong class="num">${h(money(settlingTWD, BASE))}</strong></span>` : ''}
@@ -2006,7 +2049,7 @@ function incomeCardHtml(v) {
   const top = Object.entries(inc.payers).sort((a, b) => b[1] - a[1]).slice(0, 3);
   const parts = [['incomeDiv', inc.div], ['incomeCoupon', inc.coupon], ['incomeInterest', inc.interest], ['incomeLending', inc.lending]].filter(([, x]) => x >= 0.5);
   return `<div class="card income-card">
-    <div class="card-head"><h3 class="card-title">💰 ${h(t('incomeTitle'))}</h3></div>
+    <div class="card-head"><h3 class="card-title">${h(t('incomeTitle'))}</h3></div>
     <div class="kpis">
       ${kpi(t('income12'), money(inc.last12, BASE), yieldPct ? t('incomeYield', { pct: pct(yieldPct, { digits: 2, sign: false }) }) : '')}
       ${kpi(t('incomeYtd'), money(inc.ytd, BASE))}
@@ -2017,7 +2060,7 @@ function incomeCardHtml(v) {
     ${parts.length ? `<p class="income-split">${parts.map(([k, x]) => `<span>${h(t(k))} <strong class="num">${h(money(x, BASE))}</strong></span>`).join('')}</p>` : ''}
     ${top.length ? `<p class="muted">${h(t('incomeTop'))} ${top.map(([sym, x]) => `<button class="link" type="button" data-action="open" data-symbol="${h(sym)}">${h(nameOf(sym))}</button> <span class="num">${h(money(x, BASE))}</span>`).join('、')}</p>` : ''}
     ${list
-      .map(e => `<div class="order-row"><span class="side-tag div">💰</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(e.symbol)}">${h(nameOf(e.symbol))}</button></span><span class="row-sub">${h(t('pendingDivLine', { ex: fmtDate(e.ex), pay: fmtDate(e.t), qty: fmtQty(e.shares) }))}</span></span><strong class="num up-ink">+${h(money(e.net, e.currency))}</strong></div>`)
+      .map(e => `<div class="order-row">${icon('coins', 'k-income')}<span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(e.symbol)}">${h(nameOf(e.symbol))}</button></span><span class="row-sub">${h(t('pendingDivLine', { ex: fmtDate(e.ex), pay: fmtDate(e.t), qty: fmtQty(e.shares) }))}</span></span><strong class="num up-ink">+${h(money(e.net, e.currency))}</strong></div>`)
       .join('')}
     ${list.length ? `<p class="note">${h(t('pendingDivNote'))}</p>` : ''}
   </div>`;
@@ -2026,11 +2069,11 @@ function incomeCardHtml(v) {
 function plansListHtml() {
   const plans = activePlans(state.account);
   if (!plans.length) return '';
-  return `<div class="card"><h3 class="card-title">📅 ${h(t('plansTitle'))} <span class="count">${plans.length}</span></h3>${plans
+  return `<div class="card"><h3 class="card-title">${h(t('plansTitle'))} <span class="count">${plans.length}</span></h3>${plans
     .map(p => {
       const next = nextPlanRun(p);
       const last = state.account.orders.filter(o => o.plan === p.id).at(-1);
-      return `<div class="order-row"><span class="side-tag buy">${h(t('planTag'))}</span>
+      return `<div class="order-row">${icon('calendar', 'k-cash')}
       <span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span>
       <span class="row-sub">${h(t('planActive', { amount: money(p.amount, BASE), day: p.day }))} · ${h(t('planNext', { date: next ? fmtDate(next) : '—' }))}${last ? ` · ${h(last.status === 'filled' ? t('planLast', { qty: fmtQty(last.qty), unit: unitOf(p.symbol) }) : t(`err_${last.reason}`))}` : ''}</span></span>
       <button class="ghost-button small" type="button" data-action="plan-edit" data-id="${h(p.id)}" data-symbol="${h(p.symbol)}">${h(t('planEdit'))}</button>
@@ -2042,11 +2085,11 @@ function plansListHtml() {
 function alertsListHtml() {
   const list = Object.values(state.account.alerts || {}).filter(a => a.on || (a.hit && Date.now() - a.hit.t < 7 * 86_400_000)).sort((a, b) => b.t - a.t);
   if (!list.length) return '';
-  return `<div class="card"><h3 class="card-title">🔔 ${h(t('alertsTitle'))} <span class="count">${list.filter(a => a.on).length}</span></h3>${list
+  return `<div class="card"><h3 class="card-title">${h(t('alertsTitle'))} <span class="count">${list.filter(a => a.on).length}</span></h3>${list
     .map(a => {
       const q = state.quotes.get(a.symbol);
       const gap = q && a.on ? pct(a.price / q.price - 1) : '';
-      return `<div class="order-row"><span class="side-tag ${a.on ? 'fx' : 'div'}">${a.on ? '🔔' : '✓'}</span>
+      return `<div class="order-row">${icon(a.on ? 'bell' : 'check', a.on ? 'k-fx' : '')}
       <span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(a.symbol)}">${h(nameOf(a.symbol))}</button></span>
       <span class="row-sub">${h(a.on ? t(a.op === 'above' ? 'alertWhenAbove' : 'alertWhenBelow', { price: fmtPrice(a.price, q?.currency) }) : t('alertWentOff', { price: fmtPrice(a.hit.price, q?.currency), time: dateTime(a.hit.t) }))}${gap ? ` · ${h(t('alertGap', { pct: gap }))}` : ''}</span></span>
       ${a.on ? `<button class="ghost-button small" type="button" data-action="alert-off" data-id="${h(a.id)}">${h(t('remove'))}</button>` : ''}</div>`;
@@ -2062,11 +2105,10 @@ function positionRow(p) {
   const q = p.quote;
   return `<button class="row position-row" type="button" data-action="open" data-symbol="${h(p.symbol)}">
     ${symbolBadge(p.symbol, p)}
-    <span class="row-main"><span class="row-title">${h(nameOf(p.symbol, q))}${p.short ? `<span class="held-tag short">${h(t('shortTag'))}</span>` : ''}${p.lent ? `<span class="held-tag">${h(t('lentTag', { qty: fmtQty(p.lent) }))}</span>` : ''}</span>
-      <span class="row-sub">${flagOf(p.symbol, p)} ${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)}</span></span>
-    <span class="row-spark">${q?.line?.length > 1 ? sparkline(q.line, q.kind === 'crypto' ? null : q.prev) : ''}</span>
-    <span class="row-value"><strong class="num">${h(money(p.valueTWD, BASE))}</strong><small class="num">${h(t('weight', { w: pct(p.weight, { digits: 1, sign: false }) }))}</small></span>
-    <span class="row-pl"><strong class="num ${dirClass(p.pl)}">${h(money(p.pl, BASE, { sign: true }))}</strong><small class="num ${dirClass(p.pl)}">${h(pct(p.plPct))}</small><small class="num ${dirClass(p.dayTWD)}">${h(t('todayShort'))} ${h(money(p.dayTWD, BASE, { sign: true }))}</small></span>
+    <span class="row-main"><span class="row-title">${h(nameOf(p.symbol, q))}${p.short ? `<span class="held-tag short">${h(t('shortTag'))}</span>` : ''}${p.financed > 0 ? `<span class="held-tag">${h(t('marginTag'))}</span>` : ''}${p.lent ? `<span class="held-tag">${h(t('lentTag', { qty: fmtQty(p.lent) }))}</span>` : ''}</span>
+      <span class="row-sub">${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(pct(p.weight, { digits: 1, sign: false }))}</span>
+      <span class="row-meta">${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)} · <span class="${dirClass(p.dayTWD)}">${h(t('todayShort'))} ${h(money(p.dayTWD, BASE, { sign: true }))}</span></span></span>
+    <span class="pos-right"><strong class="num">${h(money(p.valueTWD, BASE))}</strong><span class="pl-pill ${p.pl > 0 ? 'up' : p.pl < 0 ? 'down' : ''}">${h(pct(p.plPct))}</span><small class="num ${dirClass(p.pl)}">${h(money(p.pl, BASE, { sign: true }))}</small></span>
   </button>`;
 }
 
@@ -2330,12 +2372,30 @@ function exchangeHtml() {
   </div>`;
 }
 
+// The rates board, as a bank shows it: what it buys and sells each currency
+// for (per unit, or per 100 for the small ones), and today's move. A row
+// opens the exchange for that currency.
 function ratesHtml() {
-  return `<div class="card">
-    <p class="lede">${h(t('ratesIntro'))}</p>
+  const usd = state.quotes.get(fxSymbol('USD'));
+  const hero = usd
+    ? `<button class="card rates-hero" type="button" data-action="fx-to" data-cur="USD">
+        <span class="rates-hero-top"><span>🇺🇸 USD / TWD</span>${pctText(usd)}</span>
+        <strong class="num">${h(num(usd.price, 3))}</strong>
+        <span class="rates-hero-spark">${sparkline(usd.line, usd.prev, { width: 320, height: 54 })}</span>
+      </button>`
+    : '';
+  return `${hero}<div class="card rates-card">
+    <div class="rates-head"><span>${h(t('ratesCurrency'))}</span><span>${h(t('bankBuys'))}</span><span>${h(t('bankSells'))}</span><span>${h(t('ratesChange'))}</span></div>
     <div class="rates">${Object.keys(CURRENCIES).filter(c => c !== BASE).map(rateRow).join('')}</div>
-    <div class="button-row"><button class="ghost-button" type="button" data-action="fx-trade">💱 ${h(t('fxTradeButton'))}</button></div>
-  </div>`;
+    <p class="rates-foot">${h(t('ratesFoot'))}</p>
+  </div>
+  <button class="ghost-button block" type="button" data-action="fx-trade">${h(t('fxTradeButton'))}</button>`;
+}
+// Today's move as coloured text (up / down in the person's colours).
+function pctText(q) {
+  if (!q || !Number.isFinite(q.pct)) return '<span class="num muted">—</span>';
+  const cls = q.pct > 0 ? 'up-ink' : q.pct < 0 ? 'down-ink' : 'muted';
+  return `<span class="num ${cls}">${h(pct(q.pct, { digits: 2 }))}</span>`;
 }
 
 // What leaves the `from` wallet: the typed amount, or (typing what you want
@@ -2353,13 +2413,12 @@ function rateRow(c) {
   const info = currencyInfo(c);
   const sp = fxSpread(c, BASE, state.fxOpen);
   const unit = info.digits === 0 && q?.price < 1 ? 100 : 1;
+  const digits = q && q.price * unit < 1 ? 4 : 3;
   return `<button class="rate-row" type="button" data-action="fx-to" data-cur="${h(c)}">
-    <span class="wallet-flag">${info.flag}</span>
-    <span class="row-main"><span class="row-title">${h(unit > 1 ? `${unit} ` : '')}${h(c)} <small>${h(L(info))}</small></span>
-    <span class="row-sub num">${q ? `${h(t('bankSells'))} ${h(num(q.price * unit * (1 + sp), 4))} · ${h(t('bankBuys'))} ${h(num(q.price * unit * (1 - sp), 4))}` : '…'}</span></span>
-    <span class="row-spark">${q ? sparkline(q.line, q.prev, { width: 72, height: 26 }) : ''}</span>
-    <span class="row-price"><strong class="num">${q ? h(num(q.price * unit, 4)) : '…'}</strong><small>NT$</small></span>
-    ${pctPill(q)}
+    <span class="rate-cur"><span class="wallet-flag">${info.flag}</span><span><strong>${h(c)}${unit > 1 ? ` <em>×${unit}</em>` : ''}</strong><small>${h(L(info))}</small></span></span>
+    <span class="num">${q ? h(num(q.price * unit * (1 - sp), digits)) : '…'}</span>
+    <span class="num">${q ? h(num(q.price * unit * (1 + sp), digits)) : '…'}</span>
+    ${pctText(q)}
   </button>`;
 }
 
@@ -2401,7 +2460,7 @@ function growHtml() {
         ? `<div class="card"><h3 class="card-title">${h(t('tdYours'))} <span class="count">${tds.length}</span></h3>${tds
             .map(td => {
               const full = Math.round((td.amount * td.rate * td.months) / 12);
-              return `<div class="order-row"><span class="side-tag div">🏦</span><span class="row-main"><span class="row-title num">${h(money(td.amount, BASE))} · ${h(t('tdMonths', { n: td.months }))} ${h(pct(td.rate, { digits: 3, sign: false }))}</span><span class="row-sub">${h(t('tdEnds', { date: fmtDate(td.ends), v: money(full, BASE) }))}${td.renew ? ` · ${h(t('tdRenewTag'))}` : ''}</span></span><button class="ghost-button small" type="button" data-action="td-break" data-id="${h(td.id)}">${h(t('tdBreak'))}</button></div>`;
+              return `<div class="order-row">${icon('lock', 'k-income')}<span class="row-main"><span class="row-title num">${h(money(td.amount, BASE))} · ${h(t('tdMonths', { n: td.months }))} ${h(pct(td.rate, { digits: 3, sign: false }))}</span><span class="row-sub">${h(t('tdEnds', { date: fmtDate(td.ends), v: money(full, BASE) }))}${td.renew ? ` · ${h(t('tdRenewTag'))}` : ''}</span></span><button class="ghost-button small" type="button" data-action="td-break" data-id="${h(td.id)}">${h(t('tdBreak'))}</button></div>`;
             })
             .join('')}</div>`
         : ''
@@ -2432,7 +2491,7 @@ function lendRowHtml(p, now) {
 
 function lentRowHtml(l, now) {
   const so = lendFee(l, l.back || now).net;
-  return `<div class="order-row"><span class="side-tag div">🤝</span><span class="row-main"><span class="row-title">${h(nameOf(l.symbol))} · ${h(fmtQty(l.qty))} ${h(unitOf(l.symbol))}</span><span class="row-sub">${h(l.back ? t('lendBack', { date: fmtDate(l.back) }) : t('lendSince', { date: fmtDate(l.t) }))} · ${h(t('lendSoFar', { v: money(so, BASE) }))}</span></span>${l.back ? '' : `<button class="ghost-button small" type="button" data-action="recall" data-id="${h(l.id)}">${h(t('lendRecall'))}</button>`}</div>`;
+  return `<div class="order-row">${icon('hand', 'k-income')}<span class="row-main"><span class="row-title">${h(nameOf(l.symbol))} · ${h(fmtQty(l.qty))} ${h(unitOf(l.symbol))}</span><span class="row-sub">${h(l.back ? t('lendBack', { date: fmtDate(l.back) }) : t('lendSince', { date: fmtDate(l.t) }))} · ${h(t('lendSoFar', { v: money(so, BASE) }))}</span></span>${l.back ? '' : `<button class="ghost-button small" type="button" data-action="recall" data-id="${h(l.id)}">${h(t('lendRecall'))}</button>`}</div>`;
 }
 
 async function doOpenDeposit() {
@@ -2576,109 +2635,139 @@ function doRepay(all = false) {
 
 // ---- History tab: activity, orders, stats ---------------------------------------------------
 
+// Line icons (24×24, drawn in currentColor) for records that aren't a stock.
+const ICON_PATHS = {
+  swap: 'M7 7h11l-3-3M17 17H6l3 3',
+  coins: 'M12 7c4 0 7-1.3 7-3s-3-3-7-3-7 1.3-7 3 3 3 7 3zM5 4v6c0 1.7 3 3 7 3s7-1.3 7-3V4M5 10v6c0 1.7 3 3 7 3s7-1.3 7-3v-6',
+  bank: 'M3 10h18L12 4 3 10zM5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18',
+  percent: 'M19 5 5 19M7 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM17 18.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z',
+  lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  unlock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 6.8-1.2',
+  split: 'M6 4v6a6 6 0 0 0 6 6M18 4v6a6 6 0 0 1-6 6v4',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+  alert: 'M12 4 2.5 20h19L12 4zM12 10v4M12 17v.5',
+  in: 'M12 4v12M6 10l6 6 6-6M5 20h14',
+  out: 'M12 20V8M6 14l6-6 6 6M5 4h14',
+  hand: 'M4 14l4-4 3 3 3-3 6 6M4 20h16',
+  play: 'M7 5v14l11-7-11-7z',
+  trophy: 'M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M10 14h4v3h-4zM8 20h8',
+  gift: 'M4 10h16v10H4zM3 7h18v3H3zM12 7v13M12 7S10 3 8 4.5 10 7 12 7zm0 0s2-4 4-2.5S14 7 12 7z',
+  planet: 'M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM3 15c-1.5 2.5 3 3 9 1s10-5.5 9-8c-.4-1-2-1.3-4-1',
+  calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
+  bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0',
+  check: 'M5 12.5l4.5 4.5L19 7'
+};
+const icon = (name, cls = '') => `<span class="act-ic ${cls}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON_PATHS[name]}"/></svg></span>`;
+const APP_ICON_NAMES = { odds: 'play', match: 'trophy', vocab: 'gift', orbit: 'planet' };
 function activityRow(e) {
   const q = state.quotes.get(e.symbol);
-  let icon;
+  let lead;
   let title;
-  let sub;
+  let line = '';
+  let meta = [];
   let amount = '';
+  let tag = '';
+  const fees = list => list.filter(Boolean);
   switch (e.type) {
-    case 'fill':
-      icon = `<span class="side-tag ${e.side}">${h(e.maturity ? t('maturedTag') : t(e.side))}</span>`;
-      title = `${nameOf(e.symbol, q)} · ${fmtQty(e.qty)} ${unitOf(e.symbol)} @ ${fmtPrice(e.price, e.currency)}`;
-      sub = [e.commission ? `${t('commission')} ${money(e.commission, e.currency)}` : '', e.voucherOff ? `${t('voucherLine')} −${money(e.voucherOff, e.currency)}` : '', e.tax ? `${t('tax')} ${money(e.tax, e.currency)}` : '', e.fee ? `${t('exchangeFee')} ${money(e.fee, e.currency)}` : '', e.forced ? t('forcedTag') : '']
-        .filter(Boolean)
-        .join(' · ');
+    case 'fill': {
+      lead = `<span class="act-sym">${symbolBadge(e.symbol, q)}<i class="act-side ${e.side}">${h(e.side === 'buy' ? t('buyShort') : t('sellShort'))}</i></span>`;
+      title = nameOf(e.symbol, q);
+      line = `${e.maturity ? t('maturedTag') : t(e.side)} ${fmtQty(e.qty)} ${unitOf(e.symbol)} @ ${fmtPrice(e.price, e.currency)}`;
+      meta = fees([e.commission ? `${t('commission')} ${money(e.commission, e.currency)}` : '', e.voucherOff ? `${t('voucherLine')} −${money(e.voucherOff, e.currency)}` : '', e.tax ? `${t('tax')} ${money(e.tax, e.currency)}` : '', e.fee ? `${t('exchangeFee')} ${money(e.fee, e.currency)}` : '']);
+      if (e.forced) tag = t('forcedTag');
       amount = `<strong class="num ${e.side === 'buy' ? '' : 'up-ink'}">${e.side === 'buy' ? '−' : '+'}${h(money(e.total, e.currency))}</strong>`;
       break;
+    }
     case 'fx':
-      icon = '<span class="side-tag fx">💱</span>';
-      title = `${money(e.amount, e.from)} → ${money(e.received, e.to)}`;
-      sub = `${rateLine(e.from, e.to, e.rate)} · ${t('fxCost')} ${money(e.spreadTWD, BASE, { digits: e.spreadTWD < 10 ? 2 : 0 })}`;
+      lead = icon('swap', 'k-fx');
+      title = `${e.from} → ${e.to}`;
+      line = `${money(e.amount, e.from)} → ${money(e.received, e.to)}`;
+      meta = [rateLine(e.from, e.to, e.rate), `${t('fxCost')} ${money(e.spreadTWD, BASE, { digits: e.spreadTWD < 10 ? 2 : 0 })}`];
       break;
     case 'div':
-      icon = '<span class="side-tag div">💰</span>';
-      title = `${nameOf(e.symbol, q)} ${e.coupon ? t('couponPaid') : t('dividend')}${e.t > Date.now() ? ` · ${t('pendingTag')}` : ''}`;
-      sub = [`${fmtQty(e.shares)} × ${fmtPrice(e.perShare, e.currency)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, e.currency)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, e.currency)}` : ''].filter(Boolean).join(' · ');
+      lead = `<span class="act-sym">${symbolBadge(e.symbol, q)}<i class="act-side div">${h(t('divShort'))}</i></span>`;
+      title = nameOf(e.symbol, q);
+      line = `${e.coupon ? t('couponPaid') : t('dividend')} ${fmtQty(e.shares)} × ${fmtPrice(e.perShare, e.currency)}`;
+      meta = fees([e.withheld ? `${t('withheld')} ${money(e.withheld, e.currency)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, e.currency)}` : '']);
+      if (e.t > Date.now()) tag = t('pendingTag');
       amount = `<strong class="num ${e.net < 0 ? '' : 'up-ink'}">${e.net < 0 ? '' : '+'}${h(money(e.net, e.currency))}</strong>`;
       break;
     case 'interest':
-      icon = '<span class="side-tag div">🏦</span>';
+      lead = icon('percent', 'k-income');
       title = t('interestRow');
-      sub = [t('interestRate', { rate: pct(e.rate, { sign: false, digits: 2 }) }), e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : ''].filter(Boolean).join(' · ');
+      line = t('interestRate', { rate: pct(e.rate, { sign: false, digits: 2 }) });
+      meta = fees([e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : '']);
       amount = `<strong class="num up-ink">+${h(money(e.net, BASE))}</strong>`;
       break;
     case 'split':
-      icon = '<span class="side-tag div">✂️</span>';
-      title = `${nameOf(e.symbol, q)} ${t('split')} ${num(e.ratio, 4)} : 1`;
-      sub = t('splitNote');
+      lead = icon('split', 'k-income');
+      title = nameOf(e.symbol, q);
+      line = `${t('split')} ${num(e.ratio, 4)} : 1`;
       break;
     case 'deposit':
-      icon = '<span class="side-tag div">🏦</span>';
+      lead = e.pool ? icon(APP_ICON_NAMES[e.app] || 'swap', `k-app app-${h(e.app || '')}`) : icon('in', 'k-cash');
       title = e.pool ? describeEntry(e, locale) : e.id === 'deposit:start' || e.start ? t('openedWith') : e.income ? t('payday') : e.game ? t('gameIncome', { game: t(`sg_${e.game}`) }) : t('deposited');
-      icon = e.pool ? `<span class="side-tag div">${appIcon(e.app)}</span>` : e.game ? '<span class="side-tag div">🎮</span>' : icon;
-      sub = e.pool ? t('poolDepositSub') : '';
       amount = `<strong class="num ${e.amount < 0 ? 'down-ink' : ''}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, e.currency))}</strong>`;
       break;
     case 'td':
-      icon = '<span class="side-tag div">🏦</span>';
+      lead = icon('lock', 'k-income');
       title = t('tdRow', { n: e.months });
-      sub = `${pct(e.rate, { digits: 3, sign: false })} · ${t('tdEnds', { date: fmtDate(e.ends), v: money(Math.round((e.amount * e.rate * e.months) / 12), BASE) })}`;
+      line = `${pct(e.rate, { digits: 3, sign: false })} · ${t('tdEnds', { date: fmtDate(e.ends), v: money(Math.round((e.amount * e.rate * e.months) / 12), BASE) })}`;
       amount = `<strong class="num">−${h(money(e.amount, BASE))}</strong>`;
       break;
     case 'tdend':
-      icon = '<span class="side-tag div">🏦</span>';
+      lead = icon('unlock', 'k-income');
       title = e.early ? t('tdBrokenRow') : t('tdEndRow');
-      sub = [`${t('tdInterestLabel')} ${money(e.interest, BASE)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : ''].filter(Boolean).join(' · ');
+      line = `${t('tdInterestLabel')} ${money(e.interest, BASE)}`;
+      meta = fees([e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : '']);
       amount = `<strong class="num up-ink">+${h(money(e.amount + e.net, BASE))}</strong>`;
       break;
     case 'lend':
-      icon = '<span class="side-tag div">🤝</span>';
+      lead = `<span class="act-sym">${symbolBadge(e.symbol, q)}</span>`;
       title = t('lendRow', { name: nameOf(e.symbol, q), qty: fmtQty(e.qty) });
-      sub = t('lendRate', { rate: pct(e.rate, { digits: 2, sign: false }) });
+      line = t('lendRate', { rate: pct(e.rate, { digits: 2, sign: false }) });
       break;
     case 'recall':
-      icon = '<span class="side-tag div">↩️</span>';
+      lead = icon('hand', 'k-income');
       title = t('recallRow');
-      sub = t('lendBack', { date: fmtDate(e.back) });
+      line = t('lendBack', { date: fmtDate(e.back) });
       break;
     case 'lendpay':
       if (e.t > Date.now()) return '';
-      icon = '<span class="side-tag div">🤝</span>';
+      lead = icon('coins', 'k-income');
       title = t('lendPayRow', { name: nameOf(e.symbol, q) });
-      sub = [`${t('lendCutLabel')} ${money(e.cut, BASE)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : ''].filter(Boolean).join(' · ');
+      meta = fees([`${t('lendCutLabel')} ${money(e.cut, BASE)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : '']);
       amount = `<strong class="num up-ink">+${h(money(e.net, BASE))}</strong>`;
       break;
     case 'penalty':
-      icon = '<span class="side-tag loan">⚠️</span>';
+      lead = icon('alert', 'k-bad');
       title = t('penaltyRow');
-      sub = t('penaltySub');
+      line = t('penaltySub');
       amount = `<strong class="num down-ink">−${h(money(e.amount, e.currency))}</strong>`;
       break;
     case 'borrow':
-      icon = '<span class="side-tag loan">🏦</span>';
+      lead = icon('bank', 'k-loan');
       title = e.symbol ? t('creditRow', { name: nameOf(e.symbol) }) : t('borrowedRow', { cur: e.currency });
-      sub = t('loanRate', { rate: pct(e.rate, { digits: 2, sign: false }) });
+      line = t('loanRate', { rate: pct(e.rate, { digits: 2, sign: false }) });
       amount = `<strong class="num">+${h(money(e.amount, e.currency))}</strong>`;
       break;
     case 'link':
-      icon = '<span class="side-tag loan">🔗</span>';
+      lead = icon('link', 'k-loan');
       title = t('linkRow', { name: nameOf(e.symbol, q) });
-      sub = t('linkSub', { v: money(e.amount, e.currency) });
+      line = t('linkSub', { v: money(e.amount, e.currency) });
       break;
     case 'repay':
-      icon = '<span class="side-tag loan">🏦</span>';
-      title = t('repaidRow', { cur: e.currency });
-      sub = '';
+      lead = icon('bank', 'k-loan');
+      title = e.symbol ? t('repaidRowFor', { name: nameOf(e.symbol) }) : t('repaidRow', { cur: e.currency });
       amount = `<strong class="num">−${h(money(e.amount, e.currency))}</strong>`;
       break;
     default:
       return '';
   }
-  const [tag, attrs] = activityTarget(e);
-  return `<${tag} ${attrs} class="activity-row">
-    ${icon}<span class="row-main"><span class="row-title">${h(title)}</span><span class="row-sub">${h(dateTime(e.t))}${sub ? ` · ${h(sub)}` : ''}</span></span>
-    <span class="row-amt">${amount}</span></${tag}>`;
+  const [el, attrs] = activityTarget(e);
+  return `<${el} ${attrs} class="activity-row">
+    ${lead}<span class="row-main"><span class="row-title">${h(title)}${tag ? ` <em class="act-tag">${h(tag)}</em>` : ''}</span>${line ? `<span class="row-sub">${h(line)}</span>` : ''}<span class="row-meta">${h([clock(e.t), ...meta].join(' · '))}</span></span>
+    <span class="row-amt">${amount}</span></${el}>`;
 }
 
 // Where a record takes you when tapped: its stock's page, the exchange (the
@@ -2706,13 +2795,11 @@ const ACTIVITY_FILTERS = {
   // app and day under 全部, each record here (one app at a time, or all).
   apps: e => e.type === 'deposit' && Boolean(e.pool) && Boolean(APPS[e.app]) && e.app !== 'stock'
 };
-const APP_ICONS = { odds: '🎯', match: '🏟️', vocab: '🎁', orbit: '🪐' };
-const appIcon = app => APP_ICONS[app] || '🔄';
 // A day's records from one other app, as one line.
 function appDayRow(app, list) {
   const sum = list.reduce((a, e) => a + (e.amount || 0), 0);
   return `<button type="button" class="activity-row" data-action="afilter" data-f="apps" data-app="${h(app)}">
-    <span class="side-tag div">${appIcon(app)}</span><span class="row-main"><span class="row-title">${h(APPS[app]?.short || app)}</span><span class="row-sub">${h(t('appRecords', { n: list.length }))}</span></span>
+    ${icon(APP_ICON_NAMES[app] || 'swap', `k-app app-${h(app)}`)}<span class="row-main"><span class="row-title">${h(APPS[app]?.short || app)}</span><span class="row-sub">${h(t('appRecords', { n: list.length }))}</span></span>
     <span class="row-amt"><strong class="num ${sum < 0 ? 'down-ink' : ''}">${sum < 0 ? '' : '+'}${h(money(sum, BASE))}</strong></span></button>`;
 }
 
@@ -2767,10 +2854,31 @@ function renderHistory() {
       ? `<div class="chips filter-chips app-chips">${['', ...apps].map(k => `<button class="chip" type="button" data-action="afilter" data-f="apps" data-app="${h(k)}" aria-pressed="${app === k}">${h(k ? APPS[k]?.short || k : t('af_all'))}</button>`).join('')}</div>`
       : '';
   box.innerHTML = `${tabs}
+    ${monthSummaryHtml(all)}
     <div class="chips filter-chips">${Object.keys(ACTIVITY_FILTERS).map(k => `<button class="chip" type="button" data-action="afilter" data-f="${k}" data-app="" aria-pressed="${f === k}">${h(t(`af_${k}`))}</button>`).join('')}</div>
     ${appChips}
-    ${days.map(([day, g]) => `<h3 class="day-head">${h(dayLabel(day))}</h3><div class="card list-card">${g.rows.map(activityRow).join('')}${[...g.apps].map(([a, list]) => appDayRow(a, list)).join('')}</div>`).join('') || `<p class="empty">${h(t('nothingYet'))}</p>`}
+    ${days.length ? `<div class="card list-card act-list">${days.map(([day, g]) => `<h3 class="day-head">${h(dayLabel(day))}</h3>${g.rows.map(activityRow).join('')}${[...g.apps].map(([a, list]) => appDayRow(a, list)).join('')}`).join('')}</div>` : `<p class="empty">${h(t('nothingYet'))}</p>`}
     ${own.length > shown.length ? `<button class="ghost-button more" type="button" data-action="more">${h(t('showMore', { n: own.length - shown.length }))}</button>` : ''}`;
+}
+
+// The last 30 days at a glance: bought, sold, income and what trading cost, in NT$.
+function monthSummaryHtml(events) {
+  const from = Date.now() - 30 * 86_400_000;
+  const sums = { bought: 0, sold: 0, income: 0, costs: 0 };
+  for (const e of events) {
+    if (e.t < from || e.t > Date.now()) continue;
+    const twd = e.twd || 1;
+    if (e.type === 'fill') {
+      sums[e.side === 'buy' ? 'bought' : 'sold'] += e.total * twd;
+      sums.costs += ((e.commission || 0) + (e.tax || 0) + (e.fee || 0)) * twd;
+    } else if (e.type === 'div') sums.income += e.net * twd;
+    else if (e.type === 'interest' || e.type === 'tdend' || e.type === 'lendpay') sums.income += e.net || 0;
+  }
+  const cell = (key, v, cls = '') => `<div><span>${h(t(key))}</span><strong class="num ${cls}">${h(money(v, BASE))}</strong></div>`;
+  if (!Object.values(sums).some(v => v > 0)) return '';
+  return `<div class="card month-sum"><h3 class="card-title">${h(t('last30'))}</h3><div class="month-grid">
+    ${cell('sumBought', sums.bought)}${cell('sumSold', sums.sold)}${cell('sumIncome', sums.income, sums.income > 0 ? 'up-ink' : '')}${cell('sumCosts', sums.costs)}
+  </div></div>`;
 }
 
 function dayLabel(day) {
@@ -2787,51 +2895,118 @@ function statsHtml() {
   const closed = s.closed;
   const wins = closed.filter(c => c.realized > 0);
   const best = closed.reduce((b, c) => (!b || c.realized > b.realized ? c : b), null);
+  const worst = closed.reduce((b, c) => (!b || c.realized < b.realized ? c : b), null);
+  const income = v.dividends + (s.interestEarned || 0) + (s.lendIncome || 0);
+  // Realised P/L and income by Taipei month, the last 12.
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(Date.now() + 8 * 3_600_000);
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - i);
+    months.push(d.toISOString().slice(0, 7));
+  }
+  const byMonth = Object.fromEntries(months.map(m => [m, 0]));
+  for (const c of closed) {
+    const m = taipeiDay(c.t).slice(0, 7);
+    if (m in byMonth) byMonth[m] += c.realized;
+  }
+  for (const e of state.account.events) {
+    if (e.t > Date.now()) continue;
+    const m = taipeiDay(e.t).slice(0, 7);
+    if (!(m in byMonth)) continue;
+    if (e.type === 'div') byMonth[m] += e.net * (e.twd || 1);
+    else if (e.type === 'interest' || e.type === 'tdend' || e.type === 'lendpay') byMonth[m] += e.net || 0;
+  }
+  const bars = months.map(m => [m, byMonth[m]]);
+  const maxAbs = Math.max(1, ...bars.map(([, x]) => Math.abs(x)));
+  const monthChart = bars.some(([, x]) => x)
+    ? `<div class="pl-bars">${bars
+        .map(([m, x]) => `<div class="pl-col" title="${h(m)} ${h(money(x, BASE, { sign: true }))}"><span class="pl-up">${x > 0 ? `<i class="up-bg" style="height:${(x / maxAbs) * 100}%"></i>` : ''}</span><span class="pl-down">${x < 0 ? `<i class="down-bg" style="height:${(-x / maxAbs) * 100}%"></i>` : ''}</span><small>${h(String(Number(m.slice(5))))}</small></div>`)
+        .join('')}</div>
+      <div class="pl-legend"><span>${h(t('statsThisMonth'))} <strong class="num ${dirClass(bars.at(-1)[1])}">${h(money(bars.at(-1)[1], BASE, { sign: true }))}</strong></span><span>${h(t('statsYear'))} <strong class="num ${dirClass(bars.reduce((a, [, x]) => a + x, 0))}">${h(money(bars.reduce((a, [, x]) => a + x, 0), BASE, { sign: true }))}</strong></span></div>`
+    : `<p class="empty">${h(t('noClosed'))}</p>`;
+  // What trading has cost, all told.
+  const paid = v.paid;
+  const costs = [
+    [t('commission'), paid.commission],
+    [t('tax'), paid.tax],
+    [t('exchangeFee'), paid.fee],
+    [t('fxCost'), paid.fx],
+    [t('loanInterest'), paid.interest],
+    [t('borrowFee'), paid.borrow],
+    [t('withheld'), paid.withheld + paid.nhi],
+    [t('penaltyRow'), paid.penalty]
+  ].filter(([, x]) => x >= 0.5);
+  const costTotal = costs.reduce((a, [, x]) => a + x, 0);
+  const traded = Object.values(s.held).reduce((a, x) => a + x.bought + x.sold, 0);
+  // Who made and lost the most, held and sold together.
+  const contrib = {};
+  for (const c of closed) contrib[c.symbol] = (contrib[c.symbol] || 0) + c.realized;
+  for (const p of v.positions) contrib[p.symbol] = (contrib[p.symbol] || 0) + p.pl;
+  const ranked = Object.entries(contrib).sort((a, b) => b[1] - a[1]);
+  const movers = [...ranked.slice(0, 3), ...ranked.slice(3).slice(-3)].filter(([, x]) => Math.abs(x) >= 1);
   const byMarket = {};
-  for (const c of closed) byMarket[c.market] = (byMarket[c.market] || 0) + c.realized;
-  for (const p of v.positions) byMarket[p.market] = (byMarket[p.market] || 0) + p.pl;
+  for (const [sym, x] of ranked) {
+    const m = v.positions.find(p => p.symbol === sym)?.market || closed.find(c => c.symbol === sym)?.market || 'INTL';
+    byMarket[m] = (byMarket[m] || 0) + x;
+  }
   const marketRows = Object.entries(byMarket).sort((a, b) => b[1] - a[1]);
-  const maxAbs = Math.max(1, ...marketRows.map(([, x]) => Math.abs(x)));
+  const mMax = Math.max(1, ...marketRows.map(([, x]) => Math.abs(x)));
+  const winRate = closed.length ? wins.length / closed.length : 0;
+  const ring = closed.length
+    ? `<div class="win-ring" style="--p:${(winRate * 100).toFixed(1)}"><strong class="num">${h(pct(winRate, { digits: 0, sign: false }))}</strong><small>${h(t('winRate'))}</small></div>`
+    : '';
+  const tradeRow = (label, c) =>
+    c ? `<button class="stat-trade" type="button" data-action="open" data-symbol="${h(c.symbol)}"><span>${h(label)}</span>${symbolBadge(c.symbol)}<strong>${h(nameOf(c.symbol))}</strong><span class="num ${dirClass(c.realized)}">${h(money(c.realized, BASE, { sign: true }))} · ${h(pct(c.pct))}</span></button>` : '';
   return `
-    <div class="card">
-      <h3 class="card-title">${h(t('whereMoney'))}</h3>
-      <div class="kpis">
-        ${kpi(t('putIn'), money(v.deposits, BASE))}
-        ${kpi(t('netWorth'), money(v.netWorth, BASE))}
-        ${kpi(t('totalReturn'), money(v.totalReturn, BASE, { sign: true }), pct(v.totalReturnPct), dirClass(v.totalReturn))}
-        ${kpi(t('realizedPl'), money(v.realized, BASE, { sign: true }), '', dirClass(v.realized))}
-        ${kpi(t('unrealized'), money(v.unrealized, BASE, { sign: true }), '', dirClass(v.unrealized))}
-        ${kpi(t('dividendsNet'), money(v.dividends, BASE))}
+    <div class="card stats-hero">
+      <span class="muted">${h(t('totalReturn'))}</span>
+      <strong class="num stats-big ${dirClass(v.totalReturn)}">${h(money(v.totalReturn, BASE, { sign: true }))}</strong>
+      <span class="num ${dirClass(v.totalReturn)}">${h(pct(v.totalReturnPct))} · ${h(t('statsOn', { v: money(v.deposits, BASE) }))}</span>
+      <div class="stats-split">
+        <div><span>${h(t('realizedPl'))}</span><strong class="num ${dirClass(v.realized)}">${h(money(v.realized, BASE, { sign: true }))}</strong></div>
+        <div><span>${h(t('unrealized'))}</span><strong class="num ${dirClass(v.unrealized)}">${h(money(v.unrealized, BASE, { sign: true }))}</strong></div>
+        <div><span>${h(t('sumIncome'))}</span><strong class="num ${income > 0 ? 'up-ink' : ''}">${h(money(income, BASE))}</strong></div>
       </div>
-      <p class="note">${h(t('plNote'))}</p>
     </div>
-    <div class="two-col">
-      <div class="card">
-        <h3 class="card-title">${h(t('closedTrades'))} <span class="count">${closed.length}</span></h3>
-        ${
-          closed.length
-            ? `<div class="kpis">
-          ${kpi(t('winRate'), pct(wins.length / closed.length, { digits: 0, sign: false }), t('winsOf', { w: wins.length, n: closed.length }))}
+    <div class="card">
+      <h3 class="card-title">${h(t('statsMonthly'))}</h3>
+      ${monthChart}
+    </div>
+    <div class="card">
+      <h3 class="card-title">${h(t('closedTrades'))} <span class="count">${closed.length}</span></h3>
+      ${
+        closed.length
+          ? `<div class="trade-record">${ring}<div class="kpis">
+          ${kpi(t('winsLabel'), t('winsOf', { w: wins.length, n: closed.length }))}
           ${kpi(t('avgReturn'), pct(closed.reduce((sum, c) => sum + c.pct, 0) / closed.length), '', dirClass(closed.reduce((sum, c) => sum + c.pct, 0)))}
           ${kpi(t('avgHeld'), t('days', { n: num(closed.reduce((sum, c) => sum + c.held, 0) / closed.length / 86_400_000, 1) }))}
-        </div>
-        <ul class="facts">
-          ${best ? `<li>${h(t('bestTrade'))}: <button class="link" type="button" data-action="open" data-symbol="${h(best.symbol)}">${h(nameOf(best.symbol))}</button> <strong class="num ${dirClass(best.realized)}">${h(money(best.realized, BASE, { sign: true }))} (${h(pct(best.pct))})</strong></li>` : ''}
-        </ul>`
-            : `<p class="empty">${h(t('noClosed'))}</p>`
-        }
-      </div>
-      <div class="card">
-        <h3 class="card-title">${h(t('byMarket'))}</h3>
-        ${
-          marketRows.length
-            ? `<ul class="bars-list">${marketRows
-                .map(([m, x]) => `<li><span class="bar-label">${(MARKETS[m] || MARKETS.INTL).flag} ${h(marketLabel(m))}</span><span class="bar-track"><span class="bar ${dirClass(x)}" style="width:${(Math.abs(x) / maxAbs) * 100}%"></span></span><strong class="num ${dirClass(x)}">${h(money(x, BASE, { sign: true }))}</strong></li>`)
-                .join('')}</ul><p class="note">${h(t('byMarketNote'))}</p>`
-            : `<p class="empty">${h(t('nothingYet'))}</p>`
-        }
-      </div>
+        </div></div>
+        ${tradeRow(t('bestTrade'), best)}${worst && worst !== best ? tradeRow(t('worstTrade'), worst) : ''}`
+          : `<p class="empty">${h(t('noClosed'))}</p>`
+      }
     </div>
+    ${
+      movers.length
+        ? `<div class="card"><h3 class="card-title">${h(t('statsMovers'))}</h3>${movers
+            .map(([sym, x]) => `<button class="row" type="button" data-action="open" data-symbol="${h(sym)}">${symbolBadge(sym)}<span class="row-main"><span class="row-title">${h(nameOf(sym))}</span><span class="row-sub">${h(bareSymbol(sym))}</span></span><strong class="num ${dirClass(x)}">${h(money(x, BASE, { sign: true }))}</strong></button>`)
+            .join('')}</div>`
+        : ''
+    }
+    ${
+      marketRows.length
+        ? `<div class="card"><h3 class="card-title">${h(t('byMarket'))}</h3><ul class="bars-list">${marketRows
+            .map(([m, x]) => `<li><span class="bar-label">${(MARKETS[m] || MARKETS.INTL).flag} ${h(marketLabel(m))}</span><span class="bar-track"><span class="bar ${dirClass(x)}" style="width:${(Math.abs(x) / mMax) * 100}%"></span></span><strong class="num ${dirClass(x)}">${h(money(x, BASE, { sign: true }))}</strong></li>`)
+            .join('')}</ul></div>`
+        : ''
+    }
+    ${
+      costTotal >= 1
+        ? `<div class="card"><h3 class="card-title">${h(t('statsCosts'))} <span class="count num">${h(money(costTotal, BASE))}</span></h3>
+        ${stackBar(costs.map(([label, x], i) => ({ label, value: x, color: SERIES[i % SERIES.length] })), { format: x => money(x, BASE) })}
+        ${traded > 0 ? `<p class="stats-foot">${h(t('statsCostShare', { pct: pct(costTotal / traded, { digits: 2, sign: false }), v: money(traded, BASE) }))}</p>` : ''}</div>`
+        : ''
+    }
 `;
 }
 
@@ -3444,6 +3619,10 @@ document.addEventListener('click', event => {
       break;
     case 'recall':
       doRecall(el.dataset.id);
+      break;
+    case 'pos-sort':
+      state.posSort = el.dataset.v;
+      renderPortfolio();
       break;
     case 'hview':
       state.historyView = el.dataset.view;

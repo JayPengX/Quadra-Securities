@@ -584,6 +584,30 @@ dialog.q-moved::backdrop {
 .q-frame-aurora { --q-frame: conic-gradient(#22d3ee, #a78bfa, #f472b6, #facc15, #34d399, #22d3ee); box-shadow: 0 0 8px rgba(34, 211, 238, 0.45); }
 .q-frame-legend { --q-frame: conic-gradient(#7c2d12, #f97316, #fde047, #f97316, #7c2d12); box-shadow: 0 0 8px rgba(249, 115, 22, 0.5); }
 .q-frame-mythic { --q-frame: conic-gradient(#facc15, #f472b6, #60a5fa, #a78bfa, #34d399, #facc15); box-shadow: 0 0 10px rgba(250, 204, 21, 0.6); }
+.q-frame-sakura { --q-frame: linear-gradient(135deg, #f9a8d4, #fff1f2, #ec4899); }
+.q-frame-ocean { --q-frame: linear-gradient(135deg, #1e3a8a, #38bdf8, #0e7490); }
+.q-frame-ember { --q-frame: linear-gradient(135deg, #7f1d1d, #f97316, #b91c1c); }
+.q-frame-mint { --q-frame: linear-gradient(135deg, #0f766e, #a7f3d0, #14b8a6); }
+/* For staying a member: jewels at 3 months, then frames that turn. */
+.q-frame-sapphire { --q-frame: linear-gradient(135deg, #1e40af, #93c5fd, #1d4ed8, #dbeafe); box-shadow: 0 0 8px rgba(59, 130, 246, 0.5); }
+.q-frame-ruby { --q-frame: linear-gradient(135deg, #881337, #fda4af, #be123c, #ffe4e6); box-shadow: 0 0 8px rgba(225, 29, 72, 0.5); }
+@property --q-spin {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes q-spin {
+  to {
+    --q-spin: 360deg;
+  }
+}
+.q-frame-prism { --q-frame: conic-gradient(from var(--q-spin), #f43f5e, #f59e0b, #84cc16, #06b6d4, #8b5cf6, #f43f5e); box-shadow: 0 0 9px rgba(139, 92, 246, 0.5); animation: q-spin 6s linear infinite; }
+.q-frame-celestial { --q-frame: conic-gradient(from var(--q-spin), #fef3c7, #fde047, #c4b5fd, #1e1b4b, #93c5fd, #fef3c7); box-shadow: 0 0 12px rgba(253, 224, 71, 0.6), 0 0 3px rgba(196, 181, 253, 0.9); animation: q-spin 9s linear infinite; }
+.q-frame-legend { --q-frame: conic-gradient(from var(--q-spin), #7c2d12, #f97316, #fde047, #f97316, #7c2d12); animation: q-spin 10s linear infinite; }
+.q-frame-mythic { --q-frame: conic-gradient(from var(--q-spin), #facc15, #f472b6, #60a5fa, #a78bfa, #34d399, #facc15); animation: q-spin 8s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  [class*='q-frame-'] { animation: none; }
+}
 .q-account-dot {
   position: absolute;
   right: 1px;

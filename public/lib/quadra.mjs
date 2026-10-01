@@ -164,7 +164,22 @@ export const plusUntil = wallet => [...plusMonths(wallet)].sort().at(-1) ?? null
 // The account button in every app can wear an avatar (the wallet setting
 // `avatar`: { id }) and a frame around it (`frame`: { id }), chosen in
 // Quadra Hub. They're Plus's: shown only while the account is a member, and
-// back as they were if it joins again.
+// back as they were if it joins again. Some are for staying a member:
+// `streak` is how many Taiwan months in a row (this one included) the
+// account must have held Plus. A month missed starts the count again, and a
+// look worn beyond it is hidden until the streak is back.
+// Months held in a row up to `now`'s (0 when not a member now). A yearly
+// plan's months count as they arrive, not all at once.
+export function plusStreak(wallet, now = Date.now()) {
+  const held = plusMonths(wallet);
+  let n = 0;
+  for (let m = plusMonth(now); held.has(m) && n < 1200; n++) {
+    const [y, mo] = m.split('-').map(Number);
+    m = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, '0')}`;
+  }
+  return n;
+}
+export const LOOK_STREAKS = [3, 6, 12];
 export const AVATARS = [
   { id: 'sprout', glyph: '🌱' },
   { id: 'fox', glyph: '🦊' },
@@ -184,10 +199,42 @@ export const AVATARS = [
   { id: 'star', glyph: '✦' },
   { id: 'tiger', glyph: '🐯' },
   { id: 'eagle', glyph: '🦅' },
-  { id: 'trophy', glyph: '🏆' }
+  { id: 'trophy', glyph: '🏆' },
+  { id: 'owl', glyph: '🦉' },
+  { id: 'octopus', glyph: '🐙' },
+  { id: 'whale', glyph: '🐳' },
+  { id: 'butterfly', glyph: '🦋' },
+  { id: 'cactus', glyph: '🌵' },
+  { id: 'sun', glyph: '🌞' },
+  { id: 'ball', glyph: '⚽' },
+  { id: 'chart', glyph: '📈' },
+  // For staying a member.
+  { id: 'wolf', glyph: '🐺', streak: 3 },
+  { id: 'shark', glyph: '🦈', streak: 3 },
+  { id: 'bolt', glyph: '⚡', streak: 3 },
+  { id: 'peacock', glyph: '🦚', streak: 6 },
+  { id: 'planet', glyph: '🪐', streak: 6 },
+  { id: 'drake', glyph: '🐲', streak: 6 },
+  { id: 'comet', glyph: '☄️', streak: 12 },
+  { id: 'galaxy', glyph: '🌌', streak: 12 },
+  { id: 'trident', glyph: '🔱', streak: 12 }
 ];
-export const FRAMES = ['bronze', 'silver', 'jade', 'gold', 'neon', 'aurora', 'legend', 'mythic'].map(id => ({ id }));
-const worn = (wallet, key, list, now) => (plusMember(wallet, now) ? list.find(x => x.id === setting(wallet, key, null)?.id) ?? null : null);
+export const FRAMES = [
+  ...['bronze', 'silver', 'jade', 'gold', 'neon', 'aurora', 'sakura', 'ocean', 'ember', 'mint'].map(id => ({ id })),
+  // For staying a member (the long ones turn).
+  { id: 'sapphire', streak: 3 },
+  { id: 'ruby', streak: 3 },
+  { id: 'legend', streak: 6 },
+  { id: 'prism', streak: 6 },
+  { id: 'mythic', streak: 12 },
+  { id: 'celestial', streak: 12 }
+];
+// Whether this account may wear `item` now: a member, long enough.
+export const lookOpen = (wallet, item, now = Date.now()) => plusMember(wallet, now) && plusStreak(wallet, now) >= (item?.streak || 0);
+const worn = (wallet, key, list, now) => {
+  const item = list.find(x => x.id === setting(wallet, key, null)?.id);
+  return item && lookOpen(wallet, item, now) ? item : null;
+};
 export const avatarOf = (wallet, now = Date.now()) => worn(wallet, 'avatar', AVATARS, now);
 export const frameOf = (wallet, now = Date.now()) => worn(wallet, 'frame', FRAMES, now);
 
@@ -1393,7 +1440,7 @@ export function plusPerks(lang = 'zh') {
     ['stock', en ? `Commission ${pct(1 - PLUS.stock.commission)} off` : `證券手續費 ${Math.round(PLUS.stock.commission * 100) / 10} 折`, en ? 'Every market, every order' : '所有市場、每一筆委託'],
     ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
     ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
-    ['looks', en ? 'Your avatar and frame' : '自訂頭像與頭像框', en ? 'Chosen in Quadra Hub, shown in every app while you’re a member' : '在 Quadra Hub 挑選，會員期間所有 App 都看得到']
+    ['looks', en ? 'Your avatar and frame' : '自訂頭像與頭像框', en ? 'Chosen in Quadra Hub, shown in every app while you’re a member; stay 3, 6 or 12 months in a row for the rarest' : '在 Quadra Hub 挑選，會員期間所有 App 都看得到；連續訂閱 3、6、12 個月解鎖限定款']
   ];
 }
 // What Plus gave back, at face value, from the wallet: the weekly bonus

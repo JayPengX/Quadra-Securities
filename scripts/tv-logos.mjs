@@ -26,8 +26,9 @@ const idOf = x => (x?.logo?.style === 'pair' ? `${x.logo.logoid}|${x.logo.logoid
 // TradingView's icon is older than the company's current logo (checked by
 // eye in October 2026): left out; the app draws its own (OWN_ICONS in app.js).
 // 統一超's is 7-ELEVEN's old sign, Roblox's the 2017 grey tile, McDonald's
-// arches thinner than the real ones, Uber's the 2016 square.
-const STALE = new Set(['2912.TW', 'RBLX', 'MCD', 'UBER']);
+// arches thinner than the real ones, Uber's the 2016 square. FXAIX's search
+// finds abrdn's, not Fidelity's.
+const STALE = new Set(['2912.TW', 'RBLX', 'MCD', 'UBER', 'FXAIX']);
 
 // Taiwan: the screener's every listing, by code (a code is on one exchange only).
 const scan = get('https://scanner.tradingview.com/taiwan/scan', { columns: ['logoid'], range: [0, 10_000] });
@@ -68,7 +69,8 @@ function lookup(symbol, cat) {
     if (m[2] === 'HK') ticker = String(Number(ticker));
     if (m[2] === 'CO' || m[2] === 'L' || m[2] === 'SW') ticker = ticker.replace('-', '_');
     const list = search(ticker, `&exchange=${EXCHANGES[m[2]]}`);
-    return idOf(list.find(x => plain(x.symbol) === ticker.replace('.', '_')) || list.find(x => plain(x.symbol) === ticker) || null);
+    // London writes a two-letter ticker with a dot (Rolls-Royce: RR.).
+    return idOf(list.find(x => plain(x.symbol) === ticker.replace('.', '_')) || list.find(x => plain(x.symbol) === ticker || plain(x.symbol) === `${ticker}.`) || null);
   }
   const ticker = symbol.replace('-', '.');
   const list = search(ticker);
@@ -106,8 +108,17 @@ const OTHERS = {
 ${list(out)}
 };
 // TradingView's Taiwan and Hong Kong flags are blank tiles: flagcdn's instead.
-const OWN_FLAGS = { 'country/TW': 'https://flagcdn.com/tw.svg', 'country/HK': 'https://flagcdn.com/hk.svg' };
-const tvUrl = id => OWN_FLAGS[id] || \`https://s3-symbol-logo.tradingview.com/\${id}.svg\`;
+// Brands that are light in their own colours, which TradingView sets on its
+// dark tile: the same icon on white, kept in the app (logos/).
+const OWN = {
+  'country/TW': 'https://flagcdn.com/tw.svg',
+  'country/HK': 'https://flagcdn.com/hk.svg',
+  starbucks: 'logos/tv-starbucks.svg',
+  'costco-wholesale': 'logos/tv-costco-wholesale.svg',
+  'uni-president': 'logos/tv-uni-president.svg',
+  fubon: 'logos/tv-fubon.svg'
+};
+const tvUrl = id => OWN[id] || \`https://s3-symbol-logo.tradingview.com/\${id}.svg\`;
 // The symbol's icon URLs: one, or two for a pair (base first).
 export function tvLogos(symbol) {
   const id = TAIWAN[symbol.match(/^(\\w+)\\.TWO?$/)?.[1]] || OTHERS[symbol];

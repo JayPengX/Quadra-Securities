@@ -2966,13 +2966,13 @@ const OTHERS = {
   "AZN.L": "astrazeneca",
   "HSBA.L": "hsbc",
   "ULVR.L": "unilever",
+  "RR.L": "rolls-royce",
   "CSPX.L": "ishares",
   "VWRA.L": "vanguard",
   "VFIAX": "vanguard",
   "VTSAX": "vanguard",
   "VTIAX": "vanguard",
   "VBTLX": "vanguard",
-  "FXAIX": "abrdn",
   "VWELX": "vanguard",
   "SHOP.TO": "shopify",
   "RY.TO": "royal-bank-of-canada",
@@ -3011,8 +3011,17 @@ const OTHERS = {
   "^AXJO": "indices/asx-200"
 };
 // TradingView's Taiwan and Hong Kong flags are blank tiles: flagcdn's instead.
-const OWN_FLAGS = { 'country/TW': 'https://flagcdn.com/tw.svg', 'country/HK': 'https://flagcdn.com/hk.svg' };
-const tvUrl = id => OWN_FLAGS[id] || `https://s3-symbol-logo.tradingview.com/${id}.svg`;
+// Brands that are light in their own colours, which TradingView sets on its
+// dark tile: the same icon on white, kept in the app (logos/).
+const OWN = {
+  'country/TW': 'https://flagcdn.com/tw.svg',
+  'country/HK': 'https://flagcdn.com/hk.svg',
+  starbucks: 'logos/tv-starbucks.svg',
+  'costco-wholesale': 'logos/tv-costco-wholesale.svg',
+  'uni-president': 'logos/tv-uni-president.svg',
+  fubon: 'logos/tv-fubon.svg'
+};
+const tvUrl = id => OWN[id] || `https://s3-symbol-logo.tradingview.com/${id}.svg`;
 // The symbol's icon URLs: one, or two for a pair (base first).
 export function tvLogos(symbol) {
   const id = TAIWAN[symbol.match(/^(\w+)\.TWO?$/)?.[1]] || OTHERS[symbol];

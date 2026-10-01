@@ -55,7 +55,7 @@ test('shorts need 150% cover to open, get called and bought back when the price 
   assert.equal(big.error, 'shortMargin');
   assert.ok(big.max > 1500 && big.max < 2100);
   a = placeOrder(a, { side: 'sell', qty: 1900 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' }).account;
-  const up = quote('X.TW', 135, { at: T0 + DAY });
+  const up = quote('X.TW', 160, { at: T0 + DAY });
   const v2 = val(a, T0 + DAY, [['X.TW', up]]);
   assert.equal(v2.margin, 'liquidate');
   assert.deepEqual(liquidationPlan(a, v2).map(p => [p.side, p.qty]), [['buy', 1900]]);

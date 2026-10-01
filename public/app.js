@@ -1,11 +1,11 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, useVouchers, linkOldLoans, feeVoucher, tdVouchers, usedVouchers, depositRate, voucherOff, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, callState, callNeed, payDown, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, useVouchers, linkOldLoans, feeVoucher, tdVouchers, usedVouchers, depositRate, voucherOff, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import { TD_TERMS, TD_MIN, TD_EARLY, tdInterest, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, lendFee, lendable } from './lib/savings.mjs';
 import {
-  BASE, CURRENCIES, MARKETS, METALS, collateralRate, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
+  BASE, CURRENCIES, MARKETS, METALS, collateralRate, MARGIN_CALL, MARGIN_LIQUIDATE, MARGIN_RESTORE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
 } from './lib/markets.mjs';
 import { BONDS } from './lib/bonds.mjs';
 import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs';
@@ -410,24 +410,28 @@ function afterPrices() {
       account = rest;
     }
   }
-  // A margin call (維持率 under 130%): CALL_GRACE to bring it back, then every
-  // holding bought on margin is sold (斷頭). Under 115% it's sold at once
-  // (liquidationPlan, above).
+  // A margin call, Taiwan's way (callState in account.mjs): judged after the
+  // close, two business days to pay it back to 166% (補繳), then what was
+  // bought on margin is sold if the ratio is still under 130% (處分).
   if (!v.missingRates.length && !v.stale.length) {
-    if (v.margin === 'call') {
-      if (!account.call) account = { ...account, call: { since: now } };
-      else if (now - account.call.since >= CALL_GRACE) {
-        account = recallAll(account, now);
-        for (const plan of callPlan(account, v)) {
-          const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
-          if (placed.account) {
-            account = placed.account;
-            accountNotice('margin', t('toastForced', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `called:${plan.symbol}:${now}`, hash: 'fx' });
-          }
+    const c = callState(account.call || null, v, now);
+    if (c.event === 'issued') {
+      accountNotice('margin', t('callIssued', { ratio: `${Math.floor(v.ratio * 100)}%`, v: money(c.call.need, BASE), date: dateTime(c.call.due) }), { tone: 'bad', tag: `call:${now}`, hash: 'fx' });
+    } else if (c.event === 'met') accountNotice('margin', t('callMet'), { tag: `callmet:${now}`, hash: 'fx' });
+    if (c.sell) {
+      account = recallAll(account, now);
+      for (const plan of callPlan(account, v)) {
+        const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
+        if (placed.account) {
+          account = placed.account;
+          accountNotice('margin', t('toastCalledSale', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `called:${plan.symbol}:${now}`, hash: 'fx' });
         }
       }
+    }
+    if (c.call) {
+      if (JSON.stringify(c.call) !== JSON.stringify(account.call)) account = { ...account, call: c.call };
       marginCallNotice(account, v);
-    } else if (account.call && v.margin === 'ok') {
+    } else if (account.call) {
       const { call, ...rest } = account;
       account = rest;
     }
@@ -1895,8 +1899,6 @@ function errorText(r) {
 const overdrawnBy = v => Math.max(0, -(v.cash.find(c => c.currency === BASE)?.amount ?? 0));
 // How long an overdraft can stand before holdings are sold for it (T+2).
 const OD_GRACE = 2 * 86_400_000;
-// How long a margin call can stand before the margin holdings are sold (two days).
-const CALL_GRACE = 2 * 86_400_000;
 function overdraftHtml(v) {
   const owed = overdrawnBy(v);
   if (owed < 1) return '';
@@ -2089,22 +2091,55 @@ function loanWalletRow(l) {
 
 function marginCardHtml(v) {
   if (!(v.owed > 0)) return '';
-  const cls = v.margin === 'ok' ? '' : ' alert';
-  const text = v.margin === 'liquidate' ? t('marginLiquidate') : v.margin === 'call' ? t('marginCall') : t('marginOk');
+  const call = state.account.call;
+  const cls = v.margin === 'ok' && !call ? '' : ' alert';
+  const text = v.margin === 'liquidate' ? t('marginLiquidate') : call || v.margin === 'call' ? '' : t('marginOk');
   return `<div class="card margin-card${cls}">
     <div class="margin-top"><span>${h(t('maintenance'))}</span><strong class="num">${h(pct(v.ratio, { digits: 0, sign: false }))}</strong></div>
     ${gauge(v.ratio)}
-    <p>${h(text)}</p>
-    ${v.margin === 'call' && state.account.call ? `<p class="warn">${h(t('callBy', { date: fmtDate(state.account.call.since + CALL_GRACE) }))}</p>` : ''}
+    ${text ? `<p>${h(text)}</p>` : ''}
+    ${callPanelHtml(v)}
   </div>`;
+}
+
+// A margin call (or a dip under 130% while Taiwan trades): what's owed, by
+// when, and the ways to meet it, as a broker's notice puts them.
+function callPanelHtml(v) {
+  const call = state.account.call;
+  if (!call && v.margin !== 'call') return '';
+  const need = callNeed(v);
+  const avail = available(state.account, snap()).cash;
+  const cashTWD = Object.entries(avail).reduce((sum, [c, x]) => sum + Math.max(0, x) * (state.rates[c] || 0), 0);
+  const pay = Math.min(need, Math.max(0, Math.floor(cashTWD)), Math.ceil(v.debtTWD));
+  const after = v.owed - pay > 0 ? (v.assets - pay) / (v.owed - pay) : Infinity;
+  const financed = v.positions.filter(p => !p.short && p.financed > 0);
+  const lines = [];
+  if (!call) lines.push(`<p>${h(t('callIntraday'))}</p>`);
+  else {
+    lines.push(`<p class="warn">${h(t('callDue', { v: money(need, BASE), date: dateTime(call.due) }))}</p>`);
+    if (v.ratio >= MARGIN_CALL) lines.push(`<p>${h(t(Date.now() >= call.due ? 'callStandsLate' : 'callStands'))}</p>`);
+    else lines.push(`<p>${h(t('callSale'))}</p>`);
+  }
+  const ways = `<ol class="call-ways">
+    <li><strong>${h(t('callWayPay'))}</strong> ${h(t('callWayPaySub'))}</li>
+    <li><strong>${h(t('callWaySell'))}</strong> ${h(t('callWaySellSub'))}</li>
+    <li><strong>${h(t('callWayPledge'))}</strong> ${h(t('callWayPledgeSub'))}</li>
+  </ol>`;
+  const buttons = `<div class="button-row">
+    ${pay >= 1 ? `<button class="primary-button grow" type="button" data-action="call-pay" data-v="${pay}">${h(t('callPay', { v: money(pay, BASE) }))}</button>` : ''}
+    ${financed.length ? `<button class="ghost-button" type="button" data-action="open" data-symbol="${h(financed[0].symbol)}">${h(t('callSellGo', { name: nameOf(financed[0].symbol) }))}</button>` : ''}
+  </div>
+  ${pay >= 1 && pay < need ? `<p class="note">${h(t('callPayShort', { v: money(pay, BASE), ratio: pct(after, { digits: 0, sign: false }) }))}</p>` : ''}
+  ${need >= 1 && pay < 1 ? `<p class="note">${h(t('callNoCash'))}</p>` : ''}`;
+  return `<div class="call-panel">${lines.join('')}${ways}${buttons}</div>`;
 }
 
 function gauge(ratio) {
   const max = 3;
   const x = r => `${Math.min(100, (Math.min(r, max) / max) * 100)}%`;
-  return `<div class="gauge"><span class="gauge-fill ${ratio < MARGIN_LIQUIDATE ? 'bad' : ratio < MARGIN_CALL ? 'warn' : 'ok'}" style="width:${x(ratio)}"></span>
-    <i style="left:${x(MARGIN_LIQUIDATE)}" title="${h(t('liquidateLine'))}"></i><i style="left:${x(MARGIN_CALL)}" title="${h(t('callLine'))}"></i></div>
-    <div class="gauge-scale"><span class="to-left" style="left:${x(MARGIN_LIQUIDATE)}">${h(t('liquidateShort'))} ${pct(MARGIN_LIQUIDATE, { digits: 0, sign: false })}</span><span class="to-right" style="left:${x(MARGIN_CALL)}">${h(t('callShort'))} ${pct(MARGIN_CALL, { digits: 0, sign: false })}</span></div>`;
+  return `<div class="gauge"><span class="gauge-fill ${ratio < MARGIN_CALL ? 'bad' : ratio < MARGIN_RESTORE ? 'warn' : 'ok'}" style="width:${x(ratio)}"></span>
+    <i style="left:${x(MARGIN_CALL)}" title="${h(t('callLine'))}"></i><i style="left:${x(MARGIN_RESTORE)}" title="${h(t('restoreLine'))}"></i></div>
+    <div class="gauge-scale"><span class="to-left" style="left:${x(MARGIN_CALL)}">${h(t('callShort'))} ${pct(MARGIN_CALL, { digits: 0, sign: false })}</span><span class="to-right" style="left:${x(MARGIN_RESTORE)}">${h(t('restoreShort'))} ${pct(MARGIN_RESTORE, { digits: 0, sign: false })}</span></div>`;
 }
 
 function allocationHtml(v) {
@@ -2484,6 +2519,7 @@ function loansHtml() {
         <div><span class="muted">${h(t('interestAccrued'))}</span><strong class="num">${h(money(v.interestTWD || 0, BASE, { digits: (v.interestTWD || 0) < 10 ? 2 : 0 }))}</strong></div>
       </div>
       ${v.debtTWD > 0 ? gauge(v.ratio) : ''}
+      ${v.owed > 0 ? callPanelHtml(v) : ''}
     </div>
     <div class="card loan-card">
       <h3 class="card-title">${h(t('repay'))}</h3>
@@ -2512,6 +2548,18 @@ async function doExchange() {
   render();
 }
 
+
+// 補繳: cash paid against the loans, as much as the call needs (or what there is).
+async function payCall(amount) {
+  if (!state.account || !(amount >= 1) || !pricesLive()) return;
+  if (!(await ask({ lang: locale, icon: '🏦', title: t('callPayAsk', { v: money(amount, BASE) }), body: t('callPayAskBody'), ok: t('callPayOk'), cancel: t('orderAskCancel') }))) return;
+  const r = payDown(state.account, amount, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
+  if (!(r.paid >= 1)) return toast(t('callNoCash'), 'bad');
+  commit(r.account);
+  afterPrices();
+  toast(t('callPaid', { v: money(r.paid, BASE), ratio: pct(valuation().ratio, { digits: 0, sign: false }) }), 'good');
+  render();
+}
 
 function doRepay(all = false) {
   const l = state.loan;
@@ -3370,6 +3418,9 @@ document.addEventListener('click', event => {
       break;
     case 'repay':
       doRepay(false);
+      break;
+    case 'call-pay':
+      payCall(Number(el.dataset.v));
       break;
     case 'repay-all':
       doRepay(true);

@@ -454,8 +454,16 @@ export function collateralRate(kind, market, symbol = '') {
   if (market === 'TW') return /\.TWO$/i.test(symbol) ? 0.5 : 0.6;
   return COLLATERAL[kind];
 }
+// Taiwan's rules for 整戶擔保維持率: under 130% after the close the broker
+// issues a call (追繳); the account has two business days to bring it back
+// to 166% (where a 60% 融資 starts: 1 / 0.6) by paying cash against the
+// loans (補繳), repaying or selling. Back at 166% the call is cancelled; at
+// the deadline, still under 130%, what was bought on margin is sold from the
+// next business day (處分). A broker doesn't sell at once on a ratio; only
+// an account that owes more than it holds (under 100%) is sold straight away.
 export const MARGIN_CALL = 1.3;
-export const MARGIN_LIQUIDATE = 1.15;
+export const MARGIN_RESTORE = 1.66;
+export const MARGIN_LIQUIDATE = 1;
 
 // Open for trading right now? Crypto never closes; everything else follows
 // the session Yahoo reports for it (holidays included).

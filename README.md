@@ -113,7 +113,7 @@ form).
 - **Margin loans** in any currency:
   - Borrowing power is the value of your holdings times a haircut (stocks, ETFs and bonds 60%, funds and gold 50%, crypto 30%).
   - Interest accrues continuously at each currency's rate (NT$ 6.5%, US$ 7.5%, ¥ 3% …).
-  - The maintenance ratio is assets ÷ loans. Below 130% the broker calls. Below 115% it sells your largest holdings, then repays the loans, exchanging other cash if needed.
+  - The maintenance ratio is assets ÷ loans. Under 130% after Taiwan's close the broker calls (追繳): two business days to pay cash against the loans (補繳), repay or sell back to 166%, which cancels it. Still under 130% at the deadline, the margin holdings are sold from the next business day. Only under 100% (owing more than held) does it sell at once.
 
 ### 紀錄 History
 

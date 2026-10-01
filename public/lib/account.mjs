@@ -16,6 +16,7 @@ import {
   CLOSED_FX_MULTIPLIER,
   MARGIN_CALL,
   MARGIN_LIQUIDATE,
+  MARGIN_RESTORE,
   SHORT_FEE,
   SHORT_INITIAL,
   currencyInfo,
@@ -42,7 +43,7 @@ import {
   lotProblem,
   localDayOf
 } from './markets.mjs';
-import { nextTradingStart } from './holidays.mjs';
+import { nextTradingStart, isTradingDay } from './holidays.mjs';
 import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
 
@@ -529,7 +530,7 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     if (defaulted(account, now)) return { error: 'defaulted' };
     const rate = collateralRate(quote.kind, quote.market, quote.symbol);
     if (!(rate > 0)) return { error: 'notMarginable' };
-    if (!valuation || valuation.margin !== 'ok') return { error: 'margin' };
+    if (!valuation || valuation.margin !== 'ok' || account.call) return { error: 'margin' };
     order.margin = rate;
   }
   // How long it lasts: a day order ends with its session (what exchanges
@@ -1096,7 +1097,7 @@ export function borrow(account, { currency, amount }, { valuation, rates, now = 
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 
-export function repay(account, { currency, amount }, { now = Date.now(), id = randomId() } = {}) {
+export function repay(account, { currency, amount, symbol }, { now = Date.now(), id = randomId() } = {}) {
   const s = replay(account, now);
   const loan = s.loans[currency];
   if (!loan || loan.balance <= EPS) return { error: 'noLoan' };
@@ -1108,6 +1109,8 @@ export function repay(account, { currency, amount }, { now = Date.now(), id = ra
   if (!(amount > 0)) return { error: 'amount' };
   if (amount > avail + EPS) return { error: 'funds', need: amount, have: Math.max(0, avail), currency };
   const event = { id: `repay:${id}`, type: 'repay', t: now, currency, amount };
+  // Paid against one holding's 融資 (補繳, 現金償還): that holding's loan goes down.
+  if (symbol) event.symbol = symbol;
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 
@@ -1174,6 +1177,102 @@ export function callPlan(account, valuation) {
     covered += (p.valueTWD * qty) / p.qty;
   }
   return plan;
+}
+
+// ---- 追繳: a margin call, as Taiwan's brokers run it -------------------------------
+//
+// The ratio is judged on closing prices: a dip under 130% while Taiwan is
+// trading calls nothing yet. After the close it's a call (追繳通知), due by
+// the close of the second business day after. Paying cash against the loans
+// (補繳), repaying or selling can meet it; it's cancelled only back at 166%.
+// At the deadline: under 130% still, the margin holdings are sold from the
+// next business day (the orders wait for its open); between 130% and 166%
+// nothing is sold yet, but the call stands, and a later fall under 130% is
+// sold the next business day with no new grace.
+const twTime = (day, hm) => Date.parse(`${day}T${hm}:00+08:00`);
+export const twSession = t => {
+  const day = taipeiDay(t);
+  return isTradingDay('TW', day) && t >= twTime(day, '09:00') && t < twTime(day, '13:30');
+};
+// The last Taiwan close at or before `t`.
+export function lastTwClose(t) {
+  let day = taipeiDay(t);
+  for (let i = 0; i < 40; i++) {
+    if (isTradingDay('TW', day) && twTime(day, '13:30') <= t) return twTime(day, '13:30');
+    day = taipeiDay(twTime(day, '12:00') - 86_400_000);
+  }
+  return t;
+}
+// The deadline of a call issued at `t`: the close of the second business day
+// after the close it was judged on.
+export function callDeadline(t) {
+  let x = lastTwClose(t);
+  for (let n = 0, i = 0; n < 2 && i < 40; i++) {
+    x += 86_400_000;
+    if (isTradingDay('TW', taipeiDay(x))) n++;
+  }
+  return x;
+}
+// NT$ to pay against the loans to bring the ratio back to 166% (補繳金額):
+// paying x takes x off both sides, (assets − x) / (owed − x) = 166%. Only
+// loans can be paid down; a call from shorts beyond that needs buying back.
+export function callNeed(v) {
+  if (!(v.owed > EPS) || v.ratio >= MARGIN_RESTORE) return 0;
+  return Math.max(0, Math.ceil((MARGIN_RESTORE * v.owed - v.assets) / (MARGIN_RESTORE - 1)));
+}
+// Where a call stands at a check: { call (to keep on the account, or null),
+// sell (sell the margin holdings now), event ('issued' | 'met' | 'cleared' |
+// 'intraday' | null) }.
+export function callState(call, v, now = Date.now()) {
+  if (!(v.owed > EPS)) return { call: null, sell: false, event: call ? 'cleared' : null };
+  if (call && v.ratio >= MARGIN_RESTORE) return { call: null, sell: false, event: 'met' };
+  if (!call) {
+    if (v.ratio >= MARGIN_CALL) return { call: null, sell: false, event: null };
+    if (twSession(now)) return { call: null, sell: false, event: 'intraday' };
+    return { call: { since: now, due: callDeadline(now), need: callNeed(v) }, sell: false, event: 'issued' };
+  }
+  const due = call.due ?? callDeadline(call.since);
+  return { call: { ...call, due }, sell: now >= due && v.ratio < MARGIN_CALL, event: null };
+}
+
+// Pays up to `amountTWD` of the loans from the account's own cash (補繳 or
+// 現金償還): NT$ loans first, each against the holdings bought on margin
+// (largest loan first, then any loan not tied to one); a loan in another
+// currency from cash in it, then by exchanging NT$. Returns { account, paid }.
+export function payDown(account, amountTWD, { rates, fxOpen = true, now = Date.now() } = {}) {
+  let next = account;
+  let left = Math.max(0, Number(amountTWD) || 0);
+  let seq = 0;
+  const nextId = () => `pd${now.toString(36)}${(seq++).toString(36)}`;
+  const first = replay(account, now);
+  const currencies = Object.keys(first.loans).filter(c => first.loans[c].balance > EPS && rates?.[c]).sort((a, b) => (a === BASE ? -1 : b === BASE ? 1 : 0));
+  for (const currency of currencies) {
+    const r = rates[currency];
+    for (let round = 0; round < 24 && left >= 0.5; round++) {
+      const s = replay(next, now);
+      const loan = s.loans[currency];
+      if (!loan || loan.balance <= EPS) break;
+      const avail = available(next, s).cash;
+      const own = Math.max(0, avail[currency] || 0);
+      const want = Math.min(loan.balance, left / r);
+      if (own > EPS) {
+        const tied = Object.values(s.positions).filter(p => p.currency === currency && p.financed > EPS).sort((a, b) => b.financed - a.financed)[0];
+        const amount = Math.min(own, want, tied ? tied.financed : Infinity);
+        const x = repay(next, { currency, amount, symbol: tied?.symbol }, { now, id: nextId() });
+        if (x.error) break;
+        next = x.account;
+        left -= x.event.amount * r;
+        continue;
+      }
+      if (currency === BASE) break;
+      const has = Math.max(0, avail[BASE] || 0);
+      if (has <= EPS) break;
+      const fx = exchange(next, { from: BASE, to: currency, amount: Math.min(has, amountFor(BASE, currency, want, rates, fxOpen)) }, { rates, fxOpen, now, id: nextId() });
+      if (fx.error) break;
+      next = fx.account;
+    }
+  }
+  return { account: next, paid: Math.max(0, Number(amountTWD) || 0) - Math.max(0, left) };
 }
 
 export function liquidationPlan(account, valuation) {

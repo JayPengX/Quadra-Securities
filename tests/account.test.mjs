@@ -285,7 +285,7 @@ test('margin call and forced sale when holdings fall; the sale pays the loan bac
   let v = valuate(replay(a, T0), new Map([['2330.TW', quote('2330.TW', 2475)]]), RATES);
   a = borrow(a, { currency: 'TWD', amount: 590_000 }, { valuation: v, rates: RATES, now: T0, id: 'l' }).account;
   a = placeOrder(a, { side: 'buy', qty: 240 }, { quote: quote('2330.TW', 2475), rates: RATES, now: T0, id: 'b2' }).account;
-  const crash = quote('2330.TW', 1000, { at: T0 + DAY });
+  const crash = quote('2330.TW', 900, { at: T0 + DAY });
   v = valuate(replay(a, T0 + DAY), new Map([['2330.TW', crash]]), RATES);
   assert.equal(v.margin, 'liquidate');
   const plan = liquidationPlan(a, v);
@@ -295,10 +295,11 @@ test('margin call and forced sale when holdings fall; the sale pays the loan bac
   assert.equal(sold.fill.forced, true);
   const paid = repayAll(sold.account, RATES, true, T0 + DAY);
   const s = replay(paid, T0 + DAY);
-  assert.equal(s.loans.TWD.balance, 0);
-  assert.ok(s.cash.TWD > 0);
+  // Under 100% the sale can't cover it all: every dollar goes to the loan.
+  assert.ok(s.loans.TWD.balance > 0 && s.loans.TWD.balance < 20_000);
+  assert.ok(Math.abs(s.cash.TWD) < 1);
   // A milder fall only calls.
-  const dip = valuate(replay(a, T0 + DAY), new Map([['2330.TW', quote('2330.TW', 1150)]]), RATES);
+  const dip = valuate(replay(a, T0 + DAY), new Map([['2330.TW', quote('2330.TW', 1000)]]), RATES);
   assert.equal(dip.margin, 'call');
   assert.equal(liquidationPlan(a, dip).length, 0);
 });

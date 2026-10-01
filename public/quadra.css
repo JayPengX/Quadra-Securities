@@ -1990,3 +1990,14 @@ html:not([data-q-keys]) :is(:focus-visible, :focus):not(input, textarea, select)
   color: var(--q-bad);
   background: color-mix(in srgb, var(--q-bad) 10%, transparent);
 }
+
+/* A sheet or detail view open: the page behind it stays still (no scrolling
+   under it, no scroll chaining out of it). */
+html:has(dialog[open]:modal),
+html:has(dialog[open]:modal) body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+dialog {
+  overscroll-behavior: contain;
+}

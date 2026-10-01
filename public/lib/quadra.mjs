@@ -62,7 +62,12 @@ export const ECONOMY = {
   // Rewards' points: a right answer, a word mastered the first time, and a
   // game's minute (about).
   vocab: { perCorrect: 2, perMastered: 15 },
-  gamesPerMinute: 10
+  gamesPerMinute: 10,
+  // A day's points from words and games: the first `full` at the full rate,
+  // the next `full` at half (up to `half`), then `rest` (×Plus and the
+  // streak's rate, so those keep their edge): a long grind isn't the way up.
+  // Missions, weekly goals and the daily challenge aren't counted.
+  dailyXp: { full: 600, half: 1_200, rest: 0.1 }
 };
 
 // ---- Points (XP): Rewards' effort, never money -------------------------------------------
@@ -78,9 +83,11 @@ export const xpSpentOf = e => (e?.app === 'vocab' && e.kind === 'redeem' && Numb
 export const xpEarned = wallet => (wallet?.entries || []).reduce((sum, e) => sum + xpOf(e), 0);
 export const xpSpent = wallet => (wallet?.entries || []).reduce((sum, e) => sum + xpSpentOf(e), 0);
 export const xpBalance = wallet => Math.max(0, Math.round(xpEarned(wallet) - xpSpent(wallet)));
-// Level L starts at 50·L·(L−1) points: 100 for level 2, 1,000 for 5, 4,500
-// for 10, 19,000 for 20, 43,500 for 30. A title every few levels.
-export const xpForLevel = L => 50 * L * (L - 1);
+// Level L starts at 100·(L−1)² points: 100 for level 2, 1,600 for 5, 8,100
+// for 10, 36,100 for 20, 84,100 for 30, 240,100 for 50: about a year of
+// daily play to the top (ECONOMY.dailyXp keeps a grind from shortcutting
+// it). A title every few levels.
+export const xpForLevel = L => 100 * (L - 1) ** 2;
 export const XP_TITLES = [
   [1, '新手', 'Rookie'],
   [5, '學徒', 'Apprentice'],
@@ -93,7 +100,7 @@ export const XP_TITLES = [
 ];
 export function xpLevel(xp, lang = 'zh') {
   const x = Math.max(0, xp || 0);
-  let level = Math.max(1, Math.floor((1 + Math.sqrt(1 + (4 * x) / 50)) / 2));
+  let level = Math.max(1, Math.floor(1 + Math.sqrt(x / 100)));
   while (xpForLevel(level + 1) <= x) level++;
   while (level > 1 && xpForLevel(level) > x) level--;
   const [, zh, en] = [...XP_TITLES].reverse().find(([min]) => level >= min);
@@ -144,13 +151,37 @@ export function avatarOf(wallet, now = Date.now()) {
   const id = setting(wallet, 'avatar', null)?.id;
   return id && avatarOwned(wallet, id, now) ? AVATARS.find(a => a.id === id) : null;
 }
+// Frames: a ring around the account button. Levels bring some, points buy
+// the rest ('vocab:xs:frame:<id>', the Worker's REWARDS_XP.frame); the one
+// worn is the wallet setting `frame` ({ id }).
+export const FRAMES = [
+  { id: 'bronze', level: 10 },
+  { id: 'silver', xp: 2_000 },
+  { id: 'jade', xp: 4_000 },
+  { id: 'gold', xp: 8_000 },
+  { id: 'neon', xp: 15_000 },
+  { id: 'aurora', xp: 30_000 },
+  { id: 'legend', level: 40 },
+  { id: 'mythic', level: 50 }
+];
+export function frameOwned(wallet, id) {
+  const f = FRAMES.find(x => x.id === id);
+  if (!f) return false;
+  if (f.level) return xpLevel(xpEarned(wallet)).level >= f.level;
+  return (wallet?.entries || []).some(e => e.app === 'vocab' && e.id === `vocab:xs:frame:${id}`);
+}
+export function frameOf(wallet) {
+  const id = setting(wallet, 'frame', null)?.id;
+  return id && frameOwned(wallet, id) ? FRAMES.find(f => f.id === id) : null;
+}
 // ---- The streak: days in a row with Rewards' daily missions done ------------------------------
 //
 // From STREAK.from, a day counts when STREAK.missions of that day's daily
 // missions were claimed ('vocab:m:<day>:<id>'), not counting the bonus ones
 // that spend money (STREAK.bonus), or when a protection card covered it
-// ('vocab:fz:<day>'). Before that, any word practice or finished game kept
-// it, and those days still count. Today counts once it's done; until then
+// ('vocab:fz:<day>') or points bought it back ('vocab:xs:repair:<day>').
+// Before that, any word practice or finished game kept it, and those days
+// still count. Today counts once it's done; until then
 // the streak is yesterday's.
 // It raises every point (+STREAK.perDay a day, up to +STREAK.max), and the
 // longest ever unlocks an avatar and a protection card at each milestone.
@@ -172,6 +203,8 @@ export function activeDaySet(wallet) {
     if (e.app !== 'vocab' || typeof e.t !== 'number') continue;
     if (STREAK_KINDS.has(e.kind) && taipeiDay(e.t) < STREAK.from) days.add(taipeiDay(e.t));
     else if (typeof e.id === 'string' && e.id.startsWith('vocab:fz:')) days.add(e.id.slice(9));
+    // A missed day bought back with points (Rewards' streak repair).
+    else if (typeof e.id === 'string' && e.id.startsWith('vocab:xs:repair:')) days.add(e.id.slice(16));
   }
   for (const [day, n] of Object.entries(missionDays(wallet))) if (day >= STREAK.from && n >= STREAK.missions) days.add(day);
   return days;
@@ -1385,7 +1418,11 @@ export function accountButton(s, { extra = null } = {}) {
   // The avatar worn (points bought it or a level unlocked it), else the person.
   const paint = () => {
     const a = avatarOf(s.wallet);
+    const f = frameOf(s.wallet);
     btn.replaceChildren();
+    for (const c of [...btn.classList]) if (c.startsWith('q-frame-')) btn.classList.remove(c);
+    if (f) btn.classList.add('q-framed', `q-frame-${f.id}`);
+    else btn.classList.remove('q-framed');
     if (a) btn.append(node('span', { class: 'q-avatar', 'aria-hidden': 'true', text: a.glyph }));
     else btn.innerHTML = PERSON_SVG;
     btn.append(dot);
@@ -1677,7 +1714,18 @@ export function openPlus(s) {
           }
         }
       });
-    const join = () => s.plus(true, plan);
+    // Joining charges the pass: asked first, with what it costs from here on.
+    const join = async () => {
+      const yearly = plan === 'year';
+      const title = yearly ? T(`年繳 ${money(PLUS.year)} 加入 Plus？`, `Join Plus yearly for ${money(PLUS.year)}?`) : price === 0 ? T('免費試用 Plus？', 'Try Plus free?') : T(`月繳加入 Plus，本月 ${money(price)}？`, `Join Plus monthly, ${money(price)} this month?`);
+      const body = yearly
+        ? T('一次付清，用 12 個月，之後每年自動續約，隨時可以取消。', 'Paid once for 12 months, then renews yearly; cancel any time.')
+        : price === 0
+          ? T(`本月免費；${nextText}起每月 ${money(PLUS.fee)}，隨時可以取消。`, `Free this month; ${money(PLUS.fee)} a month from ${nextText}, cancel any time.`)
+          : T(`${nextText}起每月 ${money(PLUS.fee)} 自動續訂，隨時可以取消。`, `Then ${money(PLUS.fee)} a month from ${nextText}, cancel any time.`);
+      if (!(await ask({ lang: s.lang, icon: '✦', title, body, ok: yearly || price ? T('付款加入', 'Pay and join') : T('開始試用', 'Start trial'), cancel: T('先不要', 'Not now') }))) return;
+      await s.plus(true, plan);
+    };
     const saving = PLUS.fee * 12 - PLUS.year;
     const planPick = node('div', { class: 'q-plus-plans', role: 'radiogroup' }, [
       ['year', T('年繳', 'Yearly'), `${money(PLUS.year)}`, T(`每月只要 ${money(Math.round(PLUS.year / 12))} · 省 ${money(saving)}`, `${money(Math.round(PLUS.year / 12))}/mo · save ${money(saving)}`), T('最划算', 'Best value')],

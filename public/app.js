@@ -1287,10 +1287,12 @@ function addAlert() {
 }
 
 let planAddedAt = 0;
-function addPlan() {
+async function addPlan() {
   const d = state.detail;
   const q = state.quotes.get(d.symbol);
   if (!state.account || Date.now() - planAddedAt < 2000) return;
+  // A purchase every month: asked first.
+  if (!(await ask({ lang: locale, icon: '📅', title: t('planAsk', { name: nameOf(d.symbol, q), amount: money(Number(state.plan.amount) || 0, BASE) }), body: t('planAskBody', { day: state.plan.day }), ok: t('planAskOk'), cancel: t('orderAskCancel') }))) return;
   planAddedAt = Date.now();
   // The keyboard away, so the sheet redraws with the plan in place.
   document.activeElement?.blur?.();
@@ -1720,6 +1722,51 @@ function placeFromTicket() {
   }
   renderDetail();
   render();
+}
+
+// Every order asks first: what it is and about what it costs, all in.
+function confirmOrder() {
+  const d = state.detail;
+  if (!d) return Promise.resolve(false);
+  const { q, est, qty } = ticketInfo();
+  if (!q || !(qty > 0)) return Promise.resolve(false);
+  const total = est ? money(est.total, q.currency) : '';
+  return ask({
+    lang: locale,
+    icon: d.side === 'buy' ? '📈' : '📉',
+    title: t(d.side === 'buy' ? 'orderAskBuy' : 'orderAskSell', { name: nameOf(d.symbol, q) }),
+    body: t(!total ? 'orderAskQty' : d.side === 'buy' ? 'orderAskBody' : 'orderAskBodySell', { qty: fmtQty(qty), total }),
+    ok: t(d.side === 'buy' ? 'placeBuy' : 'placeSell'),
+    cancel: t('orderAskCancel')
+  });
+}
+// Short of the currency: exchanged from NT$ first, then the order.
+function placeWithFx(need) {
+  const d = state.detail;
+  if (!d) return;
+  const cur = state.quotes.get(d.symbol)?.currency;
+  const r = exchange(state.account, { from: BASE, to: cur, amount: need }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
+  if (r.error) {
+    d.msg = { kind: 'bad', text: errorText(r) };
+    return renderTicket();
+  }
+  commit(r.account);
+  toast(t('autoFxDone', { pay: money(r.event.amount, BASE), get: money(r.event.received, r.event.to) }), 'good');
+  placeFromTicket();
+}
+// On margin: the loan first, then the order.
+function placeWithMargin(amount) {
+  const d = state.detail;
+  if (!d) return;
+  const cur = state.quotes.get(d.symbol)?.currency;
+  const r = borrow(state.account, { currency: cur, amount }, { valuation: valuation(), rates: { ...state.rates, [BASE]: 1 }, now: Date.now() });
+  if (r.error) {
+    d.msg = { kind: 'bad', text: errorText(r) };
+    return renderTicket();
+  }
+  commit(r.account);
+  toast(t('marginDone', { v: money(r.event.amount, cur) }), 'good');
+  placeFromTicket();
 }
 
 function errorText(r) {
@@ -2229,9 +2276,12 @@ function loansHtml() {
   </div>`;
 }
 
-function doExchange() {
+async function doExchange() {
   if (!pricesLive()) return;
   const f = state.fx;
+  const amount = fxPayAmount();
+  const quote = amount > 0 ? quoteExchange(f.from, f.to, amount, state.rates, state.fxOpen) : null;
+  if (quote && !(await ask({ lang: locale, icon: '💱', title: t('fxAsk', { from: money(amount, f.from), to: money(quote.received, f.to) }), body: t('fxAskBody'), ok: t('fxAskOk'), cancel: t('orderAskCancel') }))) return;
   const r = exchange(state.account, { from: f.from, to: f.to, amount: fxPayAmount() }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
   if (r.error) return toast(errorText(r), 'bad');
   commit(r.account);
@@ -2240,8 +2290,9 @@ function doExchange() {
   render();
 }
 
-function doBorrow() {
+async function doBorrow() {
   const l = state.loan;
+  if (Number(l.amount) > 0 && !(await ask({ lang: locale, icon: '🏦', title: t('borrowAsk', { amount: money(Number(l.amount), l.currency) }), body: t('borrowAskBody'), ok: t('borrow'), cancel: t('orderAskCancel') }))) return;
   const r = borrow(state.account, { currency: l.currency, amount: Number(l.amount) }, { valuation: valuation(), rates: state.rates, now: Date.now() });
   if (r.error) return toast(errorText(r), 'bad');
   commit(r.account);
@@ -2941,32 +2992,16 @@ document.addEventListener('click', event => {
       renderTicket();
       break;
     case 'place':
-      placeFromTicket();
+      confirmOrder().then(ok => ok && placeFromTicket());
       break;
     case 'place-fx': {
-      const cur = state.quotes.get(d.symbol)?.currency;
-      const r = exchange(state.account, { from: BASE, to: cur, amount: Number(el.dataset.need) }, { rates: state.rates, fxOpen: state.fxOpen, now: Date.now() });
-      if (r.error) {
-        d.msg = { kind: 'bad', text: errorText(r) };
-        renderTicket();
-        break;
-      }
-      commit(r.account);
-      toast(t('autoFxDone', { pay: money(r.event.amount, BASE), get: money(r.event.received, r.event.to) }), 'good');
-      placeFromTicket();
+      const need = Number(el.dataset.need);
+      confirmOrder().then(ok => ok && placeWithFx(need));
       break;
     }
     case 'place-margin': {
-      const cur = state.quotes.get(d.symbol)?.currency;
-      const r = borrow(state.account, { currency: cur, amount: Number(el.dataset.amount) }, { valuation: valuation(), rates: { ...state.rates, [BASE]: 1 }, now: Date.now() });
-      if (r.error) {
-        d.msg = { kind: 'bad', text: errorText(r) };
-        renderTicket();
-        break;
-      }
-      commit(r.account);
-      toast(t('marginDone', { v: money(r.event.amount, cur) }), 'good');
-      placeFromTicket();
+      const amount = Number(el.dataset.amount);
+      confirmOrder().then(ok => ok && placeWithMargin(amount));
       break;
     }
     case 'topup': {

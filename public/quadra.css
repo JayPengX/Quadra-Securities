@@ -502,6 +502,19 @@ dialog.q-moved::backdrop {
   font-size: 20px;
   line-height: 1;
 }
+/* Frames: a ring around the account button (and their previews in Rewards). */
+.q-framed {
+  border: 2.5px solid transparent;
+  background: linear-gradient(var(--q-surface), var(--q-surface)) padding-box, var(--q-frame, var(--q-border)) border-box;
+}
+.q-frame-bronze { --q-frame: linear-gradient(135deg, #8c5523, #e3a76f, #b87333); }
+.q-frame-silver { --q-frame: linear-gradient(135deg, #6b7280, #f3f4f6, #9ca3af); }
+.q-frame-jade { --q-frame: linear-gradient(135deg, #065f46, #6ee7b7, #047857); }
+.q-frame-gold { --q-frame: linear-gradient(135deg, #b45309, #fde68a, #d97706); }
+.q-frame-neon { --q-frame: linear-gradient(135deg, #ec4899, #8b5cf6, #22d3ee); box-shadow: 0 0 8px rgba(139, 92, 246, 0.55); }
+.q-frame-aurora { --q-frame: conic-gradient(#22d3ee, #a78bfa, #f472b6, #facc15, #34d399, #22d3ee); box-shadow: 0 0 8px rgba(34, 211, 238, 0.45); }
+.q-frame-legend { --q-frame: conic-gradient(#7c2d12, #f97316, #fde047, #f97316, #7c2d12); box-shadow: 0 0 8px rgba(249, 115, 22, 0.5); }
+.q-frame-mythic { --q-frame: conic-gradient(#facc15, #f472b6, #60a5fa, #a78bfa, #34d399, #facc15); box-shadow: 0 0 10px rgba(250, 204, 21, 0.6); }
 .q-account-dot {
   position: absolute;
   right: 1px;

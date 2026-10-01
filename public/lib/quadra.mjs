@@ -144,22 +144,36 @@ export function avatarOf(wallet, now = Date.now()) {
   const id = setting(wallet, 'avatar', null)?.id;
   return id && avatarOwned(wallet, id, now) ? AVATARS.find(a => a.id === id) : null;
 }
-// ---- The streak: days in a row with word practice or a game in Rewards ----------------------
+// ---- The streak: days in a row with Rewards' daily missions done ------------------------------
 //
-// A day counts with any word practice or finished game (points or not, flash
-// cards too), or when a protection card covered it ('vocab:fz:<day>').
-// Today counts once something is done; until then the streak is yesterday's.
+// From STREAK.from, a day counts when STREAK.missions of that day's daily
+// missions were claimed ('vocab:m:<day>:<id>'), not counting the bonus ones
+// that spend money (STREAK.bonus), or when a protection card covered it
+// ('vocab:fz:<day>'). Before that, any word practice or finished game kept
+// it, and those days still count. Today counts once it's done; until then
+// the streak is yesterday's.
 // It raises every point (+STREAK.perDay a day, up to +STREAK.max), and the
 // longest ever unlocks an avatar and a protection card at each milestone.
-export const STREAK = { perDay: 0.02, max: 0.3, milestones: [7, 30, 100] };
+export const STREAK = { perDay: 0.02, max: 0.3, milestones: [7, 30, 100], missions: 3, bonus: ['invest', 'parlay3', 'scratch', 'lotto'], from: '2026-10-02' };
 const STREAK_KINDS = new Set(['words', 'reward', 'game']);
+// Daily missions claimed per day (the ones that keep the streak): { day: n }.
+export function missionDays(wallet) {
+  const out = {};
+  for (const e of wallet?.entries || []) {
+    if (e.app !== 'vocab' || typeof e.id !== 'string' || !e.id.startsWith('vocab:m:')) continue;
+    const [, , day, id] = e.id.split(':');
+    if (day && id && !STREAK.bonus.includes(id)) out[day] = (out[day] || 0) + 1;
+  }
+  return out;
+}
 export function activeDaySet(wallet) {
   const days = new Set();
   for (const e of wallet?.entries || []) {
     if (e.app !== 'vocab' || typeof e.t !== 'number') continue;
-    if (STREAK_KINDS.has(e.kind)) days.add(taipeiDay(e.t));
+    if (STREAK_KINDS.has(e.kind) && taipeiDay(e.t) < STREAK.from) days.add(taipeiDay(e.t));
     else if (typeof e.id === 'string' && e.id.startsWith('vocab:fz:')) days.add(e.id.slice(9));
   }
+  for (const [day, n] of Object.entries(missionDays(wallet))) if (day >= STREAK.from && n >= STREAK.missions) days.add(day);
   return days;
 }
 const dayBefore = d => new Date(Date.parse(`${d}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);

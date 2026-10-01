@@ -71,27 +71,32 @@ export const WEALTH_RANKS = [
 // from the account (Plus, overdraft interest, and Play's net when the
 // account is behind there), and the account's own result on top (worth less
 // the first plus the second).
-// An account older than the shared wallet opened with NT$110,000 in the
-// apps' own books (Securities' NT$100,000 deposit, Play's NT$10,000), not as
-// an `eco:start` entry; the reset (`eco:rebase:v3`, −80,000) brought it to
-// the NT$30,000 everyone opens with. Both count as the opening money.
-const OLD_OPENING = 110_000;
+// An account older than the shared wallet opened in the apps' own books:
+// Securities' deposit (NT$100,000, or what it was opened with: it reports
+// it as `snap.stock.opened`) and Play's NT$10,000 (its `odds:start` entry,
+// with its weekly grants). The reset (`eco:rebase:v3`, −80,000) and its fix
+// (`eco:rebase:v3fix`, for an account that had less than 110,000) brought
+// that to the NT$30,000 everyone opens with: all of it is opening money.
 const RESET_ID = 'eco:rebase:v3';
 export function moneySides(wallet) {
   const gave = { start: 0, pay: 0, rank: 0, other: 0 };
   let took = 0;
   let play = 0;
   const entries = wallet?.entries || [];
-  if (entries.some(e => e.id === RESET_ID) && !entries.some(e => e.id === 'eco:start')) gave.start += OLD_OPENING;
+  if (entries.some(e => e.id === RESET_ID) && !entries.some(e => e.id === 'eco:start')) gave.start += finiteOr0(wallet?.snap?.stock?.opened ?? 100_000);
   for (const e of entries) {
     const a = Number(e.amount) || 0;
     if (e.app === 'eco') {
-      if (e.kind === 'start' || e.kind === 'grant' || e.id === RESET_ID) gave.start += a;
+      if (e.kind === 'start' || e.kind === 'grant' || e.id.startsWith(RESET_ID)) gave.start += a;
       else if (e.kind === 'pay') gave.pay += a;
       else if (e.kind === 'rank') gave.rank += a;
       else if (e.kind === 'rebase' || e.kind === 'vip') gave.other += a;
       else if (e.kind === 'plus' || e.kind === 'od') took -= a;
-    } else if (e.app === 'odds') play += a;
+    } else if (e.app === 'odds') {
+      if (e.kind === 'start') gave.start += a;
+      else if (e.kind === 'grant') gave.other += a;
+      else play += a;
+    }
   }
   // Play: what the house kept (its edge, over every bet), or 0 if the account came out ahead.
   if (play < 0) took -= play;
@@ -911,9 +916,11 @@ const KIND = {
   'xfer-out': ['轉出', 'Transfer out'],
   merge: ['合併帶入', 'Carried over']
 };
+// One-off Worker entries named for what they were.
+const NAMED = { 'eco:rebase:v3fix': ['開戶金補足', 'Opening money made up'], 'eco:odback:v3': ['透支利息退還', 'Overdraft interest refunded'] };
 export function describeEntry(e, lang = 'zh') {
   const i = lang === 'en' ? 1 : 0;
-  const what = KIND[e.kind]?.[i] || e.kind;
+  const what = NAMED[e.id]?.[i] || KIND[e.kind]?.[i] || e.kind;
   const from = e.app === 'eco' ? 'Quadra' : APPS[e.app]?.short || e.app;
   const peer = e.peer ? ` ${e.peer}` : '';
   return `${from} · ${what}${peer}${e.note ? ` · ${e.note}` : ''}`;

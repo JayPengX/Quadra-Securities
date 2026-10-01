@@ -3404,7 +3404,10 @@ async function mergeRemote(remote, { pull = false } = {}) {
   const v = state.loaded ? valuate(replay(account), state.quotes, state.rates) : null;
   const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - v.cashTWD) : prev?.holdings;
   const moved = Number.isFinite(holdings) && !(Math.abs((prev?.holdings ?? Infinity) - holdings) < Math.max(1_000, Math.abs(holdings) * 0.02));
-  const snapPatch = prev?.cash === figure && !moved ? undefined : { stock: { cash: figure, ...(Number.isFinite(holdings) ? { holdings } : {}), t: Date.now() } };
+  // The opening money in Securities' own books (an account older than the
+  // shared wallet's; 0 since): the Worker's reset makes up what it took too much of.
+  const opened = account.events.filter(e => e.type === 'deposit' && !e.pool && (e.id === 'deposit:start' || e.start)).reduce((sum, e) => sum + e.amount, 0);
+  const snapPatch = prev?.cash === figure && prev?.opened === opened && !moved ? undefined : { stock: { cash: figure, opened, ...(Number.isFinite(holdings) ? { holdings } : {}), t: Date.now() } };
   const changed = !their || JSON.stringify(account) !== JSON.stringify(their);
   if (account !== state.account) commit(account, { sync: false });
   if (changed || snapPatch || (remote.inbox || []).length) {

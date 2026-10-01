@@ -1165,7 +1165,9 @@ function renderDetail() {
   const starred = watched(state.account).includes(d.symbol);
   const kind = q?.kind || info?.kind;
   const sub = [bareSymbol(d.symbol), q?.exchange, kind ? kindLabel(kind) : ''].filter(Boolean).join(' · ');
-  $('detail-body').innerHTML = `
+  morph(
+    $('detail-body'),
+    `
     <header class="sheet-head">
       ${symbolBadge(d.symbol, q || info)}
       <div class="sheet-title"><h2>${h(nameOf(d.symbol, q))}</h2><p>${flagOf(d.symbol, q)} ${h(sub)}</p></div>
@@ -1191,15 +1193,16 @@ function renderDetail() {
           <button class="chip small" type="button" data-action="chart-ma" aria-pressed="${state.settings.ma}">${h(t('chartMa'))}</button>
         </div>
       </div>
-      <div id="detail-chart" class="chart-box"></div>
+      <div id="detail-chart" class="chart-box" data-own></div>
     </div>
     ${q ? factsHtml(q) : ''}
     ${positionHtml(d.symbol)}
-    ${q ? (isTradable(q.kind) ? '<div id="ticket"></div>' : trackersHtml(d.symbol)) : ''}
+    ${q ? (isTradable(q.kind) ? '<div id="ticket" data-own></div>' : trackersHtml(d.symbol)) : ''}
     ${q ? toolsHtml(d.symbol, q) : ''}
     ${q ? aboutHtml(d.symbol, q) : ''}
     ${ownTradesHtml(d.symbol)}
-  `;
+  `
+  );
   renderChart();
   if (q && isTradable(q.kind)) renderTicket();
 }
@@ -1764,7 +1767,7 @@ function renderTicket() {
   const d = state.detail;
   if (!box || !d) return;
   if (!state.account) {
-    box.innerHTML = `<div class="card ticket"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
+    morph(box, `<div class="card ticket"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`);
     return;
   }
   const { q, est, cash, shares, max, short, topUp, qty, ref, last, shortRoom, req, need, marginBuy, welcome, marginRate, credit, lent, marginOk } = ticketInfo();
@@ -1821,7 +1824,9 @@ function renderTicket() {
   }
   const canPlace = est && !problems.length && !(short > 0) && marginOk;
   const rate = state.rates[q.currency];
-  box.innerHTML = `<div class="card ticket">
+  morph(
+    box,
+    `<div class="card ticket">
     <div class="ticket-top">
       <div class="segmented side-toggle" role="group">
         <button type="button" data-action="side" data-side="buy" class="buy" aria-pressed="${d.side === 'buy'}">${h(t('buy'))}</button>
@@ -1866,7 +1871,8 @@ function renderTicket() {
         : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
     }
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
-  </div>`;
+  </div>`
+  );
 }
 
 function placeFromTicket() {
@@ -2393,7 +2399,7 @@ function renderFx() {
   ]
     .map(([k, label]) => `<button type="button" data-action="fx-view" data-view="${k}" aria-pressed="${view === k}">${h(label)}</button>`)
     .join('')}</div>`;
-  box.innerHTML = `${tabs}${view === 'rates' ? ratesHtml() : view === 'loans' ? loansHtml() : view === 'grow' ? growHtml() : exchangeHtml()}`;
+  morph(box, `${tabs}${view === 'rates' ? ratesHtml() : view === 'loans' ? loansHtml() : view === 'grow' ? growHtml() : exchangeHtml()}`);
 }
 
 function exchangeHtml() {
@@ -2518,7 +2524,7 @@ function growHtml() {
       <div class="card-head"><h3 class="card-title">🏦 ${h(t('tdTitle'))}</h3>${v.savedTWD > 0 ? `<strong class="num">${h(money(v.savedTWD, BASE))}</strong>` : ''}</div>
       <div class="segmented small td-terms" role="group">${TD_TERMS.map(x => `<button type="button" data-action="td-term" data-months="${x.months}" aria-pressed="${x.months === term.months}"><span>${h(t('tdMonths', { n: x.months }))}</span><small class="num">${h(pct(depositRate(x.months, now, bonus), { digits: 2, sign: false }))}</small></button>`).join('')}</div>
       <div class="fx-side">
-        <div class="fx-side-row"><span class="fx-cur">NT$</span><input id="td-amount" class="fx-input num" inputmode="numeric" autocomplete="off" value="${h(d.amount)}" placeholder="${h(String(TD_MIN))}" aria-label="${h(t('amount'))}" /></div>
+        <label class="fx-side-row"><span class="fx-unit">NT$</span><input id="td-amount" class="fx-input num" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${h(amount > 0 ? num(amount) : '')}" placeholder="${h(num(TD_MIN))}" aria-label="${h(t('amount'))}" /></label>
         <div class="fx-side-foot"><span class="muted">${h(t('tdHave', { v: money(free, BASE) }))}</span>${free >= TD_MIN ? `<button class="link" type="button" data-action="td-max">${h(t('tdAll'))}</button>` : ''}</div>
       </div>
       <label class="check-row"><input id="td-renew" type="checkbox" ${d.renew ? 'checked' : ''} /> <span>${h(t('tdRenew'))}</span></label>
@@ -3896,12 +3902,51 @@ function keepCaret(redraw) {
   const pos = active?.selectionStart;
   redraw();
   const again = id && $(id);
-  if (again) {
+  if (again && again !== active) {
     again.focus();
     try {
       again.setSelectionRange(pos, pos);
     } catch {}
   }
+}
+
+// A redraw that changes only what's different: the field being typed in
+// stays the same element (a phone keeps its keyboard and caret), a logo
+// stays loaded. An element marked data-own is drawn by its own code.
+function morph(box, html) {
+  const next = document.createElement(box.tagName);
+  next.innerHTML = html;
+  patchChildren(box, next);
+}
+function patchChildren(from, to) {
+  const olds = [...from.childNodes];
+  const news = [...to.childNodes];
+  news.forEach((n, i) => {
+    const o = olds[i];
+    if (!o) from.appendChild(n);
+    else if (o.nodeType !== n.nodeType || o.nodeName !== n.nodeName) o.replaceWith(n);
+    else if (o.nodeType === Node.ELEMENT_NODE) patchElement(o, n);
+    else if (o.nodeValue !== n.nodeValue) o.nodeValue = n.nodeValue;
+  });
+  for (const o of olds.slice(news.length)) o.remove();
+}
+function patchElement(o, n) {
+  for (const { name } of [...o.attributes]) if (!n.hasAttribute(name)) o.removeAttribute(name);
+  for (const { name, value } of [...n.attributes]) if (o.getAttribute(name) !== value) o.setAttribute(name, value);
+  if (o instanceof HTMLInputElement) {
+    const value = n.getAttribute('value') ?? '';
+    // A field being typed in differs only where the redraw cleaned what was
+    // typed (a letter in a number): the caret stays by what's left.
+    if (o.value !== value) {
+      const typing = o === document.activeElement && o.type !== 'checkbox';
+      const caret = typing ? o.selectionStart - (o.value.length - value.length) : null;
+      o.value = value;
+      if (typing) o.setSelectionRange(Math.max(0, caret), Math.max(0, caret));
+    }
+    o.checked = n.hasAttribute('checked');
+  }
+  if (!o.hasAttribute('data-own')) patchChildren(o, n);
+  if (o instanceof HTMLSelectElement) o.value = n.querySelector('option[selected]')?.value ?? o.value;
 }
 const cleanNumber = value => value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1');
 

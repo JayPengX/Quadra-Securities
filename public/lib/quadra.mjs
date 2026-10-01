@@ -1546,7 +1546,7 @@ function detailsCard(s) {
       node('div', {}, [node('small', { text: T('Quadra 等級', 'Quadra level') }), node('strong', { text: `${avatarOf(s.wallet)?.glyph || ''} Lv ${lv.level} · ${lv.title}`.trim() })]),
       node('div', {}, [node('small', { text: T('可用積分', 'Points to spend') }), node('strong', { class: 'num', text: xpNum(xpBalance(s.wallet)) })])
     ]),
-    overdraft(s.wallet) > 0 ? node('p', { class: 'q-overdraft', text: T(`帳戶透支 ${money(overdraft(s.wallet))}：每月計息 1%，2 天內沒補足，Quadra Securities 會賣出持股補足。`, `Overdrawn by ${money(overdraft(s.wallet))}: 1% a month, and if it isn't covered within 2 days Quadra Securities sells holdings for it.`) }) : null,
+    overdraft(s.wallet) > 0 ? node('p', { class: 'q-overdraft', text: T(`帳戶透支 ${money(overdraft(s.wallet))}：每月計息 1%。2 天內沒補足就是違約交割：扣 7% 違約金、賣出持股，5 年內不能融資。`, `Overdrawn by ${money(overdraft(s.wallet))}: 1% a month. Not covered within 2 days, it's a default: a 7% penalty, holdings sold, and no margin for 5 years.`) }) : null,
     node('p', { class: 'q-payday', text: paydayText(s.lang, Date.now(), s.wallet) }),
     d.recent.length
       ? node('details', { class: 'q-recent' }, [

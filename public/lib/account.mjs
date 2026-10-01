@@ -149,7 +149,7 @@ export function replay(account, now = Date.now()) {
     loans: {},
     deposits: 0,
     // In NT$ at each event's own rate.
-    paid: { commission: 0, tax: 0, fee: 0, fx: 0, withheld: 0, nhi: 0, borrow: 0 },
+    paid: { commission: 0, tax: 0, fee: 0, fx: 0, withheld: 0, nhi: 0, borrow: 0, penalty: 0 },
     dividends: 0,
     // Bank interest on NT$ cash: accrued so far, and paid out (net).
     cashInterest: 0,
@@ -166,6 +166,11 @@ export function replay(account, now = Date.now()) {
     if (e.t > now) break;
     accrue(s, e.t);
     switch (e.type) {
+      // 違約金: charged on a default (an overdraft sold for).
+      case 'penalty':
+        add(s.cash, e.currency, -e.amount);
+        s.paid.penalty += e.amount * (e.twd || 1);
+        break;
       case 'deposit':
         add(s.cash, e.currency, e.amount);
         s.deposits += e.amount * (e.twd || 1);
@@ -451,6 +456,7 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   // made when it fills (fillOrder), never as cash beforehand.
   if (req.margin) {
     if (side !== 'buy') return { error: 'side' };
+    if (defaulted(account, now)) return { error: 'defaulted' };
     const rate = collateralRate(quote.kind, quote.market, quote.symbol);
     if (!(rate > 0)) return { error: 'notMarginable' };
     if (!valuation || valuation.margin !== 'ok') return { error: 'margin' };
@@ -475,6 +481,7 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
         const room = Math.max(0, (valuation.assets - SHORT_INITIAL * (valuation.debtTWD + valuation.shortTWD)) / (SHORT_INITIAL - 1));
         return { error: 'shortMargin', max: roundQty(have + room / (quote.price * rates[quote.currency]), quote.kind) };
       }
+      if (defaulted(account, now)) return { error: 'defaulted' };
       order.short = true;
     }
   } else {
@@ -904,6 +911,32 @@ export function repayAll(account, rates, fxOpen, now = Date.now()) {
 // Below the liquidation ratio, the broker sells: the largest holdings first,
 // until what's sold covers the debt. Returns the orders to place (none while
 // earlier forced sales are still open).
+// A default (an overdraft the account let run past its deadline, sold for)
+// is on its record: DEFAULT_PENALTY of what was owed is charged (違約金, the
+// most Taiwan's rules allow), and for DEFAULT_BAN no 融資 and no short
+// selling (a broker's credit account goes with a default).
+export const DEFAULT_PENALTY = 0.07;
+export const DEFAULT_BAN = 5 * 365 * 86_400_000;
+export const defaulted = (account, now = Date.now()) => Boolean(account?.defaultAt) && now - account.defaultAt < DEFAULT_BAN;
+export const penaltyEvent = (owedTWD, now = Date.now()) => ({ id: `penalty:${now}`, type: 'penalty', t: now, currency: BASE, amount: Math.ceil(owedTWD * DEFAULT_PENALTY - 1e-6) });
+
+// A margin call not met by its deadline (斷頭): every short bought back and
+// every holding bought on margin sold whole; with loans from before 融資 was
+// tied to purchases, holdings largest first until the loans are covered.
+export function callPlan(account, valuation) {
+  if (account.orders.some(o => o.status === 'open' && o.forced)) return [];
+  const plan = valuation.positions.filter(p => p.short).map(p => ({ symbol: p.symbol, side: 'buy', type: 'market', qty: -p.qty, forced: true }));
+  const financed = valuation.positions.filter(p => !p.short && p.financed > 0);
+  for (const p of financed) plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true });
+  let covered = valuation.cashTWD - valuation.shortTWD + financed.reduce((sum, p) => sum + p.valueTWD, 0);
+  for (const p of valuation.positions.filter(x => !x.short && !(x.financed > 0))) {
+    if (covered >= valuation.debtTWD * 1.02) break;
+    plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true });
+    covered += p.valueTWD;
+  }
+  return plan;
+}
+
 export function liquidationPlan(account, valuation) {
   if (valuation.margin !== 'liquidate') return [];
   if (account.orders.some(o => o.status === 'open' && o.forced)) return [];

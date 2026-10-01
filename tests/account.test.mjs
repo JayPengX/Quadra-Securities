@@ -113,6 +113,25 @@ test('an overdraft collected by a sale: a cover order is forced and marked as su
   assert.equal(r.fill.forced, true);
 });
 
+test('a default: 7% penalty, and no margin or shorting for 5 years; a missed margin call sells what was bought on margin', async () => {
+  const { penaltyEvent, defaulted, callPlan, DEFAULT_BAN } = await import('../public/lib/account.mjs');
+  let a = newAccount(1_000_000, T0, 'acc');
+  const q = quote('2330.TW', 2475);
+  const fine = penaltyEvent(10_000, T0);
+  assert.equal(fine.amount, 700);
+  a = { ...a, events: [...a.events, fine], defaultAt: T0 };
+  assert.equal(replay(a, T0).cash.TWD, 1_000_000 - 700);
+  assert.ok(defaulted(a, T0 + DEFAULT_BAN - 1) && !defaulted(a, T0 + DEFAULT_BAN));
+  const v = valuate(replay(a, T0), new Map([['2330.TW', q]]), RATES);
+  assert.equal(placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100, margin: true }, { quote: q, rates: RATES, valuation: v, now: T0, id: 'd1' }).error, 'defaulted');
+  // 斷頭: a holding bought on margin is sold whole.
+  let b = newAccount(1_000_000, T0, 'acc2');
+  const vb = valuate(replay(b, T0), new Map([['2330.TW', q]]), RATES);
+  b = placeOrder(b, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: vb, now: T0, id: 'm1' }).account;
+  const plan = callPlan(b, valuate(replay(b, T0), new Map([['2330.TW', q]]), RATES));
+  assert.deepEqual(plan.map(p => [p.symbol, p.side, p.qty, p.forced]), [['2330.TW', 'sell', 1000, true]]);
+});
+
 test('the welcome offer: an account marked by the app pays no commission on its first trade, only then', async () => {
   const { withWelcome, firstTrade } = await import('../public/lib/account.mjs');
   const a = withWelcome(newAccount(1_000_000, T0, 'acc'));

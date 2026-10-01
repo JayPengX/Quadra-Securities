@@ -1,7 +1,7 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, penaltyEvent, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, collateralRate, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
@@ -378,7 +378,11 @@ function afterPrices() {
         account = { ...account, od: { since: now } };
         accountNotice('margin', t('odWarn', { v: money(owed, BASE), date: fmtDate(now + OD_GRACE) }), { tone: 'bad', tag: `od:${now}`, hash: 'portfolio' });
       } else if (now - account.od.since >= OD_GRACE && !account.orders.some(o => o.status === 'open' && o.cover)) {
-        for (const x of coverPlan(v, owed).plan) {
+        // A default: 違約金 on what's owed (it's sold for too), on the record.
+        const fine = penaltyEvent(owed, now);
+        account = { ...account, events: [...account.events, fine], defaultAt: now };
+        accountNotice('margin', t('odDefault', { v: money(fine.amount, BASE) }), { tone: 'bad', tag: `default:${now}`, hash: 'portfolio' });
+        for (const x of coverPlan(v, owed + fine.amount).plan) {
           const placed = placeOrder(account, { symbol: x.symbol, side: 'sell', type: 'market', qty: x.qty, forced: true, cover: true }, { quote: state.quotes.get(x.symbol), rates: state.rates, valuation: v, now });
           if (placed.account) {
             account = placed.account;
@@ -391,7 +395,27 @@ function afterPrices() {
       account = rest;
     }
   }
-  if (v.margin === 'call' && !v.missingRates.length && !v.stale.length) marginCallNotice(account, v);
+  // A margin call (維持率 under 130%): CALL_GRACE to bring it back, then every
+  // holding bought on margin is sold (斷頭). Under 115% it's sold at once
+  // (liquidationPlan, above).
+  if (!v.missingRates.length && !v.stale.length) {
+    if (v.margin === 'call') {
+      if (!account.call) account = { ...account, call: { since: now } };
+      else if (now - account.call.since >= CALL_GRACE) {
+        for (const plan of callPlan(account, v)) {
+          const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
+          if (placed.account) {
+            account = placed.account;
+            accountNotice('margin', t('toastForced', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `called:${plan.symbol}:${now}`, hash: 'fx' });
+          }
+        }
+      }
+      marginCallNotice(account, v);
+    } else if (account.call && v.margin === 'ok') {
+      const { call, ...rest } = account;
+      account = rest;
+    }
+  }
   if (!v.missingRates.length && !v.stale.length) account = recordSnapshot(account, now, v.netWorth, v.deposits);
   const alerts = checkAlerts(account, state.quotes, now);
   account = alerts.account;
@@ -1579,7 +1603,8 @@ function ticketInfo() {
   const spendable = cash + fromTwd;
   // 融資: a buy of what the broker lends against, lent its share as it fills
   // (only one's own part is needed now).
-  const marginRate = d.side === 'buy' ? collateralRate(q.kind, q.market, q.symbol) : 0;
+  // (Not after a default: no 融資 then, DEFAULT_BAN long.)
+  const marginRate = d.side === 'buy' && !defaulted(state.account) ? collateralRate(q.kind, q.market, q.symbol) : 0;
   const credit = Boolean(d.credit) && marginRate > 0;
   // (Held for a fresh price, as every order from the ticket is.)
   const holdFor = n => requiredCash({ type: d.type, qty: n, limit: Number(d.limit), stop: Number(d.stop), waitFresh: 1, margin: credit ? marginRate : 0 }, q, Date.now()).reserve;
@@ -1835,6 +1860,8 @@ function errorText(r) {
 const overdrawnBy = v => Math.max(0, -(v.cash.find(c => c.currency === BASE)?.amount ?? 0));
 // How long an overdraft can stand before holdings are sold for it (T+2).
 const OD_GRACE = 2 * 86_400_000;
+// How long a margin call can stand before the margin holdings are sold (two days).
+const CALL_GRACE = 2 * 86_400_000;
 function overdraftHtml(v) {
   const owed = overdrawnBy(v);
   if (owed < 1) return '';
@@ -2032,6 +2059,7 @@ function marginCardHtml(v) {
     <div class="margin-top"><span>${h(t('maintenance'))}</span><strong class="num">${h(pct(v.ratio, { digits: 0, sign: false }))}</strong></div>
     ${gauge(v.ratio)}
     <p>${h(text)}</p>
+    ${v.margin === 'call' && state.account.call ? `<p class="warn">${h(t('callBy', { date: fmtDate(state.account.call.since + CALL_GRACE) }))}</p>` : ''}
   </div>`;
 }
 
@@ -2378,6 +2406,12 @@ function activityRow(e) {
       icon = e.pool ? `<span class="side-tag div">${appIcon(e.app)}</span>` : e.game ? '<span class="side-tag div">🎮</span>' : icon;
       sub = e.pool ? t('poolDepositSub') : '';
       amount = `<strong class="num ${e.amount < 0 ? 'down-ink' : ''}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, e.currency))}</strong>`;
+      break;
+    case 'penalty':
+      icon = '<span class="side-tag loan">⚠️</span>';
+      title = t('penaltyRow');
+      sub = t('penaltySub');
+      amount = `<strong class="num down-ink">−${h(money(e.amount, e.currency))}</strong>`;
       break;
     case 'borrow':
       icon = '<span class="side-tag loan">🏦</span>';

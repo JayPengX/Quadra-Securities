@@ -1689,7 +1689,7 @@ function renderTicket() {
         ? `<button class="primary-button place ${d.side}" type="button" data-action="place-fx" data-need="${topUp.need}" ${pricesLive() ? '' : 'disabled'}>${h(t('autoFx'))}</button>`
         : marginBuy && est && !problems.length
         ? `<button class="primary-button place ${d.side}" type="button" data-action="place-margin" data-amount="${marginBuy.amount}" ${pricesLive() ? '' : 'disabled'}>${h(t('marginBuy'))}</button>`
-        : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() ? '' : 'disabled'}>${h(d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
+        : `<button class="primary-button place ${d.side}" type="button" data-action="place" ${canPlace && pricesLive() && !d.busy ? '' : 'disabled'}>${h(d.busy ? t('checkingPrice') : d.side === 'buy' ? t('placeBuy') : t('placeSell'))}</button>`
     }
     ${d.msg ? `<p class="${d.msg.kind === 'bad' ? 'warn' : 'ok-msg'}">${h(d.msg.text)}</p>` : ''}
   </div>`;
@@ -1724,8 +1724,41 @@ function placeFromTicket() {
   render();
 }
 
+// Every order goes through at the price now: the quote is read again first
+// (and waited for), never the figure the screen showed a while ago. If it
+// moved more than PRICE_MOVED since the person said yes, they're asked again
+// at the new one; no fresh price, no order.
+const PRICE_MOVED = 0.01;
+async function atFreshPrice(place) {
+  const d = state.detail;
+  if (!d || d.busy) return;
+  const before = state.quotes.get(d.symbol)?.price;
+  d.busy = true;
+  d.msg = { kind: '', text: t('checkingPrice') };
+  renderTicket();
+  let ok = false;
+  try {
+    const got = await Promise.race([fetchQuotes([d.symbol]), new Promise((_, no) => setTimeout(() => no(new Error('slow')), 15_000))]);
+    ok = got.has(d.symbol) && got.get(d.symbol).price > 0;
+    absorb(got);
+  } catch {}
+  d.busy = false;
+  if (state.detail !== d) return;
+  if (!ok) {
+    d.msg = { kind: 'bad', text: t('priceUnavailable') };
+    return renderTicket();
+  }
+  d.msg = null;
+  const now = state.quotes.get(d.symbol).price;
+  if (before > 0 && Math.abs(now / before - 1) > PRICE_MOVED && d.type !== 'limit') {
+    renderTicket();
+    if (!(await confirmOrder(t('priceMoved', { from: fmtPrice(before, state.quotes.get(d.symbol).currency), to: fmtPrice(now, state.quotes.get(d.symbol).currency) })))) return;
+  }
+  place();
+}
+
 // Every order asks first: what it is and about what it costs, all in.
-function confirmOrder() {
+function confirmOrder(note = '') {
   const d = state.detail;
   if (!d) return Promise.resolve(false);
   const { q, est, qty } = ticketInfo();
@@ -1735,7 +1768,7 @@ function confirmOrder() {
     lang: locale,
     icon: d.side === 'buy' ? '📈' : '📉',
     title: t(d.side === 'buy' ? 'orderAskBuy' : 'orderAskSell', { name: nameOf(d.symbol, q) }),
-    body: t(!total ? 'orderAskQty' : d.side === 'buy' ? 'orderAskBody' : 'orderAskBodySell', { qty: fmtQty(qty), total }),
+    body: [note, t(!total ? 'orderAskQty' : d.side === 'buy' ? 'orderAskBody' : 'orderAskBodySell', { qty: fmtQty(qty), total })].filter(Boolean).join(' '),
     ok: t(d.side === 'buy' ? 'placeBuy' : 'placeSell'),
     cancel: t('orderAskCancel')
   });
@@ -2005,7 +2038,7 @@ function gauge(ratio) {
   const x = r => `${Math.min(100, (Math.min(r, max) / max) * 100)}%`;
   return `<div class="gauge"><span class="gauge-fill ${ratio < MARGIN_LIQUIDATE ? 'bad' : ratio < MARGIN_CALL ? 'warn' : 'ok'}" style="width:${x(ratio)}"></span>
     <i style="left:${x(MARGIN_LIQUIDATE)}" title="${h(t('liquidateLine'))}"></i><i style="left:${x(MARGIN_CALL)}" title="${h(t('callLine'))}"></i></div>
-    <div class="gauge-scale"><span style="left:${x(MARGIN_LIQUIDATE)}">${pct(MARGIN_LIQUIDATE, { digits: 0, sign: false })}</span><span style="left:${x(MARGIN_CALL)}">${pct(MARGIN_CALL, { digits: 0, sign: false })}</span></div>`;
+    <div class="gauge-scale"><span class="to-left" style="left:${x(MARGIN_LIQUIDATE)}">${h(t('liquidateShort'))} ${pct(MARGIN_LIQUIDATE, { digits: 0, sign: false })}</span><span class="to-right" style="left:${x(MARGIN_CALL)}">${h(t('callShort'))} ${pct(MARGIN_CALL, { digits: 0, sign: false })}</span></div>`;
 }
 
 function allocationHtml(v) {
@@ -2992,16 +3025,16 @@ document.addEventListener('click', event => {
       renderTicket();
       break;
     case 'place':
-      confirmOrder().then(ok => ok && placeFromTicket());
+      confirmOrder().then(ok => ok && atFreshPrice(placeFromTicket));
       break;
     case 'place-fx': {
       const need = Number(el.dataset.need);
-      confirmOrder().then(ok => ok && placeWithFx(need));
+      confirmOrder().then(ok => ok && atFreshPrice(() => placeWithFx(need)));
       break;
     }
     case 'place-margin': {
       const amount = Number(el.dataset.amount);
-      confirmOrder().then(ok => ok && placeWithMargin(amount));
+      confirmOrder().then(ok => ok && atFreshPrice(() => placeWithMargin(amount)));
       break;
     }
     case 'topup': {

@@ -3395,8 +3395,14 @@ async function mergeRemote(remote, { pull = false } = {}) {
   // Securities' own to watch: margin calls, interest). Before, every loan
   // came off this figure too, so it was counted twice and an account with
   // 融資 showed the whole loan as an overdraft.
+  //
+  // Below zero when Securities has spent money from the pool (a fill, an
+  // exchange) or holds it for an open order (掛單): that's taken off the pool,
+  // so Play can't spend it again. (Floored at 0 before, the pool never saw
+  // what Securities spent or held, the same money went twice, and the
+  // account ran into overdraft when the order filled.)
   const sAll = replay(account);
-  const figure = Math.max(0, Math.round(ownCash(account, sAll) * 100) / 100);
+  const figure = Math.round(ownCash(account, sAll) * 100) / 100;
   // What the holdings are worth (less loans and shorts), for the account's
   // worth across apps: sent once prices are in, again when it moves 2% (or
   // NT$1,000).

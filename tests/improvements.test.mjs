@@ -357,3 +357,20 @@ test('a plan a symbol: starting again changes it, repeated taps leave one', () =
   assert.deepEqual(activePlans(once).map(p => p.id).sort(), ['x1', Object.keys(a.plans)[0]].sort());
   assert.equal(dedupePlans(once), once);
 });
+
+test('what Securities holds for a 掛單 or has spent comes off the pool: its own part goes below zero', async () => {
+  const { newAccount, applyPool, placeOrder, ownCash, replay, available } = await import('../public/lib/account.mjs');
+  const now = Date.parse('2026-10-03T10:00:00+08:00'); // a Saturday: the order waits for Monday
+  // Money only from the pool (an account opened after the shared wallet).
+  const wallet = { entries: [{ id: 'eco:start', app: 'eco', kind: 'start', t: now - 3_600_000, amount: 30_000 }] };
+  let a = applyPool(newAccount(0, now - 3_600_000, 'p'), wallet).account;
+  assert.equal(ownCash(a, replay(a, now), now), 0);
+  const q = { symbol: '0050.TW', name: '0050', kind: 'etf', market: 'TW', currency: 'TWD', price: 100, prev: 100, session: { start: now - 2 * 86_400_000, end: now - 2 * 86_400_000 + 3_600_000 }, marketTime: now - 2 * 86_400_000 };
+  const r = placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 100 }, { quote: q, rates: { TWD: 1 }, now, id: 'o' });
+  assert.equal(r.order.status, 'open');
+  a = r.account;
+  const held = 30_000 - available(a, replay(a, now)).cash.TWD;
+  assert.ok(held > 10_000, `${held}`);
+  // The pool sees it: 30,000 in, its part −held, so 30,000 − held left for Play.
+  assert.equal(ownCash(a, replay(a, now), now), -Math.round(held * 100) / 100);
+});

@@ -1232,7 +1232,8 @@ function alertCardHtml(symbol, q) {
 
 function planCardHtml(symbol, q) {
   const plan = activePlans(state.account).find(p => p.symbol === symbol);
-  if (plan) {
+  const editing = plan && state.planEdit === plan.id;
+  if (plan && !editing) {
     const next = nextPlanRun(plan);
     return fold(
       '📅',
@@ -1240,7 +1241,7 @@ function planCardHtml(symbol, q) {
       `<p>${h(t('planActive', { amount: money(plan.amount, BASE), day: plan.day }))}</p>
       <p class="muted">${h(t('planNext', { date: next ? fmtDate(next) : '—' }))}</p>
       ${planHistoryHtml(plan)}
-      <div class="button-row"><button class="ghost-button danger" type="button" data-action="plan-off" data-id="${h(plan.id)}">${h(t('planStop'))}</button></div>`,
+      <div class="button-row"><button class="ghost-button" type="button" data-action="plan-edit" data-id="${h(plan.id)}">${h(t('planEdit'))}</button><button class="ghost-button danger" type="button" data-action="plan-off" data-id="${h(plan.id)}">${h(t('planStop'))}</button></div>`,
       true,
       'tool:plan'
     );
@@ -1258,9 +1259,10 @@ function planCardHtml(symbol, q) {
     </div>
     ${perUnit > 0 && amount > 0 ? `<p class="muted">${h(t('planBuys', { units: num(units, units < 10 ? 2 : 0), unit: unitOf(symbol) }))}${q.currency !== BASE ? ` · ${h(t('planFx', { cur: q.currency }))}` : ''}</p>` : ''}
     ${state.account ? '' : `<p class="note">${h(t('needAccount'))}</p>`}
-    <button class="primary-button" type="button" data-action="plan-add" ${amount >= PLAN_MIN && state.account ? '' : 'disabled'}>${h(t('planStart'))}</button>
+    <button class="primary-button" type="button" data-action="plan-add" ${amount >= PLAN_MIN && state.account ? '' : 'disabled'}>${h(t(editing ? 'planSave' : 'planStart'))}</button>
+    ${editing ? `<button class="ghost-button" type="button" data-action="plan-edit-cancel">${h(t('orderAskCancel'))}</button>` : ''}
     <p class="note">${h(t('planNote', { min: money(PLAN_MIN, BASE) }))}</p>`,
-    false,
+    Boolean(editing),
     'tool:plan'
   );
 }
@@ -1292,7 +1294,8 @@ async function addPlan() {
   const q = state.quotes.get(d.symbol);
   if (!state.account || Date.now() - planAddedAt < 2000) return;
   // A purchase every month: asked first.
-  if (!(await ask({ lang: locale, icon: '📅', title: t('planAsk', { name: nameOf(d.symbol, q), amount: money(Number(state.plan.amount) || 0, BASE) }), body: t('planAskBody', { day: state.plan.day }), ok: t('planAskOk'), cancel: t('orderAskCancel') }))) return;
+  const editing = Boolean(state.planEdit) && state.account.plans?.[state.planEdit]?.symbol === d.symbol;
+  if (!(await ask({ lang: locale, icon: '📅', title: t(editing ? 'planEditAsk' : 'planAsk', { name: nameOf(d.symbol, q), amount: money(Number(state.plan.amount) || 0, BASE) }), body: t('planAskBody', { day: state.plan.day }), ok: t(editing ? 'planSave' : 'planAskOk'), cancel: t('orderAskCancel') }))) return;
   planAddedAt = Date.now();
   // The keyboard away, so the sheet redraws with the plan in place.
   document.activeElement?.blur?.();
@@ -1301,6 +1304,7 @@ async function addPlan() {
   const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
   commit(r.account);
+  state.planEdit = null;
   // Rewards' mission: a new monthly plan (an edit keeps the affinity, not the mission).
   if (fresh) track('plan', symbolKeys(d.symbol), 2);
   else recordAffinity('stock', symbolKeys(d.symbol), 2);
@@ -1960,6 +1964,7 @@ function plansListHtml() {
       return `<div class="order-row"><span class="side-tag buy">${h(t('planTag'))}</span>
       <span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span>
       <span class="row-sub">${h(t('planActive', { amount: money(p.amount, BASE), day: p.day }))} · ${h(t('planNext', { date: next ? fmtDate(next) : '—' }))}${last ? ` · ${h(last.status === 'filled' ? t('planLast', { qty: fmtQty(last.qty), unit: unitOf(p.symbol) }) : t(`err_${last.reason}`))}` : ''}</span></span>
+      <button class="ghost-button small" type="button" data-action="plan-edit" data-id="${h(p.id)}" data-symbol="${h(p.symbol)}">${h(t('planEdit'))}</button>
       <button class="ghost-button small" type="button" data-action="plan-off" data-id="${h(p.id)}">${h(t('planStop'))}</button></div>`;
     })
     .join('')}<p class="note">${h(t('plansNote'))}</p></div>`;
@@ -2789,7 +2794,12 @@ async function mergeRemote(remote, { pull = false } = {}) {
     account = state.account;
   }
   account = applyPool(account, wallet).account;
-  const figure = ownCash(account, replay(account));
+  // NT$ cash for the other apps to spend: what's its own, less what's owed
+  // on loans (borrowed money stays here, for the market; it never becomes
+  // money to bet or buy with elsewhere).
+  const sAll = replay(account);
+  const owedTWD = Object.values(sAll.loans || {}).reduce((sum, l) => sum + Math.max(0, l.balance) * (l.currency === BASE ? 1 : state.rates[l.currency] || 0), 0);
+  const figure = Math.max(0, Math.round((ownCash(account, sAll) - owedTWD) * 100) / 100);
   // What the holdings are worth (less loans and shorts), for the monthly
   // allowance, which goes by the whole account's worth: sent once prices are
   // in, again when it moves 2% (or NT$1,000).
@@ -3173,6 +3183,20 @@ document.addEventListener('click', event => {
     }
     case 'plan-add':
       addPlan();
+      break;
+    // Changing a plan: its amount and day in the form, saved over it.
+    case 'plan-edit': {
+      const plan = state.account?.plans?.[el.dataset.id];
+      if (!plan) break;
+      state.planEdit = plan.id;
+      state.plan = { amount: String(plan.amount), day: String(plan.day) };
+      if (el.dataset.symbol && state.detail?.symbol !== plan.symbol) openDetail(plan.symbol);
+      else redrawDetail();
+      break;
+    }
+    case 'plan-edit-cancel':
+      state.planEdit = null;
+      redrawDetail();
       break;
     case 'plan-off': {
       const id = el.dataset.id;

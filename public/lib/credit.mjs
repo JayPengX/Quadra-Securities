@@ -14,6 +14,9 @@ import { isTradingDay } from './holidays.mjs';
 const DAY = 86_400_000;
 const YEAR = 365 * DAY;
 
+// What a sale costs at most, about (commission and tax), when working out
+// how many shares cover an amount.
+const SALE_COSTS = 0.006;
 // The credit account's limit (融資額度, the same again for 融券), by tier.
 export const CREDIT_TIERS = [500_000, 1_000_000, 2_000_000, 3_000_000, 5_000_000];
 // To open one: the brokerage account open three months, ten trades in the
@@ -130,7 +133,12 @@ export function closeOutPlan(account, valuation, now = Date.now()) {
   const plan = [];
   if (!creditAccount(account, now).open) {
     for (const p of valuation.positions) {
-      if (!p.short && p.financed > 0 && p.qty > 0) plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true, reason: 'noCredit' });
+      // Only the shares that pay the loan off (its costs and a margin for
+      // the price moving allowed for); the rest stay. The sale's cash repays it.
+      if (!p.short && p.financed > 0 && p.qty > 0 && p.price > 0) {
+        const qty = Math.min(p.qty, Math.ceil((p.financed * 1.02) / (p.price * (1 - SALE_COSTS)) - 1e-9));
+        plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty, forced: true, reason: 'noCredit' });
+      }
       else if (p.short && !p.dayShort && p.kind !== 'fx') plan.push({ symbol: p.symbol, side: 'buy', type: 'market', qty: -p.qty, forced: true, reason: 'noCredit' });
     }
   }

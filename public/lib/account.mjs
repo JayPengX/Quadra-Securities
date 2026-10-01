@@ -1169,7 +1169,11 @@ export function repayAll(account, rates, fxOpen, now = Date.now()) {
       const avail = available(next, s).cash;
       const own = avail[currency] || 0;
       if (own > EPS) {
-        const r = repay(next, { currency, amount: Math.min(own, loan.balance + 1) }, { now, id: nextId() });
+        // Against the holding bought on margin (largest first), so it's no
+        // longer counted as financed; then any loan not tied to one.
+        const tied = Object.values(s.positions).filter(p => p.currency === currency && p.financed > EPS).sort((a, b) => b.financed - a.financed)[0];
+        const amount = tied ? Math.min(own, tied.financed, loan.balance) : Math.min(own, loan.balance + 1);
+        const r = repay(next, { currency, amount, symbol: tied?.symbol }, { now, id: nextId() });
         if (r.error) break;
         next = r.account;
         continue;

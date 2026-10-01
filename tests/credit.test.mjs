@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newAccount, replay, placeOrder, processOrders, valuate } from '../public/lib/account.mjs';
+import { newAccount, replay, placeOrder, processOrders, valuate, repayAll } from '../public/lib/account.mjs';
 import { creditAccount, creditCheck, openCredit, bestTier, terms, extendTerm, closeOutPlan, afterHours, dayTradeSellFirst, CREDIT_TIERS } from '../public/lib/credit.mjs';
 import { tradeCosts } from '../public/lib/markets.mjs';
 
@@ -138,6 +138,17 @@ test('no credit account: no margin or borrowed shorts in any market, and the bro
   const q = quote('2330.TW', 1000);
   const bought = placeOrder(opened, { side: 'buy', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: val(opened, T0, [['2330.TW', q]]), now: T0, id: 'm' }).account;
   const without = { ...bought, events: bought.events.filter(e => e.type !== 'credit') };
-  assert.deepEqual(closeOutPlan(without, val(without, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR).map(p => [p.symbol, p.side, p.qty, p.reason]), [['2330.TW', 'sell', 1000, 'noCredit']]);
+  // Only what pays the loan off (60% of 1,000,000 and its costs): 617 shares, not all 1,000.
+  const plan = closeOutPlan(without, val(without, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR);
+  assert.deepEqual(plan.map(p => [p.symbol, p.side, p.qty, p.reason]), [['2330.TW', 'sell', Math.ceil((replay(without, T0).positions['2330.TW'].financed * 1.02) / (1000 * 0.994)), 'noCredit']]);
+  assert.ok(plan[0].qty < 700);
+  // Sold and the loan paid from the sale: the rest stays, and nothing more is sold.
+  const t1 = T0 + HOUR;
+  let after = placeOrder(without, plan[0], { quote: quote('2330.TW', 1000, t1), rates: RATES, valuation: val(without, t1, [['2330.TW', q]]), now: t1 }).account;
+  after = repayAll(after, RATES, true, t1);
+  const held = replay(after, t1 + 1).positions['2330.TW'];
+  assert.equal(held.qty, 1000 - plan[0].qty);
+  assert.ok(!(held.financed > 0.5));
+  assert.deepEqual(closeOutPlan(after, val(after, t1 + 2, [['2330.TW', q]]), t1 + 2), []);
   assert.deepEqual(closeOutPlan(bought, val(bought, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR), []);
 });

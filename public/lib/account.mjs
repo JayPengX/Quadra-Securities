@@ -1153,8 +1153,9 @@ export function repayAll(account, rates, fxOpen, now = Date.now()) {
         next = r.account;
         continue;
       }
-      // Other cash, NT$ first, then the largest.
-      const sources = Object.entries(avail)
+      // Other cash, NT$ first, then the largest: settled only (交割中 sale
+      // money can't be exchanged until it's in).
+      const sources = Object.entries(withdrawable(next, s, now))
         .filter(([c, v]) => c !== currency && v > EPS && rates?.[c])
         .sort(([a, va], [b, vb]) => (a === BASE ? -1 : b === BASE ? 1 : vb * rates[b] - va * rates[a]));
       if (!sources.length) break;
@@ -1285,7 +1286,8 @@ export function payDown(account, amountTWD, { rates, fxOpen = true, now = Date.n
         continue;
       }
       if (currency === BASE) break;
-      const has = Math.max(0, avail[BASE] || 0);
+      // NT$ to exchange: settled only (not 交割中 sale money).
+      const has = Math.max(0, withdrawable(next, s, now)[BASE] || 0);
       if (has <= EPS) break;
       const fx = exchange(next, { from: BASE, to: currency, amount: Math.min(has, amountFor(BASE, currency, want, rates, fxOpen)) }, { rates, fxOpen, now, id: nextId() });
       if (fx.error) break;
@@ -1717,7 +1719,7 @@ export function runPlan(account, plan, run, { price, twd, at = run.t, quote }, n
     const cost = estimate({ ...meta, side: 'buy', qty, price: ask }).total;
     const need = amountFor(BASE, meta.currency, cost, rates, true);
     const r = exchange(next, { from: BASE, to: meta.currency, amount: Math.min(plan.amount, need) }, { rates, fxOpen: true, now: at, id: `plan:${plan.id}:${run.month}` });
-    if (r.error) return reject(r.error === 'funds' ? 'funds' : 'tooSmall');
+    if (r.error) return reject(r.error === 'funds' || r.error === 'unsettled' ? 'funds' : 'tooSmall');
     next = r.account;
   }
   const open = { ...order, qty };

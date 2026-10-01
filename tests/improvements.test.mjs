@@ -283,6 +283,13 @@ test('sale proceeds settle T+2 in Taiwan: they buy again at once but can’t be 
   assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 50_000 }, { rates, now: fri + 1 }).error, 'unsettled');
   // What was never invested can go.
   assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: 9000 }, { rates, now: fri + 1 }).error, undefined);
+  // What the ticket and the exchange offer (withdrawable) is that settled
+  // part only: all of it exchanges, a dollar more touches 交割中 money.
+  const { withdrawable, replay, available } = await import('../public/lib/account.mjs');
+  const free = withdrawable(a, replay(a, fri + 1), fri + 1).TWD;
+  assert.ok(free < 11_000 && available(a, replay(a, fri + 1)).cash.TWD > 99_000, `${free}`);
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: Math.floor(free) }, { rates, now: fri + 1 }).error, undefined);
+  assert.equal(exchange(a, { from: 'TWD', to: 'USD', amount: Math.floor(free) + 1 }, { rates, now: fri + 1 }).error, 'unsettled');
   // The proceeds buy again right away.
   assert.equal(placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 800 }, { quote: q, rates: { TWD: 1 }, now: fri + 1, id: 'b2' }).fill.qty, 800);
   // Not yet on Tuesday; settled by Thursday: free to exchange.

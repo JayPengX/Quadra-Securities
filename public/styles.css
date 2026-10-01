@@ -751,12 +751,11 @@ a.activity-row { color: inherit; text-decoration: none; }
 .sym-badge.has-tv { border-radius: 50%; }
 .sym-badge .sym-logo.tv { padding: 0; object-fit: cover; border-radius: 50%; box-shadow: none; background: #fff; }
 .sym-badge .sym-pair { position: absolute; inset: 0; }
-.sym-badge .sym-pair .sym-logo.tv { width: 30px; height: 30px; inset: auto; }
+.sym-badge .sym-pair .sym-logo.tv { width: 72%; height: 72%; inset: auto; }
 .sym-badge .sym-pair .sym-logo.tv:first-child { top: 0; left: 0; z-index: 1; box-shadow: 0 0 0 2px var(--surface, #fff); }
 .sym-badge .sym-pair .sym-logo.tv:last-child { right: 0; bottom: 0; }
 .sym-badge.has-tv:has(.sym-pair) { border-radius: 0; overflow: visible; background: transparent; color: transparent; }
 .sym-badge .sym-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 5px; background: #fff; box-sizing: border-box; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
-.sym-badge.logo-neutral { background: #fff; color: #334155; }
 
 /* ---- Activity (交易明細) ---- */
 .activity-row { align-items: flex-start; padding: 12px 10px; gap: 12px; }
@@ -825,10 +824,13 @@ a.activity-row { color: inherit; text-decoration: none; }
 .win-ring { flex: none; width: 96px; height: 96px; border-radius: 50%; display: grid; place-content: center; text-align: center; background: radial-gradient(closest-side, var(--surface) 76%, transparent 77%), conic-gradient(var(--up) calc(var(--p) * 1%), var(--surface-sunken) 0); }
 .win-ring strong { font-size: 1.25rem; }
 .win-ring small { font-size: 0.66rem; color: var(--text-muted); }
-.stat-trade { width: 100%; display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px; margin-top: 10px; padding: 10px; border: 1px solid var(--grid); border-radius: 12px; background: none; text-align: left; font-size: 0.86rem; }
+.win-ring strong small { font-size: 0.85rem; font-weight: 700; }
+.stat-trade { width: 100%; display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 10px; margin-top: 10px; padding: 10px; border: 1px solid var(--grid); border-radius: 12px; background: none; text-align: left; font-size: 0.86rem; }
 .stat-trade > span:first-child { font-size: 0.72rem; font-weight: 700; color: var(--text-muted); }
-.stat-trade .sym-badge { width: 32px; height: 32px; border-radius: 9px; }
-.stat-trade strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-trade .sym-badge { width: 32px; height: 32px; }
+.stat-trade-main { display: grid; min-width: 0; }
+.stat-trade-main > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-trade-main .num { font-size: 0.8rem; }
 .stats-foot { margin: 10px 0 0; font-size: 0.76rem; color: var(--text-muted); }
 .rate-cur strong { white-space: nowrap; }
 .rate-cur strong em { font-style: normal; font-weight: 600; font-size: 0.72rem; color: var(--text-muted); }
@@ -865,7 +867,7 @@ a.activity-row { color: inherit; text-decoration: none; }
 }
 /* Movers with the company's logo. */
 .mover { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'logo name pill' 'logo price pill'; }
-.mover > .sym-badge { grid-area: logo; width: 34px; height: 34px; border-radius: 9px; font-size: 0.55rem; }
+.mover > .sym-badge { grid-area: logo; width: 34px; height: 34px; font-size: 0.55rem; }
 .mover > .sym-badge.zh { font-size: 0.68rem; }
 #home-account:empty { display: none; }
 #home-account { margin-top: 10px; }

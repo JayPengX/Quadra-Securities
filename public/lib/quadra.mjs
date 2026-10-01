@@ -360,6 +360,28 @@ function v10Notice(s) {
   return true;
 }
 
+// Once per device, for an account made before v11: the points catalogue,
+// and Plus's perks reviewed.
+const V11_SEEN = 'quadra.seen.v11';
+export const V11_AT = Date.UTC(2026, 9, 2, 16);
+function v11Notice(s) {
+  if (!(s.wallet?.created < V11_AT) || readStore(V11_SEEN)) return;
+  writeStore(V11_SEEN, '1');
+  const en = s.lang === 'en';
+  tell({
+    lang: s.lang,
+    icon: '🎁',
+    title: en ? 'Points buy more' : '積分可以兌換了',
+    body: en ? 'Rewards › Home › Points catalogue' : 'Rewards › 首頁 › 積分兌換',
+    points: [
+      ['🎁', en ? 'Free bets, vouchers, a Plus month' : '免費投注、折抵券、Plus 月份', en ? `From ${catalogCost('bet100').toLocaleString('en-US')} XP` : `${catalogCost('bet100').toLocaleString('en-US')} XP 起`],
+      ['✦', en ? 'Plus: more in Securities' : 'Plus：證券權益加碼', en ? `Deposits +${PLUS.stock.tdBonus * 100}%, lending cut ${PLUS.stock.lendCut * 100}%, catalogue 10% off` : `定存 +${PLUS.stock.tdBonus * 100}%、借券只抽 ${PLUS.stock.lendCut * 100}%、兌換 9 折`],
+      ['📘', en ? 'Word packs: one price for all' : '單字包不再有會員價', en ? 'Packs bought stay yours' : '已買的照樣保留']
+    ]
+  });
+  return true;
+}
+
 // ---- Quadra Plus ---------------------------------------------------------------------
 //
 // The one membership across Quadra: PLUS.fee a Taiwan month from the pool,
@@ -379,15 +401,20 @@ export const PLUS = {
   // rate; a fund's subscription fee too), FX spread ×0.5, NT$ cash interest
   // 2% a year on the first NT$cashCap (0.8% on the rest and otherwise, like
   // a Taiwan digital bank's high-interest tier), borrowing 1 point cheaper.
-  stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, cashCap: 100_000, loanCut: 0.01 },
+  // v11 adds: a new 定存 +tdBonus a year (on top of the posted rate, for the
+  // deposit's term), and the broker keeps lendCut of a lending fee instead
+  // of 30% (Securities' savings.mjs LEND_CUT).
+  stock: { commission: 0.28, fxSpread: 0.5, cashRate: 0.02, cashCap: 100_000, loanCut: 0.01, tdBonus: 0.001, lendCut: 0.2 },
   // Play: cash out keeps 2% instead of 5%, and a NT$bonusBet free bet each
   // week (the Worker's `eco:fb:<Monday>`). `boost` multiplies the parlay
   // boost (1: the same as everyone's since v7); `lift` was +10% on one slip a
   // day up to liftMax (v6-v7), 0 since v8.
   odds: { boost: 1, cashOutKeep: 0.02, lift: 0, liftMax: 0, bonusBet: 200 },
-  // Rewards: word packs at `packShare` of the price, `cards` streak cards a
-  // month, and points ×xpBoost (Rewards' shop.mjs, earn.mjs).
-  vocab: { packShare: 0.5, cards: 2, xpBoost: 1.5 }
+  // Rewards: `cards` streak cards a month, points ×xpBoost (Rewards'
+  // shop.mjs, earn.mjs), and the points catalogue (CATALOG) at `catalog` of
+  // its points. Word packs were half price (packShare 0.5) until v11; the
+  // Worker still takes that price from purchases already waiting on a device.
+  vocab: { packShare: 1, cards: 2, xpBoost: 1.5, catalog: 0.9 }
 };
 const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
 export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
@@ -395,9 +422,11 @@ export const plusMember = (wallet, t = Date.now()) => (wallet?.entries || []).so
 // Renewing next month (the member hasn't left).
 // A charge the balance couldn't cover (eco.js `eco:plusfail:<month>`) after
 // the last paid month: the membership lapsed and won't renew until joined again.
+// A month bought with points (note 'points') isn't a payment: it doesn't
+// bring back a membership that lapsed.
 export const plusLapsed = wallet => {
   const entries = wallet?.entries || [];
-  const last = entries.filter(e => e.app === 'eco' && e.id?.startsWith('eco:plus:')).map(e => e.id.slice(9)).sort().at(-1);
+  const last = entries.filter(e => e.app === 'eco' && e.id?.startsWith('eco:plus:') && e.note !== 'points').map(e => e.id.slice(9)).sort().at(-1);
   return Boolean(last) && entries.some(e => e.app === 'eco' && e.id?.startsWith('eco:plusfail:') && e.id.slice(13) > last);
 };
 export const plusRenewing = wallet => wallet?.settings?.plus?.value?.on === true && !plusLapsed(wallet);
@@ -469,15 +498,119 @@ export const freeBetValue = e => {
   const v = Number(e?.note);
   return Number.isInteger(v) && v > 0 && v <= FREEBET.max && v % 10 === 0 ? v : 0;
 };
-// The tokens not yet spent or expired: [{ id, value, t, until }], soonest to expire first.
+// The tokens not yet spent or expired: [{ id, value, t, until }], soonest
+// to expire first. Free bets from the points catalogue ('vocab:xs:bet100:…')
+// too, on the same terms.
 export function freeBets(wallet, now = Date.now(), spent = []) {
   const entries = wallet?.entries || [];
-  const used = new Set([...spent, ...entries.filter(e => e.app === 'odds' && typeof e.id === 'string' && e.id.startsWith('odds:fb-')).map(e => e.id.slice(8))]);
-  return entries
+  const used = new Set([...spent, ...usedTokens(wallet)]);
+  const tokens = entries
     .filter(e => e.kind === 'freebet' && typeof e.id === 'string' && ((e.app === 'vocab' && e.id.startsWith('vocab:fb:')) || (e.app === 'eco' && e.id.startsWith('eco:fb:'))) && freeBetValue(e) && !used.has(e.id))
-    .map(e => ({ id: e.id, value: freeBetValue(e), t: e.t, until: e.t + FREEBET.days * 86_400_000 }))
-    .filter(x => x.until > now)
-    .sort((a, b) => a.until - b.until);
+    .map(e => ({ id: e.id, value: freeBetValue(e), t: e.t, until: e.t + FREEBET.days * 86_400_000 }));
+  for (const item of CATALOG.filter(c => c.app === 'odds')) tokens.push(...catalogTokens(wallet, item.id, now, spent));
+  return tokens.filter(x => x.until > now).sort((a, b) => a.until - b.until);
+}
+
+// ---- The points catalogue (積分兌換) ---------------------------------------------------
+//
+// Like a card's or an airline's: points turned into Quadra's own products,
+// worth more to the person than they cost the house (a free bet's expected
+// cost is under half its face; a commission voucher brings a trade; a Plus
+// month every quarter is a taste of paying for it). Rewards redeems them:
+// 'vocab:xs:<item>:<key>', kind 'redeem', amount 0, the points in the note
+// (the Worker's REWARDS_XP takes no less than a member's price). Each
+// becomes a token in the app it's for, used once (Play marks it
+// 'odds:fb-<token id>', Securities 'stock:xs-<token id>') and gone at
+// `days`; what's left of a voucher is lost, as with a real one.
+//   bet100, bet500  a Play free bet (every pick FREE_MIN_ODDS or longer, no
+//                   cash out), NT$CATALOG_BETS of face a Taiwan month at most
+//   fee             up to NT$100 off one Securities trade's commission (the
+//                   next fill that pays one), 3 a month
+//   td              +0.5% a year on one new 定存 of up to NT$100,000, its
+//                   first term (broken early, the bonus goes), 1 a month
+//   plus            a month of Quadra Plus (key: the month; the Worker turns
+//                   it into `eco:plus:<month>`), one a quarter, after the
+//                   free first month; this month, or next when this one is held
+// A Plus member pays PLUS.vocab.catalog of the points.
+export const CATALOG = [
+  { id: 'bet100', app: 'odds', xp: 5_000, value: 100, days: 7 },
+  { id: 'bet500', app: 'odds', xp: 22_000, value: 500, days: 7 },
+  { id: 'fee', app: 'stock', xp: 4_000, value: 100, days: 30, perMonth: 3 },
+  { id: 'td', app: 'stock', xp: 12_000, rate: 0.005, cap: 100_000, days: 30, perMonth: 1 },
+  { id: 'plus', app: 'plus', xp: 20_000, perQuarter: 1 }
+];
+export const CATALOG_BETS = 1_000;
+export const catalogItem = id => CATALOG.find(c => c.id === id) ?? null;
+export const catalogCost = (id, member = false) => {
+  const c = catalogItem(id);
+  return c ? (member ? Math.round(c.xp * PLUS.vocab.catalog) : c.xp) : null;
+};
+const quarterOf = month => `${month.slice(0, 4)}-Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
+const nextMonthOf = m => {
+  const [y, mo] = m.split('-').map(Number);
+  return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, '0')}`;
+};
+// Tokens used in Play or Securities (written there, read everywhere).
+function usedTokens(wallet) {
+  const out = new Set();
+  for (const e of wallet?.entries || []) {
+    if (typeof e.id !== 'string') continue;
+    if (e.app === 'odds' && e.id.startsWith('odds:fb-')) out.add(e.id.slice(8));
+    if (e.app === 'stock' && e.id.startsWith('stock:xs-')) out.add(e.id.slice(9));
+  }
+  return out;
+}
+// Every redemption of `item`, oldest first.
+export const catalogRedeemed = (wallet, item) =>
+  (wallet?.entries || []).filter(e => e.app === 'vocab' && e.kind === 'redeem' && typeof e.id === 'string' && e.id.startsWith(`vocab:xs:${item}:`)).sort((a, b) => a.t - b.t);
+// The tokens of `item` still to use: [{ id, item, value, rate, cap, t, until }].
+export function catalogTokens(wallet, item, now = Date.now(), spent = []) {
+  const c = catalogItem(item);
+  if (!c?.days) return [];
+  const used = new Set([...spent, ...usedTokens(wallet)]);
+  return catalogRedeemed(wallet, item)
+    .filter(e => !used.has(e.id) && e.t <= now)
+    .map(e => ({ id: e.id, item, value: c.value ?? 0, rate: c.rate ?? 0, cap: c.cap ?? 0, t: e.t, until: e.t + c.days * 86_400_000 }))
+    .filter(x => x.until > now);
+}
+// The Plus month points would buy now: this one, or next when this one is
+// held; null when both are.
+export function catalogPlusMonth(wallet, now = Date.now()) {
+  const held = plusMonths(wallet);
+  const month = plusMonth(now);
+  if (!held.has(month)) return month;
+  const next = nextMonthOf(month);
+  return held.has(next) ? null : next;
+}
+// Whether `item` can be redeemed now: { ok, why, left }. `left`: how many
+// more this month (free bets: NT$ of face; Plus: this quarter).
+export function catalogLimit(wallet, item, now = Date.now()) {
+  const c = catalogItem(item);
+  if (!c) return { ok: false, why: 'item', left: 0 };
+  const month = plusMonth(now);
+  const mine = catalogRedeemed(wallet, item);
+  if (c.app === 'odds') {
+    const face = CATALOG.filter(x => x.app === 'odds').reduce((sum, x) => sum + catalogRedeemed(wallet, x.id).filter(e => plusMonth(e.t) === month).length * x.value, 0);
+    const left = Math.max(0, CATALOG_BETS - face);
+    return { ok: left >= c.value, why: left >= c.value ? '' : 'month', left };
+  }
+  if (c.perMonth) {
+    const left = Math.max(0, c.perMonth - mine.filter(e => plusMonth(e.t) === month).length);
+    return { ok: left > 0, why: left > 0 ? '' : 'month', left };
+  }
+  // Plus: after the free first month, one a quarter.
+  if (!plusTried(wallet)) return { ok: false, why: 'trial', left: 0 };
+  const target = catalogPlusMonth(wallet, now);
+  if (!target) return { ok: false, why: 'held', left: 0 };
+  const taken = mine.some(e => quarterOf(e.id.split(':')[3] || '') === quarterOf(target));
+  return { ok: !taken, why: taken ? 'quarter' : '', left: taken ? 0 : 1, month: target };
+}
+// The entry that redeems `item` (null when it can't be, or the points are short).
+export function catalogEntry(wallet, item, key, now = Date.now()) {
+  const limit = catalogLimit(wallet, item, now);
+  const cost = catalogCost(item, plusMember(wallet, now));
+  if (!limit.ok || !cost || xpBalance(wallet, now) < cost) return null;
+  return { id: `vocab:xs:${item}:${item === 'plus' ? limit.month : key}`, t: now, app: 'vocab', kind: 'redeem', amount: 0, note: String(cost) };
 }
 
 // ---- Language ------------------------------------------------------------------------
@@ -1010,7 +1143,7 @@ function makeSession(app, { lang, heartbeat }) {
     if (!first) first = await signInGate(s);
     s.first = first;
     loop();
-    setTimeout(() => resetNotice(s) || v8Notice(s) || v10Notice(s) || plusNotices(s), 1200);
+    setTimeout(() => resetNotice(s) || v8Notice(s) || v10Notice(s) || v11Notice(s) || plusNotices(s), 1200);
     s.on('wallet', () => plusNotices(s));
     setTimeout(() => offerNotices(s), 2500);
     // The first reply: what the app merges its own copy with (never the
@@ -1653,7 +1786,9 @@ export function plusPerks(lang = 'zh') {
     ['stock', en ? `${pct(PLUS.stock.cashRate)} on NT$ cash` : `台幣活存 ${pct(PLUS.stock.cashRate)}`, en ? `On the first ${money(PLUS.stock.cashCap)} (0.8% otherwise), accrued daily` : `前 ${money(PLUS.stock.cashCap)}（一般 0.8%），每日計息`],
     ['stock', en ? 'FX at half the spread' : '換匯點差減半', en ? 'Every currency' : '所有幣別'],
     ['stock', en ? `Margin ${pct(PLUS.stock.loanCut)} cheaper` : `融資利率少 ${pct(PLUS.stock.loanCut)}`, en ? 'On every new loan, every currency' : '每筆新借款、所有幣別'],
-    ['vocab', en ? `Word packs ${pct(1 - PLUS.vocab.packShare)} off` : `單字包 ${Math.round(PLUS.vocab.packShare * 100) / 10} 折`, en ? 'TOEIC, IELTS, Business English, yours to keep' : '多益、雅思、商務英文，買了永久保留'],
+    ['stock', en ? `Time deposits +${pct(PLUS.stock.tdBonus)}` : `定存利率 +${pct(PLUS.stock.tdBonus)}`, en ? 'On every new deposit, on top of the posted rate' : '每筆新定存，牌告利率再加碼'],
+    ['stock', en ? `Lending: the broker keeps ${pct(PLUS.stock.lendCut)}` : `借券出借券商只抽 ${pct(PLUS.stock.lendCut)}`, en ? `Instead of 30%: more of the fee is yours` : '一般抽 30%，借券費多拿一點'],
+    ['vocab', en ? `Points catalogue ${pct(1 - v.catalog)} off` : `積分兌換 ${Math.round(v.catalog * 100) / 10} 折`, en ? 'Free bets, commission vouchers, deposit bonuses, a Plus month' : '免費投注、手續費折抵券、定存加碼券、Plus 月份'],
     ['vocab', en ? `${v.cards} streak protections a month` : `每月 ${v.cards} 張連續紀錄保護卡`, en ? `A missed day doesn't break your streak (${money(300 * v.cards)} in the shop)` : `漏掉一天，連續紀錄照樣算（商店價 ${money(300 * v.cards)}）`],
     ['vocab', en ? `Points ×${v.xpBoost}` : `積分 ×${v.xpBoost}`, en ? 'Every word, game and mission in Rewards: level up faster' : 'Rewards 的單字、遊戲、任務都算，等級升得更快']
   ].filter(Boolean);

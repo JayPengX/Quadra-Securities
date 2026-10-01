@@ -43,7 +43,7 @@ import {
   localDayOf
 } from './markets.mjs';
 import { nextTradingStart } from './holidays.mjs';
-import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
+import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
 
 export const ACCOUNT_VERSION = 1;
@@ -97,12 +97,44 @@ const add = (map, key, amount) => (map[key] = (map[key] || 0) + amount);
 // a trade, exchange or loan by the moment it's made, cash interest by each
 // Taiwan month the membership was paid for. The app keeps `months` current
 // from the wallet (usePlus); with none, nothing here changes anything.
-const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, cashRate: CASH_RATE, cashCap: 0, loanCut: 0 };
+// A member also gets +tdBonus on a new 定存 and keeps more of a lending fee
+// (the broker's lendCut instead of LEND_CUT), both by when it's made.
+const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, cashRate: CASH_RATE, cashCap: 0, loanCut: 0, tdBonus: 0, lendCut: LEND_CUT };
 let plus = PLUS_NONE;
 export function usePlus(settings) {
   plus = settings ? { ...PLUS_NONE, ...settings } : PLUS_NONE;
 }
 export const plusAt = (t = Date.now()) => plus.months.has(taipeiDay(t).slice(0, 7));
+const tdPlus = t => (plusAt(t) ? plus.tdBonus : 0);
+
+// ---- Points catalogue vouchers (Rewards' 積分兌換, the kit's CATALOG) -------------
+//
+// Tokens redeemed with points, kept current from the wallet (useVouchers,
+// the kit's catalogTokens): `fee` takes up to its NT$ value off the
+// commission of the next fill that pays one (`fill.voucher`, the rest of it
+// lost); `td` adds its rate to one new 定存 of up to its cap
+// (`td.bonus`). Each is used once: a fill or deposit naming it spends it,
+// and the app writes 'stock:xs-<token id>' to the wallet so every app knows.
+let vouchers = { fee: [], td: [] };
+export function useVouchers(list) {
+  vouchers = { fee: list?.fee || [], td: list?.td || [] };
+}
+const spentVouchers = account => new Set((account?.events || []).flatMap(e => [e.voucher, e.bonus]).filter(Boolean));
+const voucherAt = (account, kind, t) => {
+  const spent = spentVouchers(account);
+  return vouchers[kind].filter(x => x.t <= t && t < x.until && !spent.has(x.id)).sort((a, b) => a.until - b.until)[0] ?? null;
+};
+// The commission voucher a fill at `t` would use, or null.
+export const feeVoucher = (account, t = Date.now()) => voucherAt(account, 'fee', t);
+// The 定存 bonus tokens free to use now.
+export const tdVouchers = (account, t = Date.now()) => {
+  const spent = spentVouchers(account);
+  return vouchers.td.filter(x => x.t <= t && t < x.until && !spent.has(x.id));
+};
+// Tokens this account has spent (for the wallet's markers).
+export const usedVouchers = account => (account?.events || []).flatMap(e => (e.voucher ? [[e.voucher, e.t]] : e.bonus ? [[e.bonus, e.t]] : []));
+// What a voucher takes off a commission, in its currency.
+export const voucherOff = (voucher, commission, currency, rate) => (voucher && commission > 0 && rate > 0 ? Math.min(commission, roundCash(voucher.value / rate, currency)) : 0);
 // NT$ cash interest between two moments, month by month, as rate × time:
 // `base` on all the cash, and Plus's `extra` rate on the first cashCap only
 // (like a Taiwan digital bank's high-interest tier).
@@ -242,6 +274,10 @@ export function replay(account, now = Date.now()) {
         if (e.symbol && s.positions[e.symbol]) s.positions[e.symbol].financed = (s.positions[e.symbol].financed || 0) + e.amount;
         break;
       }
+      // An old cash loan tied to the purchase it paid for (linkOldLoans).
+      case 'link':
+        if (s.positions[e.symbol]) s.positions[e.symbol].financed = (s.positions[e.symbol].financed || 0) + e.amount;
+        break;
       case 'repay': {
         const loan = s.loans[e.currency];
         if (!loan) break;
@@ -569,7 +605,11 @@ function fillOrder(account, order, price, rates, now, at = now) {
   else price = order.side === 'buy' ? Math.min(price, order.limit) : Math.max(price, order.limit);
   // A Taiwan stock sold the day it was bought pays the day-trade tax.
   const dayTrade = order.side === 'sell' && order.market === 'TW' && account.events.some(e => e.type === 'fill' && e.symbol === order.symbol && e.side === 'buy' && e.t <= at && localDayOf(e.t, 'TW') === localDayOf(at, 'TW'));
-  const est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at, dayTrade, first: firstTrade(account) });
+  let est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at, dayTrade, first: firstTrade(account) });
+  // A commission voucher from the points catalogue: off this fill's commission.
+  const voucher = feeVoucher(account, at);
+  const off = voucherOff(voucher, est.commission, order.currency, rates[order.currency]);
+  if (off > 0) est = { ...est, commission: est.commission - off, costs: est.costs - off, total: order.side === 'buy' ? est.total - off : est.total + off };
   // A fill found in the past must have fitted the cash (or shares) at that
   // moment and still fit today's.
   const moments = at < now ? [at, now] : [now];
@@ -610,6 +650,7 @@ function fillOrder(account, order, price, rates, now, at = now) {
     total: est.total,
     twd: rates[order.currency]
   };
+  if (off > 0) Object.assign(fill, { voucher: voucher.id, voucherOff: off });
   if (order.forced) fill.forced = true;
   if (order.cover) fill.cover = true;
   const extra = [];
@@ -766,14 +807,23 @@ export function deposit(account, amount, now = Date.now(), id = randomId()) {
 // NT$ cash settled and not held for orders: what can go into a deposit.
 const freeCash = (account, s, now) => Math.max(0, withdrawable(account, s, now)[BASE] || 0);
 
-export function openDeposit(account, { amount, months, renew = false }, now = Date.now(), id = randomId()) {
+// The rate a new deposit gets: the posted one, Plus's bonus, and a bonus
+// token's (its first term only: a roll-over is at the posted rate again).
+export const depositRate = (months, now = Date.now(), bonus = null) => {
+  const posted = tdRate(Number(months));
+  return posted == null ? null : Math.round((posted + tdPlus(now) + (bonus?.rate || 0)) * 1e6) / 1e6;
+};
+export function openDeposit(account, { amount, months, renew = false, bonus = null }, now = Date.now(), id = randomId()) {
   amount = Math.round(Number(amount));
-  const rate = tdRate(Number(months));
+  const token = bonus ? tdVouchers(account, now).find(x => x.id === bonus) : null;
+  if (bonus && !token) return { error: 'tdBonusGone' };
+  if (token && amount > token.cap) return { error: 'tdBonusCap', cap: token.cap };
+  const rate = depositRate(months, now, token);
   if (rate == null) return { error: 'tdTerm' };
   if (!(amount >= TD_MIN)) return { error: 'tdMin', min: TD_MIN };
   const have = freeCash(account, replay(account, now), now);
   if (amount > have + EPS) return { error: 'funds', need: amount, have, currency: BASE };
-  const event = { id: `td:${id}`, type: 'td', t: now, currency: BASE, amount, months: Number(months), rate, ends: addMonths(now, Number(months)), renew: Boolean(renew) };
+  const event = { id: `td:${id}`, type: 'td', t: now, currency: BASE, amount, months: Number(months), rate, ends: addMonths(now, Number(months)), renew: Boolean(renew), ...(token ? { bonus: token.id } : {}) };
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 
@@ -799,10 +849,49 @@ export function matureDeposits(account, now = Date.now()) {
     const due = Object.values(s.tds).filter(td => td.ends <= now).sort((a, b) => a.ends - b.ends)[0];
     if (!due) break;
     const events = [tdEnd(due, due.ends)];
-    if (due.renew) events.push({ ...due, id: `${due.id}r`, t: due.ends, rate: tdRate(due.months) ?? due.rate, ends: addMonths(due.ends, due.months) });
+    if (due.renew) {
+      const { bonus, ...rest } = due;
+      events.push({ ...rest, id: `${due.id}r`, t: due.ends, rate: depositRate(due.months, due.ends) ?? due.rate, ends: addMonths(due.ends, due.months) });
+    }
     next = { ...next, events: [...next.events, ...events] };
   }
   return next;
+}
+
+// Before 2026-10-01 10:49 Taipei a 融資 buy borrowed the shortfall as a
+// plain cash loan ('borrow:<id>', no symbol) and placed the order: the loan
+// paid for the shares but wasn't tied to them, so selling didn't repay it
+// first and a margin call didn't know them as bought on margin. Each such
+// loan is tied, once, to the buy placed within LINK_WINDOW after it (a
+// 'link' event, dated when it's made: what happened before stays as it
+// was): newest loans first, no more than the loan still owed, the buy's
+// cost or the shares' cost now. Loans already paid off are left alone.
+const LINK_BEFORE = Date.UTC(2026, 9, 1, 2, 49);
+const LINK_WINDOW = 5 * 60_000;
+export function linkOldLoans(account, now = Date.now()) {
+  const done = new Set(account.events.filter(e => e.type === 'link').map(e => e.borrow));
+  // Loans from before one was paid off in full are gone with it.
+  const cleared = cur => Math.max(0, ...account.events.filter(e => e.type === 'repay' && !e.symbol && e.currency === cur && !(replay(account, e.t).loans[cur]?.balance >= 1)).map(e => e.t));
+  const old = account.events.filter(e => e.type === 'borrow' && !e.symbol && e.id.startsWith('borrow:') && e.t < LINK_BEFORE && !done.has(e.id) && e.t > cleared(e.currency)).sort((a, b) => b.t - a.t);
+  if (!old.length) return account;
+  const s = replay(account, now);
+  const owed = Object.fromEntries(Object.entries(s.loans).map(([cur, l]) => [cur, Math.max(0, l.balance)]));
+  for (const p of Object.values(s.positions)) owed[p.currency] = Math.max(0, (owed[p.currency] || 0) - (p.financed || 0));
+  const room = Object.fromEntries(Object.values(s.positions).filter(p => p.qty > 0).map(p => [p.symbol, Math.max(0, p.cost - (p.financed || 0))]));
+  const used = {};
+  const links = [];
+  for (const b of old) {
+    const order = account.orders.filter(o => o.side === 'buy' && o.currency === b.currency && o.status === 'filled' && o.t >= b.t && o.t - b.t <= LINK_WINDOW).sort((x, y) => x.t - y.t)[0];
+    const fill = order && account.events.find(e => e.id === order.fillId);
+    if (!fill) continue;
+    const amount = roundCash(Math.min(b.amount, fill.total - (used[order.id] || 0), owed[b.currency] || 0, room[order.symbol] || 0), b.currency);
+    if (!(amount > 0)) continue;
+    used[order.id] = (used[order.id] || 0) + amount;
+    owed[b.currency] -= amount;
+    room[order.symbol] -= amount;
+    links.push({ id: `link:${b.id.slice(7)}`, type: 'link', t: now, borrow: b.id, symbol: order.symbol, currency: b.currency, amount });
+  }
+  return links.length ? { ...account, events: [...account.events, ...links] } : account;
 }
 
 // Shares of a holding that can be lent now: whole lots, settled, not lent
@@ -826,7 +915,7 @@ export function lendShares(account, { symbol, qty, price }, now = Date.now(), id
   const can = lendableQty(account, symbol, now);
   if (qty > can + EPS) return { error: 'lendQty', can };
   if (!(price > 0)) return { error: 'noQuote' };
-  const event = { id: `lend:${id}`, type: 'lend', t: now, symbol, name: p.name, market: p.market, kind: p.kind, currency: p.currency, qty, price, rate: LEND_RATE[p.kind] };
+  const event = { id: `lend:${id}`, type: 'lend', t: now, symbol, name: p.name, market: p.market, kind: p.kind, currency: p.currency, qty, price, rate: LEND_RATE[p.kind], ...(plusAt(now) && plus.lendCut !== LEND_CUT ? { cutRate: plus.lendCut } : {}) };
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 

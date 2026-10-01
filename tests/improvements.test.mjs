@@ -374,3 +374,25 @@ test('what Securities holds for a 掛單 or has spent comes off the pool: its ow
   // The pool sees it: 30,000 in, its part −held, so 30,000 − held left for Play.
   assert.equal(ownCash(a, replay(a, now), now), -Math.round(held * 100) / 100);
 });
+
+test('the account’s worth across apps is the same before and after a 掛單 or an exchange (pool + holdings)', async () => {
+  const { newAccount, applyPool, placeOrder, exchange, ownCash, replay, available, valuate } = await import('../public/lib/account.mjs');
+  const now = Date.parse('2026-10-03T10:00:00+08:00');
+  const entries = [{ id: 'eco:start', app: 'eco', kind: 'start', t: now - 3_600_000, amount: 30_000 }];
+  const rates = { TWD: 1, USD: 32 };
+  // As Securities reports it: its own spendable NT$ to the pool, the rest of its worth as holdings.
+  const worth = a => {
+    const s = replay(a, now);
+    const pool = entries.reduce((sum, e) => sum + e.amount, 0) + ownCash(a, s, now);
+    const v = valuate(s, new Map(), rates);
+    return Math.round(pool + v.netWorth - (available(a, s).cash.TWD || 0));
+  };
+  let a = applyPool(newAccount(0, now - 3_600_000, 'w'), { entries }).account;
+  assert.equal(worth(a), 30_000);
+  const q = { symbol: '0050.TW', name: '0050', kind: 'etf', market: 'TW', currency: 'TWD', price: 100, prev: 100, session: { start: now - 2 * 86_400_000, end: now - 2 * 86_400_000 + 3_600_000 }, marketTime: now - 2 * 86_400_000 };
+  a = placeOrder(a, { side: 'buy', type: 'limit', limit: 100, qty: 100 }, { quote: q, rates: { TWD: 1 }, now, id: 'o' }).account;
+  assert.equal(worth(a), 30_000);
+  const x = exchange(a, { from: 'TWD', to: 'USD', amount: 5_000 }, { rates, now });
+  // Only the exchange's spread is lost.
+  assert.ok(Math.abs(worth(x.account) - (30_000 - x.event.spreadTWD)) <= 1, `${worth(x.account)} ${x.event.spreadTWD}`);
+});

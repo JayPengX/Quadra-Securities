@@ -3403,12 +3403,14 @@ async function mergeRemote(remote, { pull = false } = {}) {
   // account ran into overdraft when the order filled.)
   const sAll = replay(account);
   const figure = Math.round(ownCash(account, sAll) * 100) / 100;
-  // What the holdings are worth (less loans and shorts), for the account's
-  // worth across apps: sent once prices are in, again when it moves 2% (or
-  // NT$1,000).
+  // Everything else Securities is worth, for the account's worth across apps
+  // (Hub's 錢從哪裡來): the holdings less loans and shorts, and the cash the
+  // pool figure above leaves out (held for 掛單, in other currencies). Sent
+  // once prices are in, again when it moves 2% (or NT$1,000).
   const prev = wallet?.snap?.stock;
-  const v = state.loaded ? valuate(replay(account), state.quotes, state.rates) : null;
-  const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - v.cashTWD) : prev?.holdings;
+  const v = state.loaded ? valuate(sAll, state.quotes, state.rates) : null;
+  const spendableTWD = available(account, sAll).cash[BASE] || 0;
+  const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - spendableTWD) : prev?.holdings;
   const moved = Number.isFinite(holdings) && !(Math.abs((prev?.holdings ?? Infinity) - holdings) < Math.max(1_000, Math.abs(holdings) * 0.02));
   // The opening money in Securities' own books (an account older than the
   // shared wallet's; 0 since): the Worker's reset makes up what it took too much of.

@@ -728,3 +728,5 @@ a.activity-row { color: inherit; text-decoration: none; }
 .td-terms button small { font-size: 0.7rem; font-weight: 500; opacity: 0.85; }
 .check-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 0.86rem; color: var(--text-secondary); }
 .check-row input { width: 18px; height: 18px; accent-color: var(--accent); }
+@keyframes flash { 0%, 100% { box-shadow: none; } 30% { box-shadow: 0 0 0 3px var(--accent, #4c8dff); } }
+.card.flash { animation: flash 1.6s ease; }

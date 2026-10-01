@@ -3120,6 +3120,21 @@ function render() {
   if (state.detail && $('detail').open) refreshDetailLive();
 }
 
+// 修改 on a plan: the sheet scrolls to the plan's form, its amount ready to type.
+// The form only exists once the quote is in, so it waits for it a little.
+function scrollToPlanForm(symbol, tries = 20) {
+  if (state.detail?.symbol !== symbol || !$('detail').open) return;
+  const card = $('detail').querySelector('[data-fold="tool:plan"]');
+  const input = card?.querySelector('#plan-amount');
+  if (!input) return void (tries > 0 && setTimeout(() => scrollToPlanForm(symbol, tries - 1), 250));
+  card.open = true;
+  requestAnimationFrame(() => {
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 1600);
+  });
+}
+
 // The whole sheet again, where it was scrolled to.
 function redrawDetail() {
   const scroll = $('detail').scrollTop;
@@ -3430,8 +3445,13 @@ document.addEventListener('click', event => {
       if (!plan) break;
       state.planEdit = plan.id;
       state.plan = { amount: String(plan.amount), day: String(plan.day) };
-      if (el.dataset.symbol && state.detail?.symbol !== plan.symbol) openDetail(plan.symbol);
-      else redrawDetail();
+      state.openFolds.add('tool:plan');
+      state.openFolds.delete('closed:tool:plan');
+      if (el.dataset.symbol && state.detail?.symbol !== plan.symbol) openDetail(plan.symbol).then(() => scrollToPlanForm(plan.symbol));
+      else {
+        redrawDetail();
+        scrollToPlanForm(plan.symbol);
+      }
       break;
     }
     case 'plan-edit-cancel':

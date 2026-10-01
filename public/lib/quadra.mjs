@@ -176,25 +176,34 @@ export function frameOf(wallet) {
 }
 // ---- The streak: days in a row with Rewards' daily missions done ------------------------------
 //
-// From STREAK.from, a day counts when STREAK.missions of that day's daily
-// missions were claimed ('vocab:m:<day>:<id>'), not counting the bonus ones
-// that spend money (STREAK.bonus), or when a protection card covered it
+// From STREAK.from, a day counts when STREAK.missions of that day's
+// missions were claimed ('vocab:m:<day>:<id>'): its six daily ones (three
+// of them in Rewards, so the other apps are always part of it), and the
+// bonus ones that spend money (STREAK.bonus) for up to STREAK.bonusCounts
+// of them, so spending is the easy way to it but never needed. Or when a
+// protection card covered it
 // ('vocab:fz:<day>') or points bought it back ('vocab:xs:repair:<day>').
 // Before that, any word practice or finished game kept it, and those days
 // still count. Today counts once it's done; until then
 // the streak is yesterday's.
 // It raises every point (+STREAK.perDay a day, up to +STREAK.max), and the
 // longest ever unlocks an avatar and a protection card at each milestone.
-export const STREAK = { perDay: 0.02, max: 0.3, milestones: [7, 30, 100], missions: 3, bonus: ['invest', 'parlay3', 'scratch', 'lotto'], from: '2026-10-02' };
+export const STREAK = { perDay: 0.02, max: 0.3, milestones: [7, 30, 100], missions: 5, bonusCounts: 2, bonus: ['invest', 'parlay3', 'scratch', 'lotto'], from: '2026-10-02' };
 const STREAK_KINDS = new Set(['words', 'reward', 'game']);
-// Daily missions claimed per day (the ones that keep the streak): { day: n }.
+// Missions claimed per day that count for the streak: { day: n } (the
+// bonus ones STREAK.bonusCounts at most).
 export function missionDays(wallet) {
-  const out = {};
+  const daily = {};
+  const bonus = {};
   for (const e of wallet?.entries || []) {
     if (e.app !== 'vocab' || typeof e.id !== 'string' || !e.id.startsWith('vocab:m:')) continue;
     const [, , day, id] = e.id.split(':');
-    if (day && id && !STREAK.bonus.includes(id)) out[day] = (out[day] || 0) + 1;
+    if (!day || !id) continue;
+    const to = STREAK.bonus.includes(id) ? bonus : daily;
+    to[day] = (to[day] || 0) + 1;
   }
+  const out = {};
+  for (const day of new Set([...Object.keys(daily), ...Object.keys(bonus)])) out[day] = (daily[day] || 0) + Math.min(STREAK.bonusCounts, bonus[day] || 0);
   return out;
 }
 export function activeDaySet(wallet) {

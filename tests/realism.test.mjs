@@ -129,3 +129,19 @@ test('orders: board lots and China’s T+1 are the exchange’s, and a Taiwan da
   assert.equal(sold.fill.tax, 1500);
   assert.ok(replay(sold.account, now + HOUR).cash.TWD > 0);
 });
+
+test('margin lends what brokers lend: Taiwan 60% (OTC 50%), Reg T 50% elsewhere, nothing on crypto, funds, gold, A-shares', async () => {
+  const { collateralRate } = await import('../public/lib/markets.mjs');
+  assert.equal(collateralRate('stock', 'TW', '2330.TW'), 0.6);
+  assert.equal(collateralRate('stock', 'TW', '6488.TWO'), 0.5);
+  assert.equal(collateralRate('etf', 'TW', '0050.TW'), 0.6);
+  assert.equal(collateralRate('stock', 'US', 'AAPL'), 0.5);
+  assert.equal(collateralRate('stock', 'CN', '600519.SS'), 0);
+  assert.equal(collateralRate('stock', 'IN', 'RELIANCE.NS'), 0);
+  for (const kind of ['crypto', 'fund', 'metal', 'fx']) assert.equal(collateralRate(kind, 'US', 'X'), 0, kind);
+  assert.equal(collateralRate('govbond', 'BOND', 'UST10'), 0.9);
+  // Borrow, buy, borrow again: with 60% the loans add up to 1.5× one's own money at most.
+  let own = 100, loan = 0;
+  for (let i = 0; i < 200; i++) loan += Math.max(0, 0.6 * (own + loan) - loan);
+  assert.ok(Math.abs(loan - 150) < 1e-6);
+});

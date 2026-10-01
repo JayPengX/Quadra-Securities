@@ -4,7 +4,7 @@ import {
   newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import {
-  BASE, CURRENCIES, MARKETS, METALS, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
+  BASE, CURRENCIES, MARKETS, METALS, collateralRate, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
 } from './lib/markets.mjs';
 import { BONDS } from './lib/bonds.mjs';
 import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs';
@@ -1579,7 +1579,10 @@ function ticketInfo() {
   // currency, done with the order in one tap. Also how big a buy margin allows.
   const v0 = d.side === 'buy' ? valuation() : null;
   const rateCur = q.currency === BASE ? 1 : state.rates[q.currency];
-  const capCur = v0 && v0.margin === 'ok' && rateCur ? (v0.capacity / rateCur) * 0.98 : 0;
+  // Only what a broker lends against can be bought on margin (crypto, funds,
+  // gold, A-shares and Indian stocks can't).
+  const marginable = collateralRate(q.kind, q.market, q.symbol) > 0;
+  const capCur = marginable && v0 && v0.margin === 'ok' && rateCur ? (v0.capacity / rateCur) * 0.98 : 0;
   const marginBuy = short > 0 && !topUp?.enough && capCur >= short ? { amount: Math.min(capCur, short * 1.01), rate: loanRateAt(q.currency) } : null;
   let maxMargin = 0;
   if (d.side === 'buy' && capCur > 0 && ref > 0) {

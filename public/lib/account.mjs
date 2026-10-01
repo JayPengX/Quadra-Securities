@@ -12,7 +12,7 @@
 // counts as owed in the maintenance ratio.
 import {
   BASE,
-  COLLATERAL,
+  collateralRate,
   CLOSED_FX_MULTIPLIER,
   MARGIN_CALL,
   MARGIN_LIQUIDATE,
@@ -713,7 +713,7 @@ export function valuate(s, quotes, rates) {
     dayChange += day;
     if (p.qty > 0) {
       longTWD += valueTWD;
-      collateral += valueTWD * (COLLATERAL[p.kind] ?? 0.5);
+      collateral += valueTWD * collateralRate(p.kind, p.market, p.symbol);
     } else {
       shortTWD -= valueTWD;
       feesTWD += fee;

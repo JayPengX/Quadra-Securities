@@ -435,9 +435,25 @@ export function dividendTaxes(market, gross) {
   return { withheld, nhi, net: gross - withheld - nhi };
 }
 
-// Margin: how much of each kind's value can be borrowed against, and the
-// maintenance ratio (assets ÷ debt) where the broker calls and where it sells.
-export const COLLATERAL = { stock: 0.6, etf: 0.6, bond: 0.6, fund: 0.5, metal: 0.5, crypto: 0.3, govbond: 0.8, fx: 0.5 };
+// Margin: how much of a holding's value can be borrowed against (its loan
+// value), as brokers set it, and the maintenance ratio (assets ÷ debt) where
+// the broker calls and where it sells.
+//   Taiwan stocks and ETFs: 融資成數, 60% listed (.TW), 50% OTC (.TWO).
+//   Other markets: 50%, the US Reg T rule international brokers apply.
+//   China A-shares (Stock Connect) and India: none (no margin for foreign
+//   retail investors).
+//   Government bonds 90%, corporate bonds 70%.
+//   Crypto, mutual funds, the gold passbook and currencies: nothing (a
+//   broker doesn't lend against them).
+export const COLLATERAL = { stock: 0.5, etf: 0.5, bond: 0.7, govbond: 0.9, fund: 0, metal: 0, crypto: 0, fx: 0 };
+const NO_MARGIN_MARKETS = new Set(['CN', 'IN']);
+export function collateralRate(kind, market, symbol = '') {
+  if (!(kind in COLLATERAL)) return 0;
+  if (kind !== 'stock' && kind !== 'etf') return COLLATERAL[kind];
+  if (NO_MARGIN_MARKETS.has(market)) return 0;
+  if (market === 'TW') return /\.TWO$/i.test(symbol) ? 0.5 : 0.6;
+  return COLLATERAL[kind];
+}
 export const MARGIN_CALL = 1.3;
 export const MARGIN_LIQUIDATE = 1.15;
 

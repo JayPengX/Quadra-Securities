@@ -7,6 +7,9 @@
 // the cache too, refreshed behind it (pageFirst); anything else from the
 // network first, the cache only when offline.
 // One copy per file is kept: a new version replaces the old one.
+// Pictures from other sites: the shared kit's (sw-images.js).
+importScripts('./sw-images.js');
+
 const CACHE = 'stock-study-v1';
 
 self.addEventListener('install', event => {
@@ -18,7 +21,7 @@ self.addEventListener('activate', event => {
     caches
       .keys()
       // Only this app's own old copies: the other Quadra apps share this site
-      // (and its caches), and the logos are kept for all of them.
+      // (and its caches), and the pictures are kept for all of them.
       .then(keys => Promise.all(keys.filter(k => k.startsWith('stock-study-') && k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );

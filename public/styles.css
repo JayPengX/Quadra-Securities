@@ -247,6 +247,8 @@ footer { padding: 10px 0 0; text-align: center; }
 .sym-badge.k-index { background: #334155; }
 .sym-badge.k-future { background: #57534e; }
 .sym-badge.k-fx { background: #0f766e; }
+/* A Taiwan company without a logo: its short Chinese name. */
+.sym-badge.zh { font-size: 0.82rem; letter-spacing: 0; }
 
 .spark { display: block; overflow: visible; }
 .spark path { fill: none; stroke-width: 1.6; stroke: var(--text-muted); vector-effect: non-scaling-stroke; stroke-linejoin: round; }
@@ -693,6 +695,8 @@ a.activity-row { color: inherit; text-decoration: none; }
 .acct-day.down strong, .acct-day.down em { color: var(--down); }
 .acct-plus { margin-left: 6px; font-size: 0.66rem; font-weight: 800; letter-spacing: 0.14em; color: color-mix(in srgb, var(--q-plus-gold) 75%, var(--q-text)); }
 .movers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+/* A phone: the risers, then the fallers, each full width so the names read. */
+@media (max-width: 560px) { .movers { grid-template-columns: 1fr; } }
 .movers-col { display: grid; align-content: start; border: 1px solid var(--q-border); border-radius: var(--q-radius-sm); background: var(--q-surface); overflow: hidden; }
 .movers-head { margin: 0; padding: 9px 12px 6px; font-size: 0.74rem; font-weight: 700; color: var(--q-muted); }
 .mover { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'name pill' 'price pill'; align-items: center; column-gap: 8px; width: 100%; padding: 8px 12px; border: 0; border-top: 1px solid var(--q-divider); background: none; font: inherit; text-align: left; color: var(--q-text); cursor: pointer; }
@@ -774,10 +778,6 @@ a.activity-row { color: inherit; text-decoration: none; }
 .act-list .day-head + .activity-row, .act-list .day-head + button.activity-row { border-top: 0; }
 
 /* ---- Rates board (匯率) ---- */
-.rates-hero { width: 100%; display: grid; gap: 4px; text-align: left; border: 1px solid var(--grid); cursor: pointer; }
-.rates-hero-top { display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary); font-weight: 600; }
-.rates-hero strong { font-size: 2rem; letter-spacing: -0.01em; }
-.rates-hero-spark .spark { width: 100%; height: 54px; }
 .rates-card { padding: 8px 10px; }
 .rates-head, .rates .rate-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 1fr 1fr 0.9fr; align-items: center; gap: 8px; }
 .rates-head { padding: 6px 6px 8px; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); border-bottom: 1px solid var(--grid); }
@@ -852,6 +852,8 @@ a.activity-row { color: inherit; text-decoration: none; }
 }
 /* Movers with the company's logo. */
 .mover { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'logo name pill' 'logo price pill'; }
-.mover > .sym-badge { grid-area: logo; width: 30px; height: 30px; border-radius: 8px; font-size: 0.5rem; }
+.mover > .sym-badge { grid-area: logo; width: 34px; height: 34px; border-radius: 9px; font-size: 0.55rem; }
+.mover > .sym-badge.zh { font-size: 0.68rem; }
 #home-account:empty { display: none; }
 #home-account { margin-top: 10px; }
+#categories { margin-top: 18px; }

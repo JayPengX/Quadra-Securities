@@ -242,43 +242,6 @@ body {
   gap: 10px;
   justify-content: center;
 }
-/* An update being put in place (watchUpdates): a veil over the app. */
-.q-updating {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483000;
-  display: grid;
-  place-items: center;
-  background: color-mix(in srgb, var(--q-page) 88%, transparent);
-  backdrop-filter: blur(4px);
-  font: 600 15px var(--q-font);
-  color: var(--q-text);
-}
-.q-update-bar {
-  position: fixed;
-  left: 50%;
-  bottom: calc(84px + env(safe-area-inset-bottom));
-  transform: translateX(-50%);
-  z-index: 2147482500;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px 10px 16px;
-  border-radius: 999px;
-  background: var(--q-text);
-  color: var(--q-page);
-  font: 600 13.5px var(--q-font);
-  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.45);
-  white-space: nowrap;
-}
-.q-update-bar button {
-  border: 0;
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: var(--q-accent);
-  color: #fff;
-  font: inherit;
-}
 .loading-box {
   display: grid;
   justify-items: center;
@@ -1334,6 +1297,111 @@ dialog.q-moved::backdrop {
     left: calc(50% + 9px);
   }
 }
+
+/* A phone or a tablet (html.q-touch, set by boot.js and quadra.mjs from the
+   device, whatever its width): the same frame as a phone, so an iPad has no
+   brand header either; only a computer's browser keeps it. On a wide tablet
+   the tabs stay a comfortable width in the middle of the bar. */
+:root.q-touch {
+  --q-nav: calc(58px + max(env(safe-area-inset-bottom), var(--q-safe-bottom, 0px)));
+}
+.q-touch .q-appbar {
+  position: static;
+  border: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.q-touch .q-appbar-inner {
+  gap: 10px;
+  min-height: 36px;
+  padding: 6px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left));
+}
+.q-touch .q-brand-logo,
+.q-touch .q-brand h1 {
+  display: none;
+}
+.q-touch .q-status {
+  font-size: 12.5px;
+}
+.q-touch .q-tabbar.q-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 0;
+  margin: 0;
+  padding: 5px max(6px, env(safe-area-inset-right)) max(env(safe-area-inset-bottom), var(--q-safe-bottom, 0px)) max(6px, env(safe-area-inset-left));
+  border-top: 1px solid var(--q-border);
+  border-radius: 0;
+  background: var(--q-bar);
+  -webkit-backdrop-filter: saturate(1.6) blur(18px);
+  backdrop-filter: saturate(1.6) blur(18px);
+}
+.q-touch .q-tabbar .q-tab {
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 4px 2px 6px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--q-muted);
+  font: 600 10.5px/1.15 var(--q-font);
+}
+.q-touch .q-tabbar .q-tab-icon {
+  width: 56px;
+  height: 30px;
+  border-radius: 15px;
+  transition: background 0.2s, transform 0.12s;
+}
+.q-touch .q-tabbar .q-tab svg {
+  width: 23px;
+  height: 23px;
+  stroke-width: 1.9;
+}
+.q-touch .q-tabbar .q-tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.q-touch .q-tabbar .q-tab[aria-selected='true'] {
+  background: none;
+  box-shadow: none;
+  color: var(--q-accent);
+  font-weight: 750;
+}
+.q-touch .q-tabbar .q-tab[aria-selected='true'] .q-tab-icon {
+  background: var(--q-accent-wash);
+}
+.q-touch .q-tabbar .q-tab[aria-selected='true'] svg {
+  stroke-width: 2.2;
+}
+.q-touch .q-tabbar .q-tab:active .q-tab-icon {
+  transform: scale(0.92);
+}
+.q-touch .q-tabbar .q-tab-badge {
+  top: 0;
+  left: calc(50% + 5px);
+  box-shadow: 0 0 0 2px var(--q-page);
+}
+.q-touch .q-tabbar .q-tab-badge.dot {
+  top: 3px;
+  left: calc(50% + 9px);
+}
+@media (min-width: 721px) {
+  .q-touch .q-tabbar.q-tabbar {
+    padding-left: max(6px, calc((100% - 680px) / 2));
+    padding-right: max(6px, calc((100% - 680px) / 2));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .q-tab,
   .q-tabbar .q-tab-icon {

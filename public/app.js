@@ -11,6 +11,7 @@ import { BONDS } from './lib/bonds.mjs';
 import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs';
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, searchSymbols, fxSymbol } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
+import { BRANDS, brandLogo } from './lib/brands.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, stackBar, SERIES } from './lib/chart.mjs';
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
@@ -836,12 +837,28 @@ document.addEventListener(
   },
   true
 );
-const logoUrl = symbol => `https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.png`;
+// The official logo (Wikidata's, scripts/brand-logos.mjs) first; Financial
+// Modeling Prep's only outside Taiwan (its Taiwan images are often photos:
+// a T-shirt for Foxconn, a container for Evergreen). A Taiwan company
+// without one shows its short Chinese name on the badge instead.
+const twSymbol = symbol => /\.TWO?$/.test(symbol);
+const logoUrl = symbol => brandLogo(symbol, 96) || (twSymbol(symbol) ? null : `https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.png`);
+// A logo that loads as a speck (an empty placeholder) counts as missing.
+document.addEventListener(
+  'load',
+  e => {
+    const img = e.target;
+    if (img instanceof HTMLImageElement && img.classList.contains('sym-logo') && img.naturalWidth < 24 && img.naturalHeight < 24) img.dispatchEvent(new Event('error'));
+  },
+  true
+);
 function symbolBadge(symbol, q) {
   const kind = q?.kind || catalogInfo(symbol)?.kind || 'stock';
-  const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
-  const logo = (kind === 'stock' || kind === 'etf') && !BONDS[symbol] && !logoMiss.has(symbol) ? `<img class="sym-logo" src="${h(logoUrl(symbol))}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
-  return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}">${h(text)}${logo}</span>`;
+  const zhShort = twSymbol(symbol) && catalogInfo(symbol)?.zh ? catalogInfo(symbol).zh.replace(kind === 'etf' ? /^(元大|富邦|國泰|群益|復華|統一|凱基|大華|中信|永豐|兆豐)/ : /[-*].*$/, '').slice(0, 2) : '';
+  const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : zhShort || bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
+  const url = !BONDS[symbol] && !logoMiss.has(symbol) && (BRANDS[symbol] || kind === 'stock' || kind === 'etf') ? logoUrl(symbol) : null;
+  const logo = url ? `<img class="sym-logo" src="${h(url)}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
+  return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}${text === zhShort && zhShort ? ' zh' : ''}">${h(text)}${logo}</span>`;
 }
 
 function quoteRow(symbol, { note = '' } = {}) {
@@ -2374,17 +2391,10 @@ function exchangeHtml() {
 
 // The rates board, as a bank shows it: what it buys and sells each currency
 // for (per unit, or per 100 for the small ones), and today's move. A row
-// opens the exchange for that currency.
+// opens the exchange for that currency. (No USD chart over it: the board
+// already has USD, and a day's line said nothing to act on.)
 function ratesHtml() {
-  const usd = state.quotes.get(fxSymbol('USD'));
-  const hero = usd
-    ? `<button class="card rates-hero" type="button" data-action="fx-to" data-cur="USD">
-        <span class="rates-hero-top"><span>🇺🇸 USD / TWD</span>${pctText(usd)}</span>
-        <strong class="num">${h(num(usd.price, 3))}</strong>
-        <span class="rates-hero-spark">${sparkline(usd.line, usd.prev, { width: 320, height: 54 })}</span>
-      </button>`
-    : '';
-  return `${hero}<div class="card rates-card">
+  return `<div class="card rates-card">
     <div class="rates-head"><span>${h(t('ratesCurrency'))}</span><span>${h(t('bankBuys'))}</span><span>${h(t('bankSells'))}</span><span>${h(t('ratesChange'))}</span></div>
     <div class="rates">${Object.keys(CURRENCIES).filter(c => c !== BASE).map(rateRow).join('')}</div>
     <p class="rates-foot">${h(t('ratesFoot'))}</p>

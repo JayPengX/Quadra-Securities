@@ -15,6 +15,10 @@
 //   older __oddsStarted / __stockStarted) and hides #loading itself (the kit
 //   does).
 (function () {
+  // A phone or a tablet (an iPad says Macintosh, with touch): the phone's
+  // frame, set before the first paint (quadra.css .q-touch).
+  var ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod|Android/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) document.documentElement.classList.add('q-touch');
   var box = document.getElementById('loading');
   if (!box) return;
   var zh = /^zh/i.test(document.documentElement.lang || navigator.language || '');
@@ -50,9 +54,11 @@
     box.hidden = true;
   };
 
-  // The progress line creeps towards 90% on its own; the app can name a
-  // step (window.__bootStep('…')), and hiding #loading ends it.
-  var shown = 0.08;
+  // The progress line follows what has really loaded: the app's own files
+  // (counted as they arrive, against how many it took last time on this
+  // device), then the steps the app names (window.__bootStep('…', part)).
+  // Hiding #loading ends it.
+  var shown = 0.04;
   var bar = q('.q-boot-bar i');
   var step = q('.q-boot-step');
   var paint = function () {
@@ -60,16 +66,48 @@
   };
   paint();
   step.textContent = L('載入中…', 'Loading…');
+  var countKey = 'quadra.bootFiles:' + location.pathname;
+  var expected = 0;
+  try {
+    expected = Number(localStorage.getItem(countKey)) || 0;
+  } catch (e) {}
+  var files = function () {
+    if (!window.performance || !performance.getEntriesByType) return 0;
+    return performance.getEntriesByType('resource').filter(function (r) {
+      return r.name.indexOf(location.origin) === 0 && !/version\.json/.test(r.name);
+    }).length;
+  };
+  var stepPart = 0;
+  var tick = function () {
+    var done = files();
+    // Files make up the first 70%; without last time's count, each file
+    // closes part of the gap that's left.
+    var part = expected ? 0.7 * Math.min(1, done / expected) : 0.7 * (1 - Math.pow(0.88, done));
+    var next = Math.max(part, stepPart);
+    if (next > shown) {
+      shown = Math.min(0.98, next);
+      paint();
+    }
+  };
+  var counted = false;
   var timer = setInterval(function () {
     if (box.hidden) return clearInterval(timer);
-    shown += (0.9 - shown) * 0.08;
-    paint();
-  }, 120);
+    // The app's modules have run: that many files is what it takes.
+    if (!counted && started()) {
+      counted = true;
+      var n = files();
+      expected = n;
+      try {
+        if (n > 2) localStorage.setItem(countKey, String(n));
+      } catch (e) {}
+    }
+    tick();
+  }, 100);
   window.__bootStep = function (text, part) {
     if (text) step.textContent = text;
-    if (part > shown) {
-      shown = Math.min(0.98, part);
-      paint();
+    if (part > stepPart) {
+      stepPart = part;
+      tick();
     }
   };
 
@@ -112,7 +150,6 @@
       if (sessionStorage.getItem(flag) === latest) return;
       sessionStorage.setItem(flag, latest);
       window.__bootUpdating = true;
-      step.textContent = L('更新到最新版本…', 'Updating to the latest version…');
       var go = function () {
         location.replace(location.pathname + '?v=' + encodeURIComponent(latest) + location.hash);
       };

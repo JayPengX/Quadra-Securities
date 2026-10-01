@@ -296,91 +296,9 @@ export const paydayFor = () => payFor();
 export const OVERDRAFT_RATE = 0.01;
 export const overdraft = wallet => Math.max(0, -poolBalance(wallet));
 
-// Once per device: what the economy reset did to an account made before it.
-const RESET_SEEN = 'quadra.seen.rebase-v3';
-function resetNotice(s) {
-  const e = (s.wallet?.entries || []).find(x => x.id === 'eco:rebase:v3' && x.app === 'eco');
-  if (!e || readStore(RESET_SEEN)) return;
-  writeStore(RESET_SEEN, '1');
-  const en = s.lang === 'en';
-  const owed = overdraft(s.wallet);
-  tell({
-    lang: s.lang,
-    icon: '⚖️',
-    title: en ? 'Quadra’s new economy' : 'Quadra 經濟調整',
-    body: en
-      ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. Every month pays a fixed ${money(ECONOMY.monthly)}.${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
-      : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月固定發薪 ${money(ECONOMY.monthly)}。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
-  });
-  return true;
-}
-
-// Once per device, for an account made before v7: Rewards gives points, not
-// money, and they level up and buy things there; the monthly pay;
-// Plus is new (v8).
-const V8_SEEN = 'quadra.seen.v8';
-// 2026-10-01 in Taiwan.
-export const V7_AT = Date.UTC(2026, 8, 30, 16);
-function v8Notice(s) {
-  if (!(s.wallet?.created < V7_AT) || readStore(V8_SEEN)) return;
-  writeStore(V8_SEEN, '1');
-  const en = s.lang === 'en';
-  tell({
-    lang: s.lang,
-    icon: '✨',
-    title: en ? 'What’s new' : 'Quadra 更新了',
-    body: en ? 'What you’ve earned is still yours.' : '已經賺到的錢都還在。',
-    points: [
-      ['⭐', en ? 'Rewards gives points (XP)' : 'Rewards 改發積分', en ? 'Level up, and trade them for cards and packs' : '升等級，還能換保護卡和單字包'],
-      ['💰', en ? `Pay ${money(ECONOMY.monthly)} a month` : `每月薪水 ${money(ECONOMY.monthly)}`, en ? 'On the 1st of every month' : '每月 1 日入帳'],
-      ['✦', en ? `Plus is ${money(PLUS.fee)} a month` : `Plus 每月 ${money(PLUS.fee)}`, en ? `A ${money(PLUS.odds.bonusBet)} free bet every week` : `每週送 ${money(PLUS.odds.bonusBet)} 免費投注`]
-    ]
-  });
-  return true;
-}
-
-// Once per device, for an account made before v10: a fixed pay, savings in
-// Securities, points that expire.
-const V10_SEEN = 'quadra.seen.v10';
-export const V10_AT = Date.UTC(2026, 9, 1, 16);
-function v10Notice(s) {
-  if (!(s.wallet?.created < V10_AT) || readStore(V10_SEEN)) return;
-  writeStore(V10_SEEN, '1');
-  const en = s.lang === 'en';
-  tell({
-    lang: s.lang,
-    icon: '🏦',
-    title: en ? 'Run like the real thing' : '跟真的一樣',
-    points: [
-      ['💰', en ? `A fixed ${money(ECONOMY.monthly)} pay` : `每月固定薪水 ${money(ECONOMY.monthly)}`, en ? 'The same however much you hold' : '存多存少都一樣'],
-      ['🏦', en ? 'Time deposits and lending shares' : '定存和借券出借', en ? 'Securities › FX & loans › Savings' : 'Securities › 換匯・融資 › 理財'],
-      ['⏳', en ? 'Points last a year' : '積分有效期限一年', en ? 'Each month’s expire a year on' : '每月的積分隔年同月底到期']
-    ]
-  });
-  return true;
-}
-
-// Once per device, for an account made before v11: the points catalogue,
-// and Plus's perks reviewed.
-const V11_SEEN = 'quadra.seen.v11';
-export const V11_AT = Date.UTC(2026, 9, 2, 16);
-function v11Notice(s) {
-  if (!(s.wallet?.created < V11_AT) || readStore(V11_SEEN)) return;
-  writeStore(V11_SEEN, '1');
-  const en = s.lang === 'en';
-  tell({
-    lang: s.lang,
-    icon: '🎁',
-    title: en ? 'Points buy more' : '積分可以兌換了',
-    body: en ? 'Rewards › Home › Points catalogue' : 'Rewards › 首頁 › 積分兌換',
-    points: [
-      ['🎁', en ? 'Free bets, vouchers, a Plus month' : '免費投注、折抵券、Plus 月份', en ? `From ${catalogCost('bet100').toLocaleString('en-US')} XP` : `${catalogCost('bet100').toLocaleString('en-US')} XP 起`],
-      ['✦', en ? 'Plus: more in Securities' : 'Plus：證券權益加碼', en ? `Deposits +${PLUS.stock.tdBonus * 100}%, lending cut ${PLUS.stock.lendCut * 100}%, catalogue 10% off` : `定存 +${PLUS.stock.tdBonus * 100}%、借券只抽 ${PLUS.stock.lendCut * 100}%、兌換 9 折`],
-      ['📘', en ? 'Word packs: one price for all' : '單字包不再有會員價', en ? 'Packs bought stay yours' : '已買的照樣保留']
-    ]
-  });
-  return true;
-}
+// The one-off "what's new" notices (economy reset, v8, v10, v11) are gone:
+// they were remembered per app on a device, so each home-screen app showed
+// them again on opening. What changed is in each app's 說明 instead.
 
 // ---- Quadra Plus ---------------------------------------------------------------------
 //
@@ -918,6 +836,11 @@ function noZoom() {
 }
 noZoom();
 
+// A phone or a tablet: html.q-touch, so a tablet gets a phone's frame (no
+// brand header, the tabs at the bottom; quadra.css). boot.js sets it earlier
+// in the apps that load it.
+if (typeof document !== 'undefined' && isPhoneOrTablet()) document.documentElement.classList.add('q-touch');
+
 // The solid strip under the phone's status bar (see .q-statusbar in quadra.css).
 function statusStrip() {
   if (typeof document === 'undefined' || !document.body || document.querySelector('.q-statusbar')) return;
@@ -1142,8 +1065,10 @@ function makeSession(app, { lang, heartbeat }) {
     writeStore(KEY.oldPass, null);
     if (!first) first = await signInGate(s);
     s.first = first;
+    // The loading screen's line (boot.js): signed in, the app's data next.
+    globalThis.__bootStep?.('', 0.8);
     loop();
-    setTimeout(() => resetNotice(s) || v8Notice(s) || v10Notice(s) || v11Notice(s) || plusNotices(s), 1200);
+    setTimeout(() => plusNotices(s), 1200);
     s.on('wallet', () => plusNotices(s));
     setTimeout(() => offerNotices(s), 2500);
     // The first reply: what the app merges its own copy with (never the
@@ -2637,8 +2562,6 @@ export function watchUpdates({ current, key, cachePrefix, busy = () => false, ev
   let checking = false;
   let pending = null;
   let waiter = 0;
-  let bar = null;
-  const zh = !/^en/i.test(document.documentElement.lang || '');
   const channel = globalThis.BroadcastChannel ? new BroadcastChannel('quadra-updates') : null;
   const occupied = () => {
     if (busy()) return true;
@@ -2651,30 +2574,14 @@ export function watchUpdates({ current, key, cachePrefix, busy = () => false, ev
     if (sessionStorage.getItem(flag) === latest) return;
     sessionStorage.setItem(flag, latest);
     rememberPlace();
-    if (document.visibilityState === 'visible') {
-      const veil = document.createElement('div');
-      veil.className = 'q-updating';
-      veil.textContent = zh ? '正在更新到最新版本…' : 'Updating to the latest version…';
-      document.body.append(veil);
-    }
     if (globalThis.caches && cachePrefix) for (const name of await caches.keys()) if (name.startsWith(cachePrefix)) await caches.delete(name);
     const reg = await navigator.serviceWorker?.getRegistration?.(location.pathname);
     await reg?.update?.().catch(() => {});
     location.replace(`${location.pathname}?v=${encodeURIComponent(latest)}${location.hash}`);
   }
   function offer(latest) {
+    // Quietly: no bar, no notice; it applies once the person is free.
     pending = latest;
-    if (!bar && document.body) {
-      bar = document.createElement('div');
-      bar.className = 'q-update-bar';
-      bar.setAttribute('role', 'status');
-      const go = document.createElement('button');
-      go.type = 'button';
-      go.textContent = zh ? '現在更新' : 'Update now';
-      go.addEventListener('click', () => apply(latest).catch(() => {}));
-      bar.append(document.createTextNode(zh ? '有新版本，忙完會自動更新' : 'A new version is ready'), go);
-      document.body.append(bar);
-    }
     if (!waiter)
       waiter = setInterval(() => {
         if (!occupied()) {

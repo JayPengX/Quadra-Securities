@@ -1,8 +1,9 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, penaltyEvent, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
+import { TD_TERMS, TD_MIN, TD_EARLY, tdInterest, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, lendFee, lendable } from './lib/savings.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, collateralRate, MARGIN_CALL, MARGIN_LIQUIDATE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
 } from './lib/markets.mjs';
@@ -59,6 +60,7 @@ const state = {
   // mode 'pay': the amount is what you give; 'get': what you want to receive.
   fx: { from: BASE, to: 'USD', amount: '', mode: 'pay', view: 'exchange' },
   loan: { currency: BASE, amount: '', mode: 'borrow' },
+  td: { amount: '', months: 12, renew: false },
   alloc: 'kind',
   historyView: 'activity',
   activityFilter: 'all',
@@ -345,8 +347,10 @@ function afterPrices() {
   // Orders left open while the page was closed are settled from the price
   // history first (backfillOrders), not at today's price.
   if (!state.account || !state.backfilled) return;
-  let account = state.account;
   const now = Date.now();
+  // Deposits that matured and lending contracts that ran their term.
+  let account = matureLending(matureDeposits(state.account, now), now);
+  for (const e of account.events.filter(e => e.type === 'tdend' && !state.account.events.some(x => x.id === e.id))) accountNotice('income', t('tdMatured', { v: money(e.amount + e.net, BASE) }), { tag: e.id, hash: 'fx' });
   // Day orders past their session end (and month-old GTC ones) lapse first.
   const ex = expireOrders(account, now);
   account = ex.account;
@@ -357,6 +361,8 @@ function afterPrices() {
   for (const o of r.rejected) accountNotice('order', t('toastRejected', { name: nameOf(o.symbol), why: t(`err_${o.reason}`) }), { tone: 'bad', tag: `order:${o.id}`, hash: 'history' });
   if (r.filled.some(f => f.forced && !f.cover)) account = repayAll(account, state.rates, state.fxOpen, now);
   let v = valuate(replay(account, now), state.quotes, state.rates);
+  // Below the line the broker needs every share: lent ones are called back.
+  if (v.margin === 'liquidate') account = recallAll(account, now);
   for (const plan of liquidationPlan(account, v)) {
     const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
     if (placed.account) {
@@ -378,11 +384,19 @@ function afterPrices() {
         account = { ...account, od: { since: now } };
         accountNotice('margin', t('odWarn', { v: money(owed, BASE), date: fmtDate(now + OD_GRACE) }), { tone: 'bad', tag: `od:${now}`, hash: 'portfolio' });
       } else if (now - account.od.since >= OD_GRACE && !account.orders.some(o => o.status === 'open' && o.cover)) {
-        // A default: 違約金 on what's owed (it's sold for too), on the record.
-        const fine = penaltyEvent(owed, now);
-        account = { ...account, events: [...account.events, fine], defaultAt: now };
-        accountNotice('margin', t('odDefault', { v: money(fine.amount, BASE) }), { tone: 'bad', tag: `default:${now}`, hash: 'portfolio' });
-        for (const x of coverPlan(v, owed + fine.amount).plan) {
+        // A default: 違約金 on what's owed (it's sold for too), on the record;
+        // time deposits are broken against it (the bank's set-off, at the
+        // early rate) and lent shares called back to be sold. Once per
+        // overdraft: later rounds only sell what's still needed.
+        if (!(account.defaultAt >= account.od.since)) {
+          const fine = penaltyEvent(owed, now);
+          account = { ...account, events: [...account.events, fine], defaultAt: now };
+          accountNotice('margin', t('odDefault', { v: money(fine.amount, BASE) }), { tone: 'bad', tag: `default:${now}`, hash: 'portfolio' });
+          for (const id of Object.keys(replay(account, now).tds)) account = breakDeposit(account, id, now).account || account;
+          account = recallAll(account, now);
+        }
+        v = valuate(replay(account, now), state.quotes, state.rates);
+        for (const x of coverPlan(v, overdrawnBy(v)).plan) {
           const placed = placeOrder(account, { symbol: x.symbol, side: 'sell', type: 'market', qty: x.qty, forced: true, cover: true }, { quote: state.quotes.get(x.symbol), rates: state.rates, valuation: v, now });
           if (placed.account) {
             account = placed.account;
@@ -402,6 +416,7 @@ function afterPrices() {
     if (v.margin === 'call') {
       if (!account.call) account = { ...account, call: { since: now } };
       else if (now - account.call.since >= CALL_GRACE) {
+        account = recallAll(account, now);
         for (const plan of callPlan(account, v)) {
           const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, now });
           if (placed.account) {
@@ -1848,6 +1863,12 @@ function errorText(r) {
       return t('err_lot', { lot: fmtQty(r.lot) });
     case 'tPlus1':
       return t('err_tPlus1', { can: fmtQty(r.can) });
+    case 'tdMin':
+      return t('err_tdMin', { min: money(r.min, BASE) });
+    case 'lendLot':
+      return t('err_lendLot', { lot: fmtQty(r.lot) });
+    case 'lendQty':
+      return t('err_lendQty', { can: fmtQty(r.can) });
     default:
       return t(`err_${r.error}`);
   }
@@ -1901,6 +1922,7 @@ function renderPortfolio() {
         <span>${h(t('cash'))} <strong class="num">${h(money(v.cashTWD - heldTWD, BASE))}</strong></span>
         ${heldTWD > 0.5 ? `<span>${h(t('openOrders'))} <strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
         <span>${h(t('holdings'))} <strong class="num">${h(money(v.longTWD, BASE))}</strong></span>
+        ${v.savedTWD > 0 ? `<span>${h(t('tdTitle'))} <strong class="num">${h(money(v.savedTWD, BASE))}</strong></span>` : ''}
         ${v.receivable > 0 ? `<span>${h(t('pendingDivTitle'))} <strong class="num">${h(money(v.receivable, BASE))}</strong></span>` : ''}
         ${v.shortTWD > 0 ? `<span>${h(t('shorts'))} <strong class="num">−${h(money(v.shortTWD, BASE))}</strong></span>` : ''}
         ${v.debtTWD > 0 ? `<span>${h(t('loans'))} <strong class="num">−${h(money(v.debtTWD, BASE))}</strong></span>` : ''}
@@ -1966,7 +1988,7 @@ function incomeCardHtml(v) {
   if (!inc.total && !list.length) return '';
   const yieldPct = v.longTWD > 0 ? inc.last12 / v.longTWD : 0;
   const top = Object.entries(inc.payers).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  const parts = [['incomeDiv', inc.div], ['incomeCoupon', inc.coupon], ['incomeInterest', inc.interest]].filter(([, x]) => x >= 0.5);
+  const parts = [['incomeDiv', inc.div], ['incomeCoupon', inc.coupon], ['incomeInterest', inc.interest], ['incomeLending', inc.lending]].filter(([, x]) => x >= 0.5);
   return `<div class="card income-card">
     <div class="card-head"><h3 class="card-title">💰 ${h(t('incomeTitle'))}</h3></div>
     <div class="kpis">
@@ -2024,7 +2046,7 @@ function positionRow(p) {
   const q = p.quote;
   return `<button class="row position-row" type="button" data-action="open" data-symbol="${h(p.symbol)}">
     ${symbolBadge(p.symbol, p)}
-    <span class="row-main"><span class="row-title">${h(nameOf(p.symbol, q))}${p.short ? `<span class="held-tag short">${h(t('shortTag'))}</span>` : ''}</span>
+    <span class="row-main"><span class="row-title">${h(nameOf(p.symbol, q))}${p.short ? `<span class="held-tag short">${h(t('shortTag'))}</span>` : ''}${p.lent ? `<span class="held-tag">${h(t('lentTag', { qty: fmtQty(p.lent) }))}</span>` : ''}</span>
       <span class="row-sub">${flagOf(p.symbol, p)} ${h(fmtQty(Math.abs(p.qty)))} ${h(unitOf(p.symbol))} · ${h(t('avgShort'))} ${h(fmtPrice(p.avg, p.currency))} · ${h(t('nowShort'))} ${h(fmtPrice(p.price, p.currency))} ${h(p.currency)}</span></span>
     <span class="row-spark">${q?.line?.length > 1 ? sparkline(q.line, q.kind === 'crypto' ? null : q.prev) : ''}</span>
     <span class="row-value"><strong class="num">${h(money(p.valueTWD, BASE))}</strong><small class="num">${h(t('weight', { w: pct(p.weight, { digits: 1, sign: false }) }))}</small></span>
@@ -2195,11 +2217,12 @@ function renderFx() {
   const tabs = `<div class="segmented fx-views" role="tablist">${[
     ['exchange', t('fxViewExchange')],
     ['rates', t('fxViewRates')],
-    ['loans', t('fxViewLoans')]
+    ['loans', t('fxViewLoans')],
+    ['grow', t('fxViewGrow')]
   ]
     .map(([k, label]) => `<button type="button" data-action="fx-view" data-view="${k}" aria-pressed="${view === k}">${h(label)}</button>`)
     .join('')}</div>`;
-  box.innerHTML = `${tabs}${view === 'rates' ? ratesHtml() : view === 'loans' ? loansHtml() : exchangeHtml()}`;
+  box.innerHTML = `${tabs}${view === 'rates' ? ratesHtml() : view === 'loans' ? loansHtml() : view === 'grow' ? growHtml() : exchangeHtml()}`;
 }
 
 function exchangeHtml() {
@@ -2289,6 +2312,124 @@ function rateRow(c) {
     <span class="row-price"><strong class="num">${q ? h(num(q.price * unit, 4)) : '…'}</strong><small>NT$</small></span>
     ${pctPill(q)}
   </button>`;
+}
+
+// 理財: time deposits (定存) and lending shares (借券出借), savings.mjs's terms.
+function growHtml() {
+  if (!state.account) return `<div class="card"><p>${h(t('needAccount'))}</p><div class="spinner"></div></div>`;
+  const v = valuation();
+  const s = snap();
+  const d = state.td;
+  const now = Date.now();
+  const free = Math.max(0, withdrawable(state.account, s)[BASE] || 0);
+  const amount = Math.round(Number(d.amount) || 0);
+  const term = TD_TERMS.find(x => x.months === d.months) || TD_TERMS.at(-1);
+  const gross = amount > 0 ? Math.round((amount * term.rate * term.months) / 12) : 0;
+  const ok = amount >= TD_MIN && amount <= free;
+  const tds = v.tds || [];
+  const lendRows = v.positions.filter(p => !p.short && lendable(p.market, p.kind));
+  const lent = v.lent || [];
+  return `<div class="fx-page">
+    <div class="card loan-card">
+      <div class="card-head"><h3 class="card-title">🏦 ${h(t('tdTitle'))}</h3>${v.savedTWD > 0 ? `<strong class="num">${h(money(v.savedTWD, BASE))}</strong>` : ''}</div>
+      <div class="segmented small td-terms" role="group">${TD_TERMS.map(x => `<button type="button" data-action="td-term" data-months="${x.months}" aria-pressed="${x.months === term.months}"><span>${h(t('tdMonths', { n: x.months }))}</span><small class="num">${h(pct(x.rate, { digits: 2, sign: false }))}</small></button>`).join('')}</div>
+      <div class="fx-side">
+        <div class="fx-side-row"><span class="fx-cur">NT$</span><input id="td-amount" class="fx-input num" inputmode="numeric" autocomplete="off" value="${h(d.amount)}" placeholder="${h(String(TD_MIN))}" aria-label="${h(t('amount'))}" /></div>
+        <div class="fx-side-foot"><span class="muted">${h(t('tdHave', { v: money(free, BASE) }))}</span>${free >= TD_MIN ? `<button class="link" type="button" data-action="td-max">${h(t('tdAll'))}</button>` : ''}</div>
+      </div>
+      <label class="check-row"><input id="td-renew" type="checkbox" ${d.renew ? 'checked' : ''} /> <span>${h(t('tdRenew'))}</span></label>
+      ${amount > 0 ? `<p class="muted">${h(amount < TD_MIN ? t('err_tdMin', { min: money(TD_MIN, BASE) }) : amount > free ? t('tdTooMuch') : t('tdWillEarn', { v: money(gross, BASE), date: fmtDate(addMonthsTPE(now, term.months)) }))}</p>` : ''}
+      <div class="button-row"><button class="primary-button grow" type="button" data-action="td-open" ${ok ? '' : 'disabled'}>${h(t('tdOpen'))}</button></div>
+      <p class="note">${h(t('tdNote', { early: pct(TD_EARLY, { digits: 0, sign: false }) }))}</p>
+    </div>
+    ${
+      tds.length
+        ? `<div class="card"><h3 class="card-title">${h(t('tdYours'))} <span class="count">${tds.length}</span></h3>${tds
+            .map(td => {
+              const full = Math.round((td.amount * td.rate * td.months) / 12);
+              return `<div class="order-row"><span class="side-tag div">🏦</span><span class="row-main"><span class="row-title num">${h(money(td.amount, BASE))} · ${h(t('tdMonths', { n: td.months }))} ${h(pct(td.rate, { digits: 3, sign: false }))}</span><span class="row-sub">${h(t('tdEnds', { date: fmtDate(td.ends), v: money(full, BASE) }))}${td.renew ? ` · ${h(t('tdRenewTag'))}` : ''}</span></span><button class="ghost-button small" type="button" data-action="td-break" data-id="${h(td.id)}">${h(t('tdBreak'))}</button></div>`;
+            })
+            .join('')}</div>`
+        : ''
+    }
+    <div class="card">
+      <div class="card-head"><h3 class="card-title">🤝 ${h(t('lendTitle'))}</h3>${v.lendIncome > 0 ? `<strong class="num up-ink">+${h(money(v.lendIncome, BASE))}</strong>` : ''}</div>
+      ${lendRows.length ? lendRows.map(p => lendRowHtml(p, now)).join('') : `<p class="muted">${h(t('lendNone'))}</p>`}
+      ${lent.map(l => lentRowHtml(l, now)).join('')}
+      <p class="note">${h(t('lendNote', { cut: pct(LEND_CUT, { digits: 0, sign: false }), days: LEND_RECALL, term: LEND_TERM_DAYS }))}</p>
+    </div>
+  </div>`;
+}
+
+const addMonthsTPE = (t0, n) => {
+  const d = new Date(t0 + 8 * 3_600_000);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()) - 8 * 3_600_000;
+};
+
+function lendRowHtml(p, now) {
+  const can = lendableQty(state.account, p.symbol, now);
+  const rate = p.kind === 'etf' ? 0.006 : 0.012;
+  const yearNet = can ? lendFee({ qty: can, price: p.price, rate, t: 0 }, 365 * 86_400_000).net : 0;
+  const why = p.financed > 0 ? t('lendWhyMargin') : can ? '' : p.qty - (p.lent || 0) < LEND_LOT ? t('lendWhyLot') : t('lendWhySettle');
+  return `<div class="order-row"><span class="side-tag buy">${h(t('lendTag'))}</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span><span class="row-sub">${h(can ? t('lendCan', { qty: fmtQty(can), rate: pct(rate * (1 - LEND_CUT), { digits: 2, sign: false }), v: money(yearNet, BASE) }) : why)}</span></span>${can ? `<button class="ghost-button small" type="button" data-action="lend" data-symbol="${h(p.symbol)}" data-qty="${can}">${h(t('lendGo'))}</button>` : ''}</div>`;
+}
+
+function lentRowHtml(l, now) {
+  const so = lendFee(l, l.back || now).net;
+  return `<div class="order-row"><span class="side-tag div">🤝</span><span class="row-main"><span class="row-title">${h(nameOf(l.symbol))} · ${h(fmtQty(l.qty))} ${h(unitOf(l.symbol))}</span><span class="row-sub">${h(l.back ? t('lendBack', { date: fmtDate(l.back) }) : t('lendSince', { date: fmtDate(l.t) }))} · ${h(t('lendSoFar', { v: money(so, BASE) }))}</span></span>${l.back ? '' : `<button class="ghost-button small" type="button" data-action="recall" data-id="${h(l.id)}">${h(t('lendRecall'))}</button>`}</div>`;
+}
+
+async function doOpenDeposit() {
+  const d = state.td;
+  const amount = Math.round(Number(d.amount) || 0);
+  const term = TD_TERMS.find(x => x.months === d.months);
+  if (!term) return;
+  const gross = Math.round((amount * term.rate * term.months) / 12);
+  if (!(await ask({ lang: locale, icon: '🏦', title: t('tdAsk', { v: money(amount, BASE), n: term.months }), points: [['📈', t('tdAskRate', { rate: pct(term.rate, { digits: 3, sign: false }) }), t('tdAskEarn', { v: money(gross, BASE) })], ['🔒', t('tdAskLock', { date: fmtDate(addMonthsTPE(Date.now(), term.months)) }), t('tdAskEarly', { early: pct(TD_EARLY, { digits: 0, sign: false }) })]], ok: t('tdOpen'), cancel: t('orderAskCancel') }))) return;
+  const r = openDeposit(state.account, { amount, months: term.months, renew: d.renew }, Date.now());
+  if (r.error) return toast(errorText(r), 'bad');
+  commit(r.account);
+  d.amount = '';
+  toast(t('tdDone', { v: money(amount, BASE) }), 'good');
+  render();
+}
+
+async function doBreakDeposit(id) {
+  const now = Date.now();
+  const td = snap().tds[id];
+  if (!td) return;
+  const full = Math.round((td.amount * td.rate * td.months) / 12);
+  const got = tdInterest(td, now).gross;
+  if (!(await ask({ lang: locale, icon: '⚠️', title: t('tdBreakAsk'), points: [['💸', t('tdBreakGet', { v: money(got, BASE) }), t('tdBreakLose', { v: money(Math.max(0, full - got), BASE) })]], ok: t('tdBreak'), cancel: t('orderAskCancel'), danger: true }))) return;
+  const r = breakDeposit(state.account, id, now);
+  if (r.error) return toast(errorText(r), 'bad');
+  commit(r.account);
+  toast(t('tdBroken', { v: money(r.event.amount + r.event.net, BASE) }), 'good');
+  render();
+}
+
+async function doLend(symbol, qty) {
+  const q = state.quotes.get(symbol);
+  if (!q?.price) return toast(t('err_noQuote'), 'bad');
+  const v = valuation();
+  const p = v.positions.find(x => x.symbol === symbol);
+  const rate = p?.kind === 'etf' ? 0.006 : 0.012;
+  const yearNet = lendFee({ qty, price: q.price, rate, t: 0 }, 365 * 86_400_000).net;
+  if (!(await ask({ lang: locale, icon: '🤝', title: t('lendAsk', { qty: fmtQty(qty), name: nameOf(symbol) }), points: [['💰', t('lendAskEarn', { v: money(yearNet, BASE) }), t('lendAskCut', { cut: pct(LEND_CUT, { digits: 0, sign: false }) })], ['🔒', t('lendAskLock'), t('lendAskRecall', { days: LEND_RECALL })]], ok: t('lendGo'), cancel: t('orderAskCancel') }))) return;
+  const r = lendShares(state.account, { symbol, qty, price: q.price }, Date.now());
+  if (r.error) return toast(errorText(r), 'bad');
+  commit(r.account);
+  toast(t('lendDone', { qty: fmtQty(qty), name: nameOf(symbol) }), 'good');
+  render();
+}
+
+async function doRecall(id) {
+  if (!(await ask({ lang: locale, icon: '↩️', title: t('lendRecallAsk'), body: t('lendRecallBody', { days: LEND_RECALL }), ok: t('lendRecall'), cancel: t('orderAskCancel') }))) return;
+  const r = recallShares(state.account, id, Date.now());
+  if (r.error) return toast(errorText(r), 'bad');
+  commit(r.account);
+  toast(t('lendRecalled', { date: fmtDate(r.back) }), 'good');
+  render();
 }
 
 function loansHtml() {
@@ -2407,6 +2548,35 @@ function activityRow(e) {
       sub = e.pool ? t('poolDepositSub') : '';
       amount = `<strong class="num ${e.amount < 0 ? 'down-ink' : ''}">${e.amount < 0 ? '' : '+'}${h(money(e.amount, e.currency))}</strong>`;
       break;
+    case 'td':
+      icon = '<span class="side-tag div">🏦</span>';
+      title = t('tdRow', { n: e.months });
+      sub = `${pct(e.rate, { digits: 3, sign: false })} · ${t('tdEnds', { date: fmtDate(e.ends), v: money(Math.round((e.amount * e.rate * e.months) / 12), BASE) })}`;
+      amount = `<strong class="num">−${h(money(e.amount, BASE))}</strong>`;
+      break;
+    case 'tdend':
+      icon = '<span class="side-tag div">🏦</span>';
+      title = e.early ? t('tdBrokenRow') : t('tdEndRow');
+      sub = [`${t('tdInterestLabel')} ${money(e.interest, BASE)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : ''].filter(Boolean).join(' · ');
+      amount = `<strong class="num up-ink">+${h(money(e.amount + e.net, BASE))}</strong>`;
+      break;
+    case 'lend':
+      icon = '<span class="side-tag div">🤝</span>';
+      title = t('lendRow', { name: nameOf(e.symbol, q), qty: fmtQty(e.qty) });
+      sub = t('lendRate', { rate: pct(e.rate, { digits: 2, sign: false }) });
+      break;
+    case 'recall':
+      icon = '<span class="side-tag div">↩️</span>';
+      title = t('recallRow');
+      sub = t('lendBack', { date: fmtDate(e.back) });
+      break;
+    case 'lendpay':
+      if (e.t > Date.now()) return '';
+      icon = '<span class="side-tag div">🤝</span>';
+      title = t('lendPayRow', { name: nameOf(e.symbol, q) });
+      sub = [`${t('lendCutLabel')} ${money(e.cut, BASE)}`, e.withheld ? `${t('withheld')} ${money(e.withheld, BASE)}` : '', e.nhi ? `${t('nhi')} ${money(e.nhi, BASE)}` : ''].filter(Boolean).join(' · ');
+      amount = `<strong class="num up-ink">+${h(money(e.net, BASE))}</strong>`;
+      break;
     case 'penalty':
       icon = '<span class="side-tag loan">⚠️</span>';
       title = t('penaltyRow');
@@ -2452,7 +2622,7 @@ const ACTIVITY_FILTERS = {
   all: () => true,
   trades: e => e.type === 'fill',
   fx: e => e.type === 'fx',
-  income: e => e.type === 'div' || e.type === 'split' || e.type === 'interest',
+  income: e => ['div', 'split', 'interest', 'td', 'tdend', 'lend', 'recall', 'lendpay'].includes(e.type),
   loans: e => e.type === 'borrow' || e.type === 'repay',
   cash: e => e.type === 'deposit' && !ACTIVITY_FILTERS.apps(e),
   // Money moved by the other Quadra apps (bets, games, rewards): one line per
@@ -3154,6 +3324,26 @@ document.addEventListener('click', event => {
     case 'repay-all':
       doRepay(true);
       break;
+    case 'td-term':
+      state.td.months = Number(el.dataset.months);
+      renderFx();
+      break;
+    case 'td-max':
+      state.td.amount = String(Math.floor(Math.max(0, withdrawable(state.account, snap())[BASE] || 0)));
+      renderFx();
+      break;
+    case 'td-open':
+      doOpenDeposit();
+      break;
+    case 'td-break':
+      doBreakDeposit(el.dataset.id);
+      break;
+    case 'lend':
+      doLend(el.dataset.symbol, Number(el.dataset.qty));
+      break;
+    case 'recall':
+      doRecall(el.dataset.id);
+      break;
     case 'hview':
       state.historyView = el.dataset.view;
       renderHistory();
@@ -3312,6 +3502,10 @@ document.addEventListener('input', event => {
       state.loan.amount = cleanNumber(el.value);
       keepCaret(renderFx);
       break;
+    case 'td-amount':
+      state.td.amount = cleanNumber(el.value).replace(/\..*/, '');
+      keepCaret(renderFx);
+      break;
     case 'alert-price':
       state.alertPrice = cleanNumber(el.value);
       keepCaret(redrawDetail);
@@ -3335,6 +3529,7 @@ document.addEventListener('change', event => {
     if (!state.rates[c]) ensureRates([c]).then(renderFx).catch(() => {});
     renderFx();
   }
+  if (el.id === 'td-renew') state.td.renew = el.checked;
   if (el.id === 'loan-cur') {
     state.loan.currency = el.value;
     renderFx();

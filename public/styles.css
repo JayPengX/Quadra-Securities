@@ -721,3 +721,10 @@ a.activity-row { color: inherit; text-decoration: none; }
 .toast.go { pointer-events: auto; cursor: pointer; }
 
 .fee-welcome { margin: 8px 0 0; font-size: 0.84rem; font-weight: 700; color: var(--accent, currentColor); }
+
+/* 理財: time deposit terms (term over rate), the roll-over switch */
+.td-terms { display: flex; flex-wrap: nowrap; width: 100%; margin-bottom: 10px; }
+.td-terms button { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 2px; }
+.td-terms button small { font-size: 0.7rem; font-weight: 500; opacity: 0.85; }
+.check-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 0.86rem; color: var(--text-secondary); }
+.check-row input { width: 18px; height: 18px; accent-color: var(--accent); }

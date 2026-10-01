@@ -74,7 +74,54 @@ export const xpOf = e => (e?.app === 'vocab' && XP_KINDS.has(e.kind) ? (e.xp > 0
 export const xpSpentOf = e => (e?.app === 'vocab' && e.kind === 'redeem' && Number(e.note) > 0 ? Number(e.note) : 0);
 export const xpEarned = wallet => (wallet?.entries || []).reduce((sum, e) => sum + xpOf(e), 0);
 export const xpSpent = wallet => (wallet?.entries || []).reduce((sum, e) => sum + xpSpentOf(e), 0);
-export const xpBalance = wallet => Math.max(0, Math.round(xpEarned(wallet) - xpSpent(wallet)));
+// Points expire like a card's or an airline's: each Taiwan month's points
+// at the end of the same month a year later (XP_LIFE_MONTHS), spending the
+// oldest first. Points from before v7 count as earned when v7 began. The
+// level goes by everything ever earned (xpEarned) and never drops.
+export const XP_LIFE_MONTHS = 12;
+const XP_FROM = Date.UTC(2026, 8, 30, 16);
+const xpMonthEnd = (t, n) => {
+  const d = new Date(t + 8 * 3_600_000);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n + 1, 1) - 8 * 3_600_000;
+};
+// The points still to spend at `now`, in lots oldest first: [{ amount, expires }].
+export function xpLots(wallet, now = Date.now()) {
+  const moves = [];
+  for (const e of wallet?.entries || []) {
+    const t = Math.max(XP_FROM, Number(e.t) || XP_FROM);
+    if (t > now) continue;
+    const gain = xpOf(e);
+    if (gain > 0) moves.push({ t, gain });
+    const spend = xpSpentOf(e);
+    if (spend > 0) moves.push({ t, spend });
+  }
+  moves.sort((a, b) => a.t - b.t || (a.gain ? -1 : 1));
+  const lots = [];
+  for (const m of moves) {
+    while (lots.length && lots[0].expires <= m.t) lots.shift();
+    if (m.gain) {
+      const expires = xpMonthEnd(m.t, XP_LIFE_MONTHS);
+      const last = lots.at(-1);
+      if (last && last.expires === expires) last.amount += m.gain;
+      else lots.push({ amount: m.gain, expires });
+      continue;
+    }
+    let left = m.spend;
+    while (left > 0 && lots.length) {
+      const take = Math.min(left, lots[0].amount);
+      lots[0].amount -= take;
+      left -= take;
+      if (lots[0].amount <= 0) lots.shift();
+    }
+  }
+  return lots.filter(l => l.expires > now && l.amount > 0);
+}
+export const xpBalance = (wallet, now = Date.now()) => Math.max(0, Math.round(xpLots(wallet, now).reduce((sum, l) => sum + l.amount, 0)));
+// The next points to expire within `days`: { amount, at } or null.
+export function xpExpiring(wallet, now = Date.now(), days = 60) {
+  const lot = xpLots(wallet, now)[0];
+  return lot && lot.expires - now <= days * 86_400_000 ? { amount: Math.round(lot.amount), at: lot.expires } : null;
+}
 // Level L starts at 100·(L−1)² points: 100 for level 2, 1,600 for 5, 8,100
 // for 10, 36,100 for 20, 84,100 for 30, 240,100 for 50: about a year of
 // daily play to the top (ECONOMY.dailyXp keeps a grind from shortcutting
@@ -287,6 +334,27 @@ function v8Notice(s) {
       ['⭐', en ? 'Rewards gives points (XP)' : 'Rewards 改發積分', en ? 'Level up, and trade them for cards and packs' : '升等級，還能換保護卡和單字包'],
       ['💰', en ? `Pay ${money(ECONOMY.monthly)} a month` : `每月薪水 ${money(ECONOMY.monthly)}`, en ? 'On the 1st of every month' : '每月 1 日入帳'],
       ['✦', en ? `Plus is ${money(PLUS.fee)} a month` : `Plus 每月 ${money(PLUS.fee)}`, en ? `A ${money(PLUS.odds.bonusBet)} free bet every week` : `每週送 ${money(PLUS.odds.bonusBet)} 免費投注`]
+    ]
+  });
+  return true;
+}
+
+// Once per device, for an account made before v10: a fixed pay, savings in
+// Securities, points that expire.
+const V10_SEEN = 'quadra.seen.v10';
+export const V10_AT = Date.UTC(2026, 9, 1, 16);
+function v10Notice(s) {
+  if (!(s.wallet?.created < V10_AT) || readStore(V10_SEEN)) return;
+  writeStore(V10_SEEN, '1');
+  const en = s.lang === 'en';
+  tell({
+    lang: s.lang,
+    icon: '🏦',
+    title: en ? 'Run like the real thing' : '跟真的一樣',
+    points: [
+      ['💰', en ? `A fixed ${money(ECONOMY.monthly)} pay` : `每月固定薪水 ${money(ECONOMY.monthly)}`, en ? 'The same however much you hold' : '存多存少都一樣'],
+      ['🏦', en ? 'Time deposits and lending shares' : '定存和借券出借', en ? 'Securities › FX & loans › Savings' : 'Securities › 換匯・融資 › 理財'],
+      ['⏳', en ? 'Points last a year' : '積分有效期限一年', en ? 'Each month’s expire a year on' : '每月的積分隔年同月底到期']
     ]
   });
   return true;
@@ -935,7 +1003,7 @@ function makeSession(app, { lang, heartbeat }) {
     if (!first) first = await signInGate(s);
     s.first = first;
     loop();
-    setTimeout(() => resetNotice(s) || v8Notice(s) || plusNotices(s), 1200);
+    setTimeout(() => resetNotice(s) || v8Notice(s) || v10Notice(s) || plusNotices(s), 1200);
     s.on('wallet', () => plusNotices(s));
     setTimeout(() => offerNotices(s), 2500);
     // The first reply: what the app merges its own copy with (never the
@@ -1538,6 +1606,7 @@ function detailsCard(s) {
       node('div', {}, [node('small', { text: T('Quadra 等級', 'Quadra level') }), node('strong', { text: `${avatarOf(s.wallet)?.glyph || ''} Lv ${lv.level} · ${lv.title}`.trim() })]),
       node('div', {}, [node('small', { text: T('可用積分', 'Points to spend') }), node('strong', { class: 'num', text: xpNum(xpBalance(s.wallet)) })])
     ]),
+    (x => (x ? node('p', { class: 'q-overdraft', text: T(`${xpNum(x.amount)} 積分將在 ${short(x.at - 1)} 到期`, `${xpNum(x.amount)} points expire ${short(x.at - 1)}`) }) : null))(xpExpiring(s.wallet)),
     overdraft(s.wallet) > 0 ? node('p', { class: 'q-overdraft', text: T(`帳戶透支 ${money(overdraft(s.wallet))}：每月計息 1%。2 天內沒補足就是違約交割：扣 7% 違約金、賣出持股，5 年內不能融資。`, `Overdrawn by ${money(overdraft(s.wallet))}: 1% a month. Not covered within 2 days, it's a default: a 7% penalty, holdings sold, and no margin for 5 years.`) }) : null,
     node('p', { class: 'q-payday', text: paydayText(s.lang, Date.now(), s.wallet) }),
     d.recent.length

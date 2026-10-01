@@ -43,6 +43,7 @@ import {
   localDayOf
 } from './markets.mjs';
 import { nextTradingStart } from './holidays.mjs';
+import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
 
 export const ACCOUNT_VERSION = 1;
@@ -149,7 +150,11 @@ export function replay(account, now = Date.now()) {
     loans: {},
     deposits: 0,
     // In NT$ at each event's own rate.
-    paid: { commission: 0, tax: 0, fee: 0, fx: 0, withheld: 0, nhi: 0, borrow: 0, penalty: 0 },
+    paid: { commission: 0, tax: 0, fee: 0, fx: 0, withheld: 0, nhi: 0, borrow: 0, penalty: 0, lendCut: 0 },
+    // Time deposits (定存) open now, and shares lent (借券出借), by event id.
+    tds: {},
+    lent: {},
+    lendIncome: 0,
     dividends: 0,
     // Bank interest on NT$ cash: accrued so far, and paid out (net).
     cashInterest: 0,
@@ -170,6 +175,33 @@ export function replay(account, now = Date.now()) {
       case 'penalty':
         add(s.cash, e.currency, -e.amount);
         s.paid.penalty += e.amount * (e.twd || 1);
+        break;
+      case 'td':
+        add(s.cash, BASE, -e.amount);
+        s.tds[e.id] = e;
+        break;
+      case 'tdend':
+        if (!s.tds[e.td]) break;
+        delete s.tds[e.td];
+        add(s.cash, BASE, e.amount + e.net);
+        s.interestEarned += e.net;
+        s.paid.withheld += e.withheld || 0;
+        s.paid.nhi += e.nhi || 0;
+        break;
+      case 'lend':
+        s.lent[e.id] = { ...e };
+        break;
+      case 'recall':
+        if (s.lent[e.lend]) s.lent[e.lend].back = e.back;
+        break;
+      case 'lendpay':
+        if (!s.lent[e.lend]) break;
+        delete s.lent[e.lend];
+        add(s.cash, BASE, e.net);
+        s.lendIncome += e.net;
+        s.paid.lendCut += e.cut || 0;
+        s.paid.withheld += e.withheld || 0;
+        s.paid.nhi += e.nhi || 0;
         break;
       case 'deposit':
         add(s.cash, e.currency, e.amount);
@@ -295,6 +327,8 @@ export function available(account, s) {
   const cash = { ...s.cash };
   const qty = {};
   for (const p of Object.values(s.positions)) qty[p.symbol] = p.qty;
+  // Lent shares (until they're back) can't be sold.
+  for (const l of Object.values(s.lent || {})) qty[l.symbol] = (qty[l.symbol] || 0) - l.qty;
   for (const o of account.orders || []) {
     if (o.status !== 'open') continue;
     if (o.side === 'buy') cash[o.currency] = (cash[o.currency] || 0) - (o.reserve || 0);
@@ -726,6 +760,110 @@ export function deposit(account, amount, now = Date.now(), id = randomId()) {
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 
+// ---- Time deposits (定存) and securities lending (借券出借) ----------------------
+// (savings.mjs has the terms.)
+
+// NT$ cash settled and not held for orders: what can go into a deposit.
+const freeCash = (account, s, now) => Math.max(0, withdrawable(account, s, now)[BASE] || 0);
+
+export function openDeposit(account, { amount, months, renew = false }, now = Date.now(), id = randomId()) {
+  amount = Math.round(Number(amount));
+  const rate = tdRate(Number(months));
+  if (rate == null) return { error: 'tdTerm' };
+  if (!(amount >= TD_MIN)) return { error: 'tdMin', min: TD_MIN };
+  const have = freeCash(account, replay(account, now), now);
+  if (amount > have + EPS) return { error: 'funds', need: amount, have, currency: BASE };
+  const event = { id: `td:${id}`, type: 'td', t: now, currency: BASE, amount, months: Number(months), rate, ends: addMonths(now, Number(months)), renew: Boolean(renew) };
+  return { account: { ...account, events: [...account.events, event] }, event };
+}
+
+function tdEnd(td, at) {
+  const { gross, early } = tdInterest(td, at);
+  return { id: `tdend:${td.id.slice(3)}`, type: 'tdend', t: at, td: td.id, currency: BASE, amount: td.amount, interest: gross, ...incomeTaxes(gross), early };
+}
+
+// 解約: closed before maturity, at the early rate.
+export function breakDeposit(account, tdId, now = Date.now()) {
+  const td = replay(account, now).tds[tdId];
+  if (!td) return { error: 'tdGone' };
+  const event = tdEnd(td, now);
+  return { account: { ...account, events: [...account.events, event] }, event };
+}
+
+// Deposits that reached maturity: paid back (dated then), and rolled over
+// at the rate posted then when they were set to.
+export function matureDeposits(account, now = Date.now()) {
+  let next = account;
+  for (let guard = 0; guard < 240; guard++) {
+    const s = replay(next, now);
+    const due = Object.values(s.tds).filter(td => td.ends <= now).sort((a, b) => a.ends - b.ends)[0];
+    if (!due) break;
+    const events = [tdEnd(due, due.ends)];
+    if (due.renew) events.push({ ...due, id: `${due.id}r`, t: due.ends, rate: tdRate(due.months) ?? due.rate, ends: addMonths(due.ends, due.months) });
+    next = { ...next, events: [...next.events, ...events] };
+  }
+  return next;
+}
+
+// Shares of a holding that can be lent now: whole lots, settled, not lent
+// already, not promised to a sell order, not bought on margin.
+export function lendableQty(account, symbol, now = Date.now()) {
+  const s = replay(account, now);
+  const p = s.positions[symbol];
+  if (!p || p.qty <= 0 || !lendable(p.market, p.kind) || p.financed > 0) return 0;
+  const free = available(account, s).qty[symbol] || 0;
+  const settling = account.events.filter(e => e.type === 'fill' && e.symbol === symbol && e.side === 'buy' && e.t <= now && e.settle > now).reduce((sum, e) => sum + e.qty, 0);
+  return Math.max(0, Math.floor((Math.min(free, p.qty - settling) + EPS) / LEND_LOT) * LEND_LOT);
+}
+
+export function lendShares(account, { symbol, qty, price }, now = Date.now(), id = randomId()) {
+  const s = replay(account, now);
+  const p = s.positions[symbol];
+  if (!p || !lendable(p.market, p.kind)) return { error: 'notLendable' };
+  if (p.financed > 0) return { error: 'lendFinanced' };
+  qty = Number(qty);
+  if (!(qty >= LEND_LOT) || qty % LEND_LOT) return { error: 'lendLot', lot: LEND_LOT };
+  const can = lendableQty(account, symbol, now);
+  if (qty > can + EPS) return { error: 'lendQty', can };
+  if (!(price > 0)) return { error: 'noQuote' };
+  const event = { id: `lend:${id}`, type: 'lend', t: now, symbol, name: p.name, market: p.market, kind: p.kind, currency: p.currency, qty, price, rate: LEND_RATE[p.kind] };
+  return { account: { ...account, events: [...account.events, event] }, event };
+}
+
+function lendEnd(lend, at, back) {
+  const key = lend.id.slice(5);
+  const fee = lendFee(lend, back);
+  return [
+    { id: `recall:${key}`, type: 'recall', t: at, lend: lend.id, back },
+    { id: `lendpay:${key}`, type: 'lendpay', t: back, lend: lend.id, symbol: lend.symbol, currency: BASE, ...fee }
+  ];
+}
+
+// 召回: the shares come back (and the fee is paid) in LEND_RECALL business days.
+export function recallShares(account, lendId, now = Date.now()) {
+  const l = replay(account, now).lent[lendId];
+  if (!l) return { error: 'lendGone' };
+  if (l.back) return { account, back: l.back };
+  const back = addWeekdays(now, LEND_RECALL);
+  return { account: { ...account, events: [...account.events, ...lendEnd(l, now, back)] }, back };
+}
+
+// Contracts past their term end by themselves (dated then).
+export function matureLending(account, now = Date.now()) {
+  const s = replay(account, now);
+  const due = Object.values(s.lent).filter(l => !l.back && l.t + LEND_TERM_DAYS * 86_400_000 <= now);
+  if (!due.length) return account;
+  return { ...account, events: [...account.events, ...due.flatMap(l => lendEnd(l, l.t + LEND_TERM_DAYS * 86_400_000, l.t + LEND_TERM_DAYS * 86_400_000))] };
+}
+
+// Everything lent is called back (a default or a margin call: the broker
+// needs the shares to sell).
+export function recallAll(account, now = Date.now()) {
+  let next = account;
+  for (const id of Object.keys(replay(account, now).lent)) next = recallShares(next, id, now).account || next;
+  return next;
+}
+
 // ---- Valuation ---------------------------------------------------------------
 
 // Everything in NT$ at today's prices and rates. A holding with no quote is
@@ -793,7 +931,13 @@ export function valuate(s, quotes, rates) {
   const assets = cashTWD + longTWD;
   const owed = debtTWD + shortTWD;
   const receivable = s.receivable || 0;
-  const netWorth = assets + receivable - owed;
+  // Time deposits are the bank's, not collateral: in net worth, not assets.
+  const tds = Object.values(s.tds || {}).sort((a, b) => a.ends - b.ends);
+  const savedTWD = tds.reduce((sum, td) => sum + td.amount, 0);
+  const lentByPos = {};
+  for (const l of Object.values(s.lent || {})) lentByPos[l.symbol] = (lentByPos[l.symbol] || 0) + l.qty;
+  for (const p of out.positions) p.lent = lentByPos[p.symbol] || 0;
+  const netWorth = assets + receivable + savedTWD - owed;
   for (const p of out.positions) p.weight = assets ? Math.abs(p.valueTWD) / assets : 0;
   out.positions.sort((a, b) => Math.abs(b.valueTWD) - Math.abs(a.valueTWD));
   out.cash.sort((a, b) => (a.currency === BASE ? -1 : b.currency === BASE ? 1 : b.twd - a.twd));
@@ -802,6 +946,10 @@ export function valuate(s, quotes, rates) {
   return {
     ...out,
     cashTWD,
+    tds,
+    savedTWD,
+    lent: Object.values(s.lent || {}).sort((a, b) => a.t - b.t),
+    lendIncome: s.lendIncome || 0,
     holdingsTWD: longTWD - shortTWD,
     longTWD,
     shortTWD,
@@ -928,11 +1076,13 @@ export function callPlan(account, valuation) {
   const plan = valuation.positions.filter(p => p.short).map(p => ({ symbol: p.symbol, side: 'buy', type: 'market', qty: -p.qty, forced: true }));
   const financed = valuation.positions.filter(p => !p.short && p.financed > 0);
   for (const p of financed) plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true });
+  // (Bought on margin, so never lent.)
   let covered = valuation.cashTWD - valuation.shortTWD + financed.reduce((sum, p) => sum + p.valueTWD, 0);
-  for (const p of valuation.positions.filter(x => !x.short && !(x.financed > 0))) {
+  for (const p of valuation.positions.filter(x => !x.short && !(x.financed > 0) && x.qty - (x.lent || 0) > EPS)) {
     if (covered >= valuation.debtTWD * 1.02) break;
-    plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true });
-    covered += p.valueTWD;
+    const qty = p.qty - (p.lent || 0);
+    plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty, forced: true });
+    covered += (p.valueTWD * qty) / p.qty;
   }
   return plan;
 }
@@ -944,10 +1094,12 @@ export function liquidationPlan(account, valuation) {
   // until what's sold covers the loans.
   const plan = valuation.positions.filter(p => p.short).map(p => ({ symbol: p.symbol, side: 'buy', type: 'market', qty: -p.qty, forced: true }));
   let covered = valuation.cashTWD - valuation.shortTWD;
-  for (const p of valuation.positions.filter(x => !x.short)) {
+  // Lent shares can't be sold until they're back (recallAll calls them).
+  for (const p of valuation.positions.filter(x => !x.short && x.qty - (x.lent || 0) > EPS)) {
     if (covered >= valuation.debtTWD * 1.02) break;
-    plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty: p.qty, forced: true });
-    covered += p.valueTWD;
+    const qty = p.qty - (p.lent || 0);
+    plan.push({ symbol: p.symbol, side: 'sell', type: 'market', qty, forced: true });
+    covered += (p.valueTWD * qty) / p.qty;
   }
   return plan;
 }
@@ -964,7 +1116,8 @@ export function coverPlan(valuation, owedTWD) {
     if (left <= 0) break;
     const unit = p.valueTWD / p.qty;
     const step = qtyStep(p.kind);
-    let qty = Math.min(p.qty, Math.ceil(left / unit / step) * step);
+    const free = p.qty - (p.lent || 0);
+    let qty = Math.min(free, Math.ceil(left / unit / step) * step);
     qty = roundQty(qty, p.kind);
     if (!(qty > 0)) continue;
     plan.push({ symbol: p.symbol, qty, twd: qty * unit, all: qty >= p.qty });
@@ -1482,9 +1635,9 @@ export function incomeSummary(account, now = Date.now()) {
     months.push([d.toISOString().slice(0, 7), 0]);
   }
   const index = new Map(months.map(([k], i) => [k, i]));
-  const out = { total: 0, ytd: 0, last12: 0, div: 0, coupon: 0, interest: 0, pending: 0, months, payers: {} };
+  const out = { total: 0, ytd: 0, last12: 0, div: 0, coupon: 0, interest: 0, lending: 0, pending: 0, months, payers: {} };
   for (const e of account?.events || []) {
-    if (e.type !== 'div' && e.type !== 'interest') continue;
+    if (!['div', 'interest', 'tdend', 'lendpay'].includes(e.type)) continue;
     const twd = e.net * (e.twd || 1);
     if (e.t > now) {
       if (e.type === 'div') out.pending += twd;
@@ -1496,7 +1649,8 @@ export function incomeSummary(account, now = Date.now()) {
     if (!index.has(k)) continue;
     months[index.get(k)][1] += twd;
     out.last12 += twd;
-    if (e.type === 'interest') out.interest += twd;
+    if (e.type === 'interest' || e.type === 'tdend') out.interest += twd;
+    else if (e.type === 'lendpay') out.lending += twd;
     else if (e.coupon) out.coupon += twd;
     else out.div += twd;
     if (e.type === 'div') out.payers[e.symbol] = (out.payers[e.symbol] || 0) + twd;

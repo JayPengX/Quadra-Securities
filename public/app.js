@@ -12,6 +12,7 @@ import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, searchSymbols, fxSymbol } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { BRANDS, brandLogo } from './lib/brands.mjs';
+import { tvLogos } from './lib/tvlogos.mjs';
 import { afterHours, creditAccount, creditCheck, openCredit, bestTier, creditUsed, terms as creditTerms, extendTerm, closeOutPlan, yearOfTrading, dayTradeSellFirst, CREDIT_TIERS, CREDIT_MIN_TRADES, CREDIT_TURNOVER, CREDIT_PROOF } from './lib/credit.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, stackBar, SERIES } from './lib/chart.mjs';
@@ -826,7 +827,8 @@ function marketStatus(q) {
 // A company's logo (Financial Modeling Prep's free images, by ticker: US,
 // Taiwan, Tokyo, Hong Kong…) over its ticker badge; a ticker without one
 // keeps the badge (remembered, so it isn't asked for again).
-const LOGO_MISS_KEY = 'stock.logoMiss';
+const LOGO_MISS_KEY = 'stock.logoMiss.v2';
+const tvMiss = new Set();
 const logoMiss = (() => {
   try {
     return new Set(JSON.parse(localStorage.getItem(LOGO_MISS_KEY) || '[]'));
@@ -839,7 +841,11 @@ document.addEventListener(
   e => {
     const img = e.target;
     if (!(img instanceof HTMLImageElement) || !img.classList.contains('sym-logo')) return;
-    img.remove();
+    img.closest('.sym-badge')?.classList.remove('has-tv', 'has-logo');
+    (img.closest('.sym-pair') || img).remove();
+    // TradingView's icons exist for every symbol mapped: a miss is the
+    // network, so only for this visit.
+    if (img.classList.contains('tv')) return void tvMiss.add(img.dataset.symbol);
     logoMiss.add(img.dataset.symbol);
     try {
       localStorage.setItem(LOGO_MISS_KEY, JSON.stringify([...logoMiss].slice(-400)));
@@ -858,7 +864,7 @@ document.addEventListener(
   'load',
   e => {
     const img = e.target;
-    if (img instanceof HTMLImageElement && img.classList.contains('sym-logo') && img.naturalWidth < 24 && img.naturalHeight < 24) img.dispatchEvent(new Event('error'));
+    if (img instanceof HTMLImageElement && img.classList.contains('sym-logo') && !img.classList.contains('tv') && img.naturalWidth < 24 && img.naturalHeight < 24) img.dispatchEvent(new Event('error'));
   },
   true
 );
@@ -866,8 +872,16 @@ function symbolBadge(symbol, q) {
   const kind = q?.kind || catalogInfo(symbol)?.kind || 'stock';
   const zhShort = twSymbol(symbol) && catalogInfo(symbol)?.zh ? catalogInfo(symbol).zh.replace(kind === 'etf' ? /^(元大|富邦|國泰|群益|復華|統一|凱基|大華|中信|永豐|兆豐)/ : /[-*].*$/, '').slice(0, 2) : '';
   const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : zhShort || bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
+  const img = (url, cls = 'sym-logo') => `<img class="${cls}" src="${h(url)}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
+  // TradingView's round icon first (every company, coin, metal, index, a
+  // pair's two flags, a bond's country), then the official logo, then FMP's.
+  const tv = !tvMiss.has(symbol) && tvLogos(symbol);
+  if (tv) {
+    const logo = tv.length > 1 ? `<span class="sym-pair">${img(tv[0], 'sym-logo tv')}${img(tv[1], 'sym-logo tv')}</span>` : img(tv[0], 'sym-logo tv');
+    return `<span class="sym-badge k-${h(kind)} has-logo has-tv">${h(text)}${logo}</span>`;
+  }
   const url = !BONDS[symbol] && !logoMiss.has(symbol) && (BRANDS[symbol] || kind === 'stock' || kind === 'etf') ? logoUrl(symbol) : null;
-  const logo = url ? `<img class="sym-logo" src="${h(url)}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : '';
+  const logo = url ? img(url) : '';
   return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}${text === zhShort && zhShort ? ' zh' : ''}">${h(text)}${logo}</span>`;
 }
 
@@ -1437,6 +1451,25 @@ async function addPlan() {
   else recordAffinity('stock', symbolKeys(d.symbol), 2);
   toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
   redrawDetail();
+}
+
+// A plan changed in its row of the plans list.
+async function savePlanRow(id) {
+  const plan = state.account?.plans?.[id];
+  if (!plan || Date.now() - planAddedAt < 2000) return;
+  const amount = Number(state.plan.amount) || 0;
+  if (amount < PLAN_MIN) return toast(t('planNote', { min: money(PLAN_MIN, BASE) }), 'bad');
+  if (!(await ask({ lang: locale, icon: '📅', title: t('planEditAsk', { name: nameOf(plan.symbol), amount: money(amount, BASE) }), body: t('planAskBody', { day: state.plan.day }), ok: t('planSave'), cancel: t('orderAskCancel') }))) return;
+  planAddedAt = Date.now();
+  document.activeElement?.blur?.();
+  const q = state.quotes.get(plan.symbol) || {};
+  const r = setPlan(state.account, { id: plan.id, symbol: plan.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name || plan.name, kind: q.kind || plan.kind, market: q.market || plan.market, currency: q.currency || plan.currency });
+  if (r.error) return toast(t(`err_${r.error}`), 'bad');
+  commit(r.account);
+  state.planEdit = null;
+  recordAffinity('stock', symbolKeys(plan.symbol), 2);
+  toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
+  renderPortfolio();
 }
 
 // ---- Detail sheet: what the company does, its numbers, news ------------------------
@@ -2109,10 +2142,21 @@ function plansListHtml() {
     .map(p => {
       const next = nextPlanRun(p);
       const last = state.account.orders.filter(o => o.plan === p.id).at(-1);
+      // 修改 opens the plan's amount and day right in its row (no trip to the
+      // stock's sheet and a long scroll down to its form).
+      if (state.planEdit === p.id && !$('detail').open) {
+        return `<div class="order-row plan-edit-row">${icon('calendar', 'k-cash')}
+      <span class="row-main"><span class="row-title">${h(nameOf(p.symbol))}</span>
+      <span class="loan-form">
+        <label class="field grow"><span>${h(t('planAmount'))} (NT$)</span><input id="plan-row-amount" inputmode="numeric" autocomplete="off" value="${h(state.plan.amount)}" /></label>
+        <label class="field"><span>${h(t('planDay'))}</span><select id="plan-row-day">${Array.from({ length: 28 }, (_, i) => `<option value="${i + 1}" ${String(i + 1) === state.plan.day ? 'selected' : ''}>${h(t('dayOfMonth', { n: i + 1 }))}</option>`).join('')}</select></label>
+      </span>
+      <span class="button-row"><button class="primary-button small" type="button" data-action="plan-row-save" data-id="${h(p.id)}">${h(t('planSave'))}</button><button class="ghost-button small" type="button" data-action="plan-edit-cancel">${h(t('orderAskCancel'))}</button></span></span></div>`;
+      }
       return `<div class="order-row">${icon('calendar', 'k-cash')}
       <span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span>
       <span class="row-sub">${h(t('planActive', { amount: money(p.amount, BASE), day: p.day }))} · ${h(t('planNext', { date: next ? fmtDate(next) : '—' }))}${last ? ` · ${h(last.status === 'filled' ? t('planLast', { qty: fmtQty(last.qty), unit: unitOf(p.symbol) }) : t(`err_${last.reason}`))}` : ''}</span></span>
-      <button class="ghost-button small" type="button" data-action="plan-edit" data-id="${h(p.id)}" data-symbol="${h(p.symbol)}">${h(t('planEdit'))}</button>
+      <button class="ghost-button small" type="button" data-action="plan-edit" data-id="${h(p.id)}" data-row="1">${h(t('planEdit'))}</button>
       <button class="ghost-button small" type="button" data-action="plan-off" data-id="${h(p.id)}">${h(t('planStop'))}</button></div>`;
     })
     .join('')}<p class="note">${h(t('plansNote'))}</p></div>`;
@@ -3439,7 +3483,7 @@ function scrollToPlanForm(symbol, tries = 20) {
   if (!input) return void (tries > 0 && setTimeout(() => scrollToPlanForm(symbol, tries - 1), 250));
   card.open = true;
   requestAnimationFrame(() => {
-    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     card.classList.add('flash');
     setTimeout(() => card.classList.remove('flash'), 1600);
   });
@@ -3774,16 +3818,22 @@ document.addEventListener('click', event => {
       state.plan = { amount: String(plan.amount), day: String(plan.day) };
       state.openFolds.add('tool:plan');
       state.openFolds.delete('closed:tool:plan');
-      if (el.dataset.symbol && state.detail?.symbol !== plan.symbol) openDetail(plan.symbol).then(() => scrollToPlanForm(plan.symbol));
-      else {
+      if (el.dataset.row) {
+        renderPortfolio();
+        $('plan-row-amount')?.focus({ preventScroll: true });
+      } else {
         redrawDetail();
         scrollToPlanForm(plan.symbol);
       }
       break;
     }
+    case 'plan-row-save':
+      savePlanRow(el.dataset.id);
+      break;
     case 'plan-edit-cancel':
       state.planEdit = null;
-      redrawDetail();
+      if ($('detail').open) redrawDetail();
+      else renderPortfolio();
       break;
     case 'plan-off': {
       const id = el.dataset.id;
@@ -3896,6 +3946,9 @@ document.addEventListener('input', event => {
       state.plan.amount = cleanNumber(el.value);
       keepCaret(redrawDetail);
       break;
+    case 'plan-row-amount':
+      state.plan.amount = cleanNumber(el.value);
+      break;
     case 'tm-amount':
       state.tm.amount = cleanNumber(el.value);
       break;
@@ -3920,7 +3973,7 @@ document.addEventListener('change', event => {
     state.loan.currency = el.value;
     renderFx();
   }
-  if (el.id === 'plan-day') state.plan.day = el.value;
+  if (el.id === 'plan-day' || el.id === 'plan-row-day') state.plan.day = el.value;
   if (el.id === 'tm-symbol' || el.id === 'tm-start') {
     state.tm[el.id === 'tm-symbol' ? 'symbol' : 'start'] = el.value;
     state.tm.result = null;

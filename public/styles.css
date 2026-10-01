@@ -619,6 +619,10 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 
 /* Records and sources that open something: the whole line is the target. */
 .order-row[data-action] { cursor: pointer; }
+.plan-edit-row { align-items: flex-start; }
+.plan-edit-row .row-main { display: grid; gap: 8px; }
+.plan-edit-row .loan-form { display: flex; gap: 8px; }
+.plan-edit-row .button-row { display: flex; gap: 8px; }
 a.activity-row { color: inherit; text-decoration: none; }
 
 /* ---- Quadra v2: the account chip, the home rows, the ticket's figures ---- */
@@ -743,6 +747,14 @@ a.activity-row { color: inherit; text-decoration: none; }
 .lede:empty, small:empty { display: none; }
 /* A company's logo over its ticker badge (white tile; the badge shows if it fails). */
 .sym-badge { position: relative; }
+/* TradingView's icons fill the badge as a circle; a currency pair shows two. */
+.sym-badge.has-tv { border-radius: 50%; }
+.sym-badge .sym-logo.tv { padding: 0; object-fit: cover; border-radius: 50%; box-shadow: none; background: #fff; }
+.sym-badge .sym-pair { position: absolute; inset: 0; }
+.sym-badge .sym-pair .sym-logo.tv { width: 30px; height: 30px; inset: auto; }
+.sym-badge .sym-pair .sym-logo.tv:first-child { top: 0; left: 0; z-index: 1; box-shadow: 0 0 0 2px var(--surface, #fff); }
+.sym-badge .sym-pair .sym-logo.tv:last-child { right: 0; bottom: 0; }
+.sym-badge.has-tv:has(.sym-pair) { border-radius: 0; overflow: visible; background: transparent; color: transparent; }
 .sym-badge .sym-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 5px; background: #fff; box-sizing: border-box; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
 
 /* ---- Activity (交易明細) ---- */

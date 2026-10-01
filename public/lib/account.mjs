@@ -245,7 +245,11 @@ export function replay(account, now = Date.now()) {
       }
       // An old cash loan tied to the purchase it paid for (linkOldLoans).
       case 'link':
-        if (s.positions[e.symbol]) s.positions[e.symbol].financed = (s.positions[e.symbol].financed || 0) + e.amount;
+        if (s.positions[e.symbol]) {
+          const p = s.positions[e.symbol];
+          p.financed = (p.financed || 0) + e.amount;
+          p.marginQty = p.qty;
+        }
         break;
       case 'repay': {
         const loan = s.loans[e.currency];
@@ -257,7 +261,11 @@ export function replay(account, now = Date.now()) {
         if (e.symbol && s.positions[e.symbol]) {
           const p = s.positions[e.symbol];
           p.financed = Math.max(0, (p.financed || 0) - e.amount);
-          if (p.financed < 0.5) delete p.loanDue;
+          // Paid off (現金償還, or the rest from a sale's cash): its shares are 現股 now.
+          if (p.financed < 0.5) {
+            delete p.loanDue;
+            p.marginQty = 0;
+          }
         }
         break;
       }
@@ -323,6 +331,8 @@ function applyFill(s, e) {
     p.cost -= cost;
     p.costTWD -= costTWD;
     left -= close;
+    // A sale's 融資 shares (融資賣出): the ones it repaid; never more than are left.
+    if (!buy && p.marginQty > 0) p.marginQty = Math.min(p.qty, Math.max(0, p.marginQty - (e.marginQty || 0)));
   }
   // Then what it opens or adds to: shares bought, or shares sold short.
   if (left > EPS) {
@@ -343,6 +353,9 @@ function applyFill(s, e) {
     p.qty += buy ? left : -left;
     p.cost += buy ? part : -part;
     p.costTWD += (buy ? part : -part) * twd;
+    // Bought with 融資: these shares are the loan's collateral (融資 shares,
+    // sold only with 融資賣出; the rest are 現股, the account's own).
+    if (buy && e.financed > 0) p.marginQty = (p.marginQty || 0) + left;
   }
   if (Math.abs(p.qty) <= qtyStep(p.kind) / 2) delete s.positions[e.symbol];
 }
@@ -510,7 +523,8 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     qty,
     t: now,
     status: 'open',
-    rev: 1
+    rev: 1,
+    ...(req.fromMargin && side === 'sell' ? { fromMargin: true } : {})
   };
   if (type === 'limit') order.limit = Number(req.limit);
   if (type === 'stop') order.stop = Number(req.stop);
@@ -716,7 +730,12 @@ function fillOrder(account, order, price, rates, now, at = now) {
     const pos = s0.positions[order.symbol];
     const loan = s0.loans[order.currency];
     if (pos?.financed > 0 && pos.qty > 0 && loan?.balance > 0) {
-      const amount = roundCash(Math.min(pos.financed * Math.min(1, order.qty / pos.qty), loan.balance, est.total), order.currency);
+      // Which shares it sells: 現股 first, then 融資 shares (融資賣出), unless
+      // it's the broker's sale of the 融資 shares (fromMargin).
+      const mq = Math.min(pos.qty, pos.marginQty ?? pos.qty);
+      const fromMargin = order.fromMargin ? Math.min(order.qty, mq) : Math.max(0, order.qty - (pos.qty - mq));
+      const amount = fromMargin > 0 ? roundCash(Math.min(pos.financed * Math.min(1, fromMargin / mq), loan.balance, est.total), order.currency) : 0;
+      if (fromMargin > 0) fill.marginQty = fromMargin;
       if (amount > 0) {
         fill.repaid = amount;
         extra.push({ id: `repay:${order.id}`, type: 'repay', t: at, currency: order.currency, amount, symbol: order.symbol });

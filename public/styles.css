@@ -765,9 +765,11 @@ a.activity-row { color: inherit; text-decoration: none; }
 /* ---- Activity (交易明細) ---- */
 .activity-row { align-items: flex-start; padding: 12px 10px; gap: 12px; }
 .activity-row .row-main { gap: 2px; }
-.activity-row .row-title { font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
-.activity-row .row-sub { font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+/* A record's lines wrap: nothing of a trade (quantity, price, fees) is cut off. */
+.activity-row .row-title { font-size: 0.95rem; white-space: normal; overflow-wrap: anywhere; }
+.activity-row .row-sub { font-size: 0.82rem; color: var(--text-secondary); white-space: normal; overflow-wrap: anywhere; }
 .row-meta { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.activity-row .row-meta { white-space: normal; overflow-wrap: anywhere; }
 .activity-row .row-amt { padding-top: 2px; }
 .act-ic { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-sunken); color: var(--text-secondary); }
 .act-ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -859,7 +861,8 @@ a.activity-row { color: inherit; text-decoration: none; }
 .position-row { align-items: center; }
 .position-row .row-main { gap: 1px; }
 .position-row .row-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
-.position-row .row-sub, .position-row .row-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+/* A holding's lines wrap: its 現股 / 融資 split and prices are never cut off. */
+.position-row .row-sub, .position-row .row-meta { white-space: normal; overflow-wrap: anywhere; }
 .pos-right { flex: none; display: grid; justify-items: end; gap: 3px; text-align: right; }
 .pos-right strong { font-size: 0.95rem; }
 .pos-right small { font-size: 0.68rem; color: var(--text-muted); }

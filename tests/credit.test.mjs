@@ -133,22 +133,30 @@ test('no credit account: no margin or borrowed shorts in any market, and the bro
   // A currency pair sold is no borrowing: still allowed.
   const pair = quote('EURUSD=X', 1.1, T0, { kind: 'fx', market: 'FX', currency: 'USD', session: null });
   assert.notEqual(placeOrder(a, { side: 'sell', qty: 1000 }, { quote: pair, rates: RATES, valuation: val(a, T0, [['EURUSD=X', pair]]), now: T0 }).error, 'creditNeeded');
-  // 融資 held without a credit account (bought while it had one, an event later gone): sold.
+  // 融資 held without a credit account (bought while it had one, an event later gone), and 300 shares of 現股.
   const opened = { ...a, events: [...a.events, { id: 'credit:x', type: 'credit', t: T0, limit: 5_000_000 }] };
   const q = quote('2330.TW', 1000);
-  const bought = placeOrder(opened, { side: 'buy', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: val(opened, T0, [['2330.TW', q]]), now: T0, id: 'm' }).account;
+  let bought = placeOrder(opened, { side: 'buy', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: val(opened, T0, [['2330.TW', q]]), now: T0, id: 'm' }).account;
+  bought = placeOrder(bought, { side: 'buy', qty: 300 }, { quote: q, rates: RATES, valuation: val(bought, T0, [['2330.TW', q]]), now: T0 + 1, id: 'c' }).account;
+  assert.equal(replay(bought, T0 + 2).positions['2330.TW'].marginQty, 1000);
   const without = { ...bought, events: bought.events.filter(e => e.type !== 'credit') };
-  // Only what pays the loan off (60% of 1,000,000 and its costs): 617 shares, not all 1,000.
+  // The broker sells the 融資 shares, all of them, and never the 現股.
   const plan = closeOutPlan(without, val(without, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR);
-  assert.deepEqual(plan.map(p => [p.symbol, p.side, p.qty, p.reason]), [['2330.TW', 'sell', Math.ceil((replay(without, T0).positions['2330.TW'].financed * 1.02) / (1000 * 0.994)), 'noCredit']]);
-  assert.ok(plan[0].qty < 700);
-  // Sold and the loan paid from the sale: the rest stays, and nothing more is sold.
+  assert.deepEqual(plan.map(p => [p.symbol, p.side, p.qty, p.fromMargin, p.reason]), [['2330.TW', 'sell', 1000, true, 'noCredit']]);
   const t1 = T0 + HOUR;
   let after = placeOrder(without, plan[0], { quote: quote('2330.TW', 1000, t1), rates: RATES, valuation: val(without, t1, [['2330.TW', q]]), now: t1 }).account;
   after = repayAll(after, RATES, true, t1);
-  const held = replay(after, t1 + 1).positions['2330.TW'];
-  assert.equal(held.qty, 1000 - plan[0].qty);
-  assert.ok(!(held.financed > 0.5));
+  const held = replay(after, t1 + 1);
+  assert.equal(held.positions['2330.TW'].qty, 300);
+  assert.ok(!(held.positions['2330.TW'].financed > 0.5) && !(held.loans.TWD?.balance > 0.5));
   assert.deepEqual(closeOutPlan(after, val(after, t1 + 2, [['2330.TW', q]]), t1 + 2), []);
+  assert.deepEqual(closeOutPlan(bought, val(bought, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR), []);
+  // An ordinary sale sells 現股 first: 300 of them repay nothing; past them, the 融資 shares repay theirs.
+  const s300 = placeOrder(bought, { side: 'sell', qty: 300 }, { quote: quote('2330.TW', 1000, t1), rates: RATES, valuation: val(bought, t1, [['2330.TW', q]]), now: t1 });
+  assert.equal(s300.fill.repaid, undefined);
+  assert.equal(replay(s300.account, t1 + 1).positions['2330.TW'].marginQty, 1000);
+  const s500 = placeOrder(bought, { side: 'sell', qty: 500 }, { quote: quote('2330.TW', 1000, t1), rates: RATES, valuation: val(bought, t1, [['2330.TW', q]]), now: t1 });
+  assert.equal(s500.fill.marginQty, 200);
+  assert.equal(replay(s500.account, t1 + 1).positions['2330.TW'].marginQty, 800);
   assert.deepEqual(closeOutPlan(bought, val(bought, T0 + HOUR, [['2330.TW', q]]), T0 + HOUR), []);
 });

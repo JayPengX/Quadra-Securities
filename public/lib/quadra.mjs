@@ -2711,6 +2711,65 @@ export function watchUpdates({ current, key, cachePrefix, busy = () => false, ev
   setInterval(check, every);
 }
 
+// Strips that scroll sideways (chips, tabs, dates) keep their place when
+// the app redraws them: a redraw replaces the strip with a new one at the
+// start, which threw the person back to the first chip after every tap. The
+// kit notes where each strip was scrolled (by the nearest element with an
+// id, its class and its place among its likes) and, after any redraw, puts a
+// fresh strip back there, unless the app placed it itself; the chosen chip
+// (aria-pressed / aria-selected / .active / .on) is kept in view. Every app,
+// every strip, nothing to call.
+function keepStrips() {
+  if (typeof document === 'undefined' || typeof MutationObserver === 'undefined' || globalThis.__quadraStrips) return;
+  globalThis.__quadraStrips = true;
+  const kept = new Map();
+  const host = el => el.parentElement?.closest('[id]') || document.body;
+  const classOf = el => (typeof el.className === 'string' ? el.className.trim().split(/\s+/).filter(c => !/^(is-|on$|active$|open$|stuck$)/.test(c)).sort().join('.') : '');
+  const signature = el => {
+    const h = host(el);
+    const cls = classOf(el);
+    const peers = [...h.querySelectorAll(el.tagName)].filter(x => classOf(x) === cls);
+    return { key: `${h.id || 'body'}|${el.tagName}|${cls}|${peers.indexOf(el)}`, hostId: h.id || '', tag: el.tagName, cls, index: peers.indexOf(el) };
+  };
+  const sideways = el => el instanceof Element && el.scrollWidth > el.clientWidth + 2;
+  const note = el => {
+    if (!sideways(el)) return;
+    const sig = signature(el);
+    kept.set(sig.key, { ...sig, left: el.scrollLeft });
+  };
+  document.addEventListener('scroll', e => note(e.target), true);
+  // A tap on a chip counts as where the strip was, even never scrolled.
+  document.addEventListener('pointerdown', e => {
+    for (let el = e.target instanceof Element ? e.target : null; el && el !== document.body; el = el.parentElement) if (sideways(el)) return note(el);
+  }, true);
+  const chosen = '[aria-pressed="true"], [aria-selected="true"], [aria-current="true"], [aria-current="page"], .active, .on, .selected';
+  let queued = false;
+  const restore = () => {
+    queued = false;
+    for (const k of kept.values()) {
+      const h = k.hostId ? document.getElementById(k.hostId) : document.body;
+      if (!h) continue;
+      const el = [...h.querySelectorAll(k.tag)].filter(x => classOf(x) === k.cls)[k.index];
+      if (!el || !sideways(el) || el.scrollLeft !== 0 || el.__quadraKept === k) continue;
+      el.__quadraKept = k;
+      el.scrollLeft = k.left;
+      const pick = el.querySelector(chosen);
+      if (pick) {
+        const a = pick.getBoundingClientRect();
+        const b = el.getBoundingClientRect();
+        if (a.left < b.left || a.right > b.right) el.scrollLeft += a.left < b.left ? a.left - b.left - 12 : a.right - b.right + 12;
+      }
+    }
+  };
+  // Right after the redraw (before it's painted), so the strip never shows at its start.
+  new MutationObserver(() => {
+    if (queued || !kept.size) return;
+    queued = true;
+    restore();
+  }).observe(document.documentElement, { childList: true, subtree: true });
+}
+keepStrips();
+
 // Where the person was (the scroll), kept across a reload for an update and
 // put back by restorePlace() once the app has painted.
 const PLACE_KEY = 'quadra.place';

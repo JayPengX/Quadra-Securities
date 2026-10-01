@@ -67,10 +67,11 @@ export const WEALTH_RANKS = [
   { id: 'tycoon', min: 20_000_000, reward: 30_000, icon: '🚀' }
 ];
 // Where the money came from and went (all time, NT$): what the system gave
-// (opening money, pay, level rewards, resets, VIP cashback), what Quadra took
-// from the account (Plus, overdraft interest, and Play's net when the
-// account is behind there), and the account's own result on top (worth less
-// the first plus the second).
+// (opening money, pay, level rewards, resets, VIP cashback), the account
+// against Quadra (Play's settled bets less Plus fees and overdraft interest:
+// a surplus when it has won more than it lost and paid), and its own result
+// (markets, savings: worth less the other two). A bet still open is in the
+// worth, as money at stake, and in neither side until it's settled.
 // An account older than the shared wallet opened in the apps' own books:
 // Securities' deposit (NT$100,000, or what it was opened with: it reports
 // it as `snap.stock.opened`) and Play's NT$10,000 (its `odds:start` entry,
@@ -80,9 +81,15 @@ export const WEALTH_RANKS = [
 const RESET_ID = 'eco:rebase:v3';
 export function moneySides(wallet) {
   const gave = { start: 0, pay: 0, rank: 0, other: 0 };
-  let took = 0;
+  // Play's settled bets (payouts less stakes) and what Quadra charges (Plus
+  // fees, overdraft interest); a bet still open is neither yet: it's money
+  // at stake, still the account's.
   let play = 0;
+  let fees = 0;
+  let atStake = 0;
   const entries = wallet?.entries || [];
+  const ids = new Set(entries.map(e => e.id));
+  const open = e => e.kind === 'stake' && typeof e.id === 'string' && e.id.startsWith('odds:stake-') && !ids.has(`odds:payout-${e.id.slice(11)}`) && !ids.has(`odds:refund-${e.id.slice(11)}`);
   if (entries.some(e => e.id === RESET_ID) && !entries.some(e => e.id === 'eco:start')) gave.start += finiteOr0(wallet?.snap?.stock?.opened ?? 100_000);
   for (const e of entries) {
     const a = Number(e.amount) || 0;
@@ -91,18 +98,21 @@ export function moneySides(wallet) {
       else if (e.kind === 'pay') gave.pay += a;
       else if (e.kind === 'rank') gave.rank += a;
       else if (e.kind === 'rebase' || e.kind === 'vip') gave.other += a;
-      else if (e.kind === 'plus' || e.kind === 'od') took -= a;
+      else if (e.kind === 'plus' || e.kind === 'od') fees -= a;
     } else if (e.app === 'odds') {
       if (e.kind === 'start') gave.start += a;
       else if (e.kind === 'grant') gave.other += a;
+      else if (open(e)) atStake -= a;
       else play += a;
     }
   }
-  // Play: what the house kept (its edge, over every bet), or 0 if the account came out ahead.
-  if (play < 0) took -= play;
   const given = gave.start + gave.pay + gave.rank + gave.other;
-  const worth = worthOf(wallet);
-  return { gave, given, took, worth, own: worth - given + took, playNet: play };
+  // Against Quadra, signed: above 0 when Play has paid out more than the
+  // account lost there and paid in fees (a surplus), below when Quadra kept more.
+  const quadra = play - fees;
+  // The worth counts money at stake: it's still the account's until settled.
+  const worth = worthOf(wallet) + atStake;
+  return { gave, given, quadra, fees, playNet: play, atStake, took: Math.max(0, -quadra), worth, own: worth - given - quadra };
 }
 // The monthly pay: fixed, whatever the account holds (eco.js PAY_MONTH).
 export const paydayFor = () => ECONOMY.monthly;

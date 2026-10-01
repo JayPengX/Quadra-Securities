@@ -10,7 +10,10 @@
 //   this page (meta build-version) is loaded straight away, its old cached
 //   files dropped (data-cache, the service worker's cache prefix), before
 //   anything starts. The kit's watchUpdates keeps the page current after.
-// - Offers a way out when the app never starts (an error, or 15 s): reload,
+// - When the app fails to start (an error: an installed app whose cached
+//   page mixed an old version's files with a new one's), mends itself once
+//   in ten minutes: its cached files dropped, the latest deploy loaded from
+//   the network. Otherwise (or still failing, or 15 s) a way out: reload,
 //   or open anyway. The app says it started with window.__fxStarted (or the
 //   older __oddsStarted / __stockStarted) and hides #loading itself (the kit
 //   does).
@@ -114,17 +117,57 @@
   var started = function () {
     return Boolean(window.__fxStarted || window.__oddsStarted || window.__stockStarted || window.__quadraStarted);
   };
-  var fail = function (message) {
-    if (box.hidden || !q('.q-boot-error').hidden) return;
+  var cachePrefix = box.getAttribute('data-cache') || '';
+  // The app's cached files dropped, then `then`.
+  var dropCache = function (then) {
+    if (!window.caches || !cachePrefix) return then();
+    caches
+      .keys()
+      .then(function (names) {
+        return Promise.all(
+          names
+            .filter(function (n) {
+              return n.indexOf(cachePrefix) === 0;
+            })
+            .map(function (n) {
+              return caches.delete(n);
+            })
+        );
+      })
+      .then(then, then);
+  };
+  var healKey = 'quadra.bootHeal:' + location.pathname;
+  var heal = function () {
+    var last = 0;
+    try {
+      last = Number(localStorage.getItem(healKey)) || 0;
+      if (Date.now() - last < 10 * 60000) return false;
+      localStorage.setItem(healKey, String(Date.now()));
+    } catch (e) {
+      return false;
+    }
+    window.__bootUpdating = true;
+    step.textContent = L('更新中…', 'Updating…');
+    dropCache(function () {
+      location.replace(location.pathname + '?v=' + Date.now() + location.hash);
+    });
+    return true;
+  };
+  var fail = function (message, broken) {
+    if (box.hidden || !q('.q-boot-error').hidden || window.__bootUpdating) return;
+    if (broken && heal()) return;
     q('.q-boot-error-text').textContent = message || L('頁面沒有正常啟動，可能是網路不穩。', "The page didn't start, maybe a network hiccup.");
     q('.q-boot-error').hidden = false;
     q('.q-boot-bar').hidden = true;
     step.hidden = true;
   };
   // The names the apps' scripts already call.
-  window.__quadraFail = window.__fxFail = window.__oddsFail = window.__stockFail = fail;
+  var broke = function () {
+    fail('', true);
+  };
+  window.__quadraFail = window.__fxFail = window.__oddsFail = window.__stockFail = broke;
   window.addEventListener('error', function () {
-    if (!started()) fail();
+    if (!started()) broke();
   });
   setTimeout(function () {
     if (!started()) fail();
@@ -134,7 +177,6 @@
   var meta = document.querySelector('meta[name="build-version"]');
   var current = meta && meta.content;
   if (!current || current === 'dev' || !window.fetch) return;
-  var cachePrefix = box.getAttribute('data-cache') || '';
   var ctl = window.AbortController ? new AbortController() : null;
   setTimeout(function () {
     if (ctl) ctl.abort();
@@ -150,24 +192,9 @@
       if (sessionStorage.getItem(flag) === latest) return;
       sessionStorage.setItem(flag, latest);
       window.__bootUpdating = true;
-      var go = function () {
+      dropCache(function () {
         location.replace(location.pathname + '?v=' + encodeURIComponent(latest) + location.hash);
-      };
-      if (!window.caches || !cachePrefix) return go();
-      caches
-        .keys()
-        .then(function (names) {
-          return Promise.all(
-            names
-              .filter(function (n) {
-                return n.indexOf(cachePrefix) === 0;
-              })
-              .map(function (n) {
-                return caches.delete(n);
-              })
-          );
-        })
-        .then(go, go);
+      });
     })
     .catch(function () {});
 })();

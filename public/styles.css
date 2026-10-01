@@ -857,3 +857,19 @@ a.activity-row { color: inherit; text-decoration: none; }
 #home-account:empty { display: none; }
 #home-account { margin-top: 10px; }
 #categories { margin-top: 18px; }
+
+/* ---- The credit account (信用帳戶) ---- */
+.credit-card { display: grid; gap: 10px; }
+.credit-card .card-title small { font-weight: 600; margin-left: 6px; }
+.credit-tiers { flex-wrap: wrap; }
+.credit-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.credit-checks li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+.credit-checks li.no { color: var(--text-secondary); }
+.credit-checks li.ok .act-ic { color: var(--q-good, #16a34a); }
+.credit-checks li.no .act-ic { color: var(--q-warn, #d97706); }
+.credit-use { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 0.86rem; }
+.credit-use .loan-bar { grid-column: 1 / -1; }
+.credit-terms { display: grid; border-top: 1px solid var(--q-divider, var(--grid)); }
+.credit-term { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--q-divider, var(--grid)); }
+.credit-term-main { display: grid; flex: 1; min-width: 0; }
+.credit-term-main small { color: var(--text-secondary); font-size: 0.8rem; }

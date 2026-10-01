@@ -12,6 +12,7 @@ import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, searchSymbols, fxSymbol } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
 import { BRANDS, brandLogo } from './lib/brands.mjs';
+import { afterHours, creditAccount, creditCheck, openCredit, bestTier, creditUsed, terms as creditTerms, extendTerm, closeOutPlan, yearOfTrading, dayTradeSellFirst, CREDIT_TIERS, CREDIT_MIN_TRADES, CREDIT_TURNOVER, CREDIT_PROOF } from './lib/credit.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
 import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donut, miniBars, stackBar, SERIES } from './lib/chart.mjs';
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
@@ -370,6 +371,15 @@ function afterPrices() {
     if (placed.account) {
       account = placed.account;
       accountNotice('margin', t('toastForced', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `forced:${plan.symbol}:${now}`, hash: 'fx' });
+    }
+  }
+  // Taiwan's 融資 and 融券 past their six months (not extended), and day
+  // trades sold first and not bought back by the close: closed for the account.
+  for (const plan of closeOutPlan(account, v, now)) {
+    const placed = placeOrder(account, plan, { quote: state.quotes.get(plan.symbol), rates: state.rates, valuation: v, now });
+    if (placed.account) {
+      account = placed.account;
+      accountNotice('margin', t(plan.reason === 'due' ? 'toastTermDue' : 'toastDayCover', { name: nameOf(plan.symbol) }), { tone: 'bad', tag: `closeout:${plan.symbol}:${now}`, hash: 'fx' });
     }
   }
   if (account !== state.account) {
@@ -1759,7 +1769,11 @@ function renderTicket() {
     : [];
   const problems = [];
   const shorting = d.side === 'sell' && qty > shares + 1e-9;
+  // Taiwan: selling short is 融券 (through the credit account) or a day trade sold first.
+  const twCredit = q.market === 'TW' ? creditAccount(state.account, Date.now()).open : false;
+  const twDayShort = q.market === 'TW' && !twCredit && dayTradeSellFirst(state.account, Date.now());
   if (shorting && !isShortable(q.kind)) problems.push(t('notEnoughShares', { have: fmtQty(shares) }));
+  else if (shorting && q.market === 'TW' && !twCredit && !twDayShort) problems.push(t('err_creditNeeded'));
   else if (shorting && qty > shares + shortRoom + 1e-9) problems.push(t('shortTooBig', { max: fmtQty(shares + shortRoom) }));
   if (credit && !marginOk) problems.push(t('err_margin'));
   if (short > 0 && !topUp?.enough && !marginBuy) problems.push(t('notEnoughCash', { cur: q.currency, have: money(cash, q.currency), short: money(short, q.currency) }));
@@ -1804,7 +1818,8 @@ function renderTicket() {
         ${est.commission && !plusAt() ? `<button class="q-plus-hint fee-plus" type="button" data-action="plus">${h(t('feePlus', { v: money(q.market === 'TW' ? Math.floor(est.commission * PLUS.stock.commission) : est.commission * PLUS.stock.commission, q.currency) }))}</button>` : ''}`
         : ''
     }
-    ${shorting && isShortable(q.kind) && !problems.length ? `<p class="note">${h(t('shortNote', { qty: fmtQty(qty - shares), unit, fee: rateText(SHORT_FEE) }))}</p>` : ''}
+    ${shorting && isShortable(q.kind) && !problems.length ? `<p class="note">${h(q.market !== 'TW' ? t('shortNote', { qty: fmtQty(qty - shares), unit, fee: rateText(SHORT_FEE) }) : twCredit ? t('shortNoteTw', { qty: fmtQty(qty - shares), unit, deposit: money((qty - shares) * q.price * 0.9, q.currency) }) : t('dayShortNote', { qty: fmtQty(qty - shares), unit }))}</p>` : ''}
+    ${q.market === 'TW' && afterHours(Date.now()) ? `<p class="note">${h(t('afterHoursNote'))}</p>` : ''}
     ${problems.map(p => `<p class="warn">${h(p)}</p>`).join('')}
     ${topUp?.enough ? `<p class="note">${h(t('autoFxLine', { pay: money(topUp.need, BASE), get: money(topUp.get, q.currency) }))}</p>` : ''}
     ${credit && est ? `<p class="note margin-line">${h(t('creditNote', { rate: pct(loanRateAt(q.currency), { digits: 2, sign: false }) }))}</p>` : ''}
@@ -1917,6 +1932,10 @@ function errorText(r) {
       return t('err_capacity', { cap: money(r.capacity, BASE) });
     case 'shortMargin':
       return t('err_shortMargin', { max: fmtQty(r.max) });
+    case 'creditLimit':
+      return t('err_creditLimit', { room: money(r.room ?? 0, BASE), limit: money(r.limit ?? 0, BASE) });
+    case 'termEarly':
+      return t('err_termEarly', { date: fmtDate(r.from) });
     case 'unsettled':
       return t('err_unsettled', { have: money(r.have ?? 0, r.currency || BASE) });
     case 'tick':
@@ -2590,6 +2609,7 @@ function loansHtml() {
       ${v.debtTWD > 0 ? gauge(v.ratio) : ''}
       ${v.owed > 0 ? callPanelHtml(v) : ''}
     </div>
+    ${creditCardHtml(v)}
     <div class="card loan-card">
       <h3 class="card-title">${h(t('repay'))}</h3>
       <div class="fx-side">
@@ -2601,6 +2621,60 @@ function loansHtml() {
     </div>
     ${v.loans.length ? `<div class="card"><h3 class="card-title">${h(t('yourLoans'))}</h3><div class="wallets">${v.loans.map(x => `<div class="wallet debt"><span class="wallet-flag">${currencyInfo(x.currency).flag}</span><span class="wallet-main"><strong>${h(x.currency)}</strong><small>${h(t('loanRate', { rate: pct(x.rate, { digits: 2, sign: false }) }))} · ${h(t('interestSoFar', { amount: money(x.interest, x.currency, { digits: 2 }) }))}</small></span><span class="wallet-amt"><strong class="num down-ink">−${h(money(x.balance, x.currency))}</strong>${x.currency !== BASE ? `<small class="num">≈ −${h(money(x.twd, BASE))}</small>` : ''}</span></div>`).join('')}</div></div>` : ''}
   </div>`;
+}
+
+// The credit account (信用帳戶): its limit and what's used, the terms of
+// what's out with 展延; or, not open yet, what opening one needs.
+function creditCardHtml(v) {
+  const now = Date.now();
+  const credit = creditAccount(state.account, now);
+  const year = yearOfTrading(state.account, now);
+  if (!credit.open) {
+    const pick = CREDIT_TIERS.includes(state.creditTier) ? state.creditTier : CREDIT_TIERS[0];
+    const check = creditCheck(state.account, pick, v.netWorth, now);
+    const need = key => check.needs.find(n => n.key === key);
+    const row = (key, text) => `<li class="${need(key) ? 'no' : 'ok'}">${icon(need(key) ? 'alert' : 'check')}<span>${h(text)}</span></li>`;
+    return `<div class="card credit-card">
+      <h3 class="card-title">${h(t('creditTitle'))}</h3>
+      <p class="note">${h(t('creditWhy'))}</p>
+      <div class="chips credit-tiers">${CREDIT_TIERS.map(x => `<button class="chip" type="button" data-action="credit-tier" data-limit="${x}" aria-pressed="${x === pick}">${h(compactMoney(x, BASE))}</button>`).join('')}</div>
+      <ul class="credit-checks">
+        ${row('age', need('age') ? t('creditAgeNo', { date: fmtDate(need('age').from) }) : t('creditAgeOk'))}
+        ${row('trades', t('creditTrades', { n: year.trades, want: CREDIT_MIN_TRADES }))}
+        ${row('turnover', t('creditTurnover', { have: compactMoney(year.turnoverTWD, BASE), want: compactMoney(pick * CREDIT_TURNOVER, BASE) }))}
+        ${pick > CREDIT_TIERS[0] ? row('means', t('creditMeans', { want: compactMoney(pick * CREDIT_PROOF, BASE) })) : ''}
+      </ul>
+      <button class="primary-button block" type="button" data-action="credit-open" data-limit="${pick}" ${check.ok ? '' : 'disabled'}>${h(t('creditOpen', { v: compactMoney(pick, BASE) }))}</button>
+      <p class="note">${h(dayTradeSellFirst(state.account, now) ? t('dayTradeOk') : t('dayTradeNo'))}</p>
+    </div>`;
+  }
+  const used = creditUsed(v);
+  const better = bestTier(state.account, v.netWorth, now);
+  const bar = (label, x) => `<div class="credit-use"><span>${h(label)}</span><strong class="num">${h(money(x, BASE))} / ${h(compactMoney(credit.limit, BASE))}</strong><div class="loan-bar"><i style="width:${Math.min(100, (x / credit.limit) * 100).toFixed(1)}%"></i></div></div>`;
+  const list = creditTerms(v, now);
+  return `<div class="card credit-card">
+    <h3 class="card-title">${h(t('creditTitle'))} <small class="muted">${h(t('creditLimitIs', { v: compactMoney(credit.limit, BASE) }))}</small></h3>
+    ${bar(t('creditLoanUsed'), used.loan)}${bar(t('creditShortUsed'), used.short)}
+    ${better > credit.limit ? `<button class="ghost-button block" type="button" data-action="credit-open" data-limit="${better}">${h(t('creditRaise', { v: compactMoney(better, BASE) }))}</button>` : ''}
+    ${list.length
+      ? `<div class="credit-terms">${list.map(x => `<div class="credit-term"><span class="credit-term-main"><strong>${h(nameOf(x.symbol))}</strong><small>${h(x.side === 'loan' ? t('termLoan') : t('termShort'))} · ${h(t('termDue', { date: fmtDate(x.due) }))}</small></span>${x.canExtend ? `<button class="chip" type="button" data-action="extend" data-symbol="${h(x.symbol)}">${h(t('extend'))}</button>` : `<small class="muted">${h(t('extendFrom', { date: fmtDate(x.due - 30 * 86_400_000) }))}</small>`}</div>`).join('')}</div>`
+      : ''}
+    <p class="note">${h(t('creditRules'))}</p>
+  </div>`;
+}
+function doOpenCredit(limit) {
+  const r = openCredit(state.account, limit, valuation().netWorth, Date.now());
+  if (r.error) return toast(t('creditNotYet'), 'bad');
+  commit(r.account);
+  toast(t('creditOpened', { v: money(limit, BASE) }), 'good');
+  render();
+}
+function doExtend(symbol) {
+  const r = extendTerm(state.account, valuation(), symbol, Date.now());
+  if (r.error) return toast(errorText(r), 'bad');
+  commit(r.account);
+  toast(t('extended', { name: nameOf(symbol) }), 'good');
+  render();
 }
 
 async function doExchange() {
@@ -2683,8 +2757,11 @@ function activityRow(e) {
       lead = `<span class="act-sym">${symbolBadge(e.symbol, q)}<i class="act-side ${e.side}">${h(e.side === 'buy' ? t('buyShort') : t('sellShort'))}</i></span>`;
       title = nameOf(e.symbol, q);
       line = `${e.maturity ? t('maturedTag') : t(e.side)} ${fmtQty(e.qty)} ${unitOf(e.symbol)} @ ${fmtPrice(e.price, e.currency)}`;
-      meta = fees([e.commission ? `${t('commission')} ${money(e.commission, e.currency)}` : '', e.voucherOff ? `${t('voucherLine')} −${money(e.voucherOff, e.currency)}` : '', e.tax ? `${t('tax')} ${money(e.tax, e.currency)}` : '', e.fee ? `${t('exchangeFee')} ${money(e.fee, e.currency)}` : '']);
+      meta = fees([e.commission ? `${t('commission')} ${money(e.commission, e.currency)}` : '', e.voucherOff ? `${t('voucherLine')} −${money(e.voucherOff, e.currency)}` : '', e.tax ? `${t('tax')} ${money(e.tax, e.currency)}` : '', e.fee ? `${t(e.handling ? 'shortFees' : 'exchangeFee')} ${money(e.fee, e.currency)}` : '', e.settle > e.t ? (e.settle > Date.now() ? t('settlesOn', { date: shortDate(e.settle) }) : t('settledOn', { date: shortDate(e.settle) })) : '']);
       if (e.forced) tag = t('forcedTag');
+      else if (e.credit) tag = t('termShort');
+      else if (e.dayShort) tag = t('dayTradeTag');
+      else if (e.after) tag = t('afterTag');
       amount = `<strong class="num ${e.side === 'buy' ? '' : 'up-ink'}">${e.side === 'buy' ? '−' : '+'}${h(money(e.total, e.currency))}</strong>`;
       break;
     }
@@ -3609,6 +3686,16 @@ document.addEventListener('click', event => {
       break;
     case 'repay-all':
       doRepay(true);
+      break;
+    case 'credit-tier':
+      state.creditTier = Number(el.dataset.limit);
+      renderFx();
+      break;
+    case 'credit-open':
+      doOpenCredit(Number(el.dataset.limit));
+      break;
+    case 'extend':
+      doExtend(el.dataset.symbol);
       break;
     case 'td-term':
       state.td.months = Number(el.dataset.months);

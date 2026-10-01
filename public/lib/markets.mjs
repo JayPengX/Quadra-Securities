@@ -406,7 +406,9 @@ export function tradeCosts({ market, side, kind, gross, currency, discount = 1, 
     return { commission, tax: 0, fee: 0, total: commission, taxRate: 0, feeRate: 0 };
   }
   const min = oddLot && m.commission.oddMin != null ? m.commission.oddMin : m.commission.min;
-  const commission = gross > 0 && m.commission.rate > 0 ? round(Math.max(gross * m.commission.rate, min) * discount) : 0;
+  // The discount is off the commission, and the minimum applies after it (a
+  // broker's 2.8折 still charges NT$20 at least); free (0) is free.
+  const commission = gross > 0 && m.commission.rate > 0 && discount > 0 ? round(Math.max(gross * m.commission.rate * discount, min)) : 0;
   const rules = levy(side === 'buy' ? m.buy : m.sell, kind);
   const dayRate = dayTrade ? (side === 'buy' ? m.buy : m.sell)?.[kind]?.dayTrade : null;
   const { fee: feeRate } = rules;

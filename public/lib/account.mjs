@@ -46,6 +46,7 @@ import {
 import { nextTradingStart, isTradingDay } from './holidays.mjs';
 import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
+import { creditAccount, creditUsed, dayTradeSellFirst, termDue, afterHours, SHORT_DEPOSIT, SHORT_HANDLING } from './credit.mjs';
 
 export const ACCOUNT_VERSION = 1;
 // Every new account opens with the same NT$100,000 (Quadra's base amount);
@@ -162,7 +163,7 @@ function accrue(s, t) {
   }
   s.cashLast = Math.max(s.cashLast, t);
   for (const p of Object.values(s.positions)) {
-    if (p.qty < 0 && t > p.feeLast) p.borrowFee += (-p.cost * SHORT_FEE * (t - p.feeLast)) / YEAR_MS;
+    if (p.qty < 0 && t > p.feeLast && !p.credit && !p.dayShort) p.borrowFee += (-p.cost * SHORT_FEE * (t - p.feeLast)) / YEAR_MS;
     p.feeLast = Math.max(p.feeLast ?? t, t);
   }
   for (const loan of Object.values(s.loans)) {
@@ -272,7 +273,24 @@ export function replay(account, now = Date.now()) {
         loan.rate = e.rate;
         add(s.cash, e.currency, e.amount);
         // A purchase's own loan (融資): what of the holding is financed.
-        if (e.symbol && s.positions[e.symbol]) s.positions[e.symbol].financed = (s.positions[e.symbol].financed || 0) + e.amount;
+        if (e.symbol && s.positions[e.symbol]) {
+          const p = s.positions[e.symbol];
+          // 融資's six-month term runs from the first loan on the holding.
+          if (!(p.financed > 0)) Object.assign(p, { loanSince: e.t, loanExt: 0, loanDue: termDue(e.t) });
+          p.financed = (p.financed || 0) + e.amount;
+        }
+        break;
+      }
+      // 展延: the term of a 融資 holding or a 融券 short, six months more.
+      case 'extend': {
+        const p = s.positions[e.symbol];
+        if (p?.qty > 0 && p.loanDue) {
+          p.loanExt = (p.loanExt || 0) + 1;
+          p.loanDue = termDue(p.loanSince, p.loanExt);
+        } else if (p?.qty < 0 && p.shortDue) {
+          p.shortExt = (p.shortExt || 0) + 1;
+          p.shortDue = termDue(p.first, p.shortExt);
+        }
         break;
       }
       // An old cash loan tied to the purchase it paid for (linkOldLoans).
@@ -286,7 +304,11 @@ export function replay(account, now = Date.now()) {
         loan.repaid += e.amount;
         if (loan.balance < 10 ** -currencyInfo(e.currency).digits / 2) loan.balance = 0;
         add(s.cash, e.currency, -e.amount);
-        if (e.symbol && s.positions[e.symbol]) s.positions[e.symbol].financed = Math.max(0, (s.positions[e.symbol].financed || 0) - e.amount);
+        if (e.symbol && s.positions[e.symbol]) {
+          const p = s.positions[e.symbol];
+          p.financed = Math.max(0, (p.financed || 0) - e.amount);
+          if (p.financed < 0.5) delete p.loanDue;
+        }
         break;
       }
     }
@@ -325,6 +347,13 @@ function applyFill(s, e) {
     const part = (e.total * close) / e.qty;
     let realizedLocal = buy ? -cost - part : part - cost;
     let realized = buy ? -costTWD - part * twd : part * twd - costTWD;
+    if (buy && (p.shortDeposit || p.shortHeld)) {
+      // A 融券 bought back: that part's deposit and held sale money come back.
+      const back = (p.shortDeposit + p.shortHeld) * share;
+      p.shortDeposit -= p.shortDeposit * share;
+      p.shortHeld -= p.shortHeld * share;
+      add(s.cash, e.currency, back);
+    }
     if (buy) {
       // Buying back pays the borrowing fee accrued on that part.
       const fee = p.borrowFee * share;
@@ -351,6 +380,15 @@ function applyFill(s, e) {
     if (Math.abs(p.qty) <= EPS) {
       p.first = e.t;
       p.feeLast = e.t;
+      if (!buy && e.credit) Object.assign(p, { credit: true, shortExt: 0, shortDue: termDue(e.t), shortDeposit: 0, shortHeld: 0 });
+      if (!buy && e.dayShort) p.dayShort = true;
+    }
+    // 融券: the seller's 90% deposit and the sale money stay with the broker.
+    if (!buy && e.credit) {
+      const deposit = roundCash((SHORT_DEPOSIT * e.gross * left) / e.qty, e.currency);
+      p.shortDeposit = (p.shortDeposit || 0) + deposit;
+      p.shortHeld = (p.shortHeld || 0) + part;
+      add(s.cash, e.currency, -(deposit + part));
     }
     p.qty += buy ? left : -left;
     p.cost += buy ? part : -part;
@@ -369,7 +407,11 @@ export function available(account, s) {
   for (const o of account.orders || []) {
     if (o.status !== 'open') continue;
     if (o.side === 'buy') cash[o.currency] = (cash[o.currency] || 0) - (o.reserve || 0);
-    else qty[o.symbol] = (qty[o.symbol] || 0) - o.qty;
+    else {
+      qty[o.symbol] = (qty[o.symbol] || 0) - o.qty;
+      // A 融券 order waiting holds its 90% deposit.
+      if (o.deposit) cash[o.currency] = (cash[o.currency] || 0) - o.deposit;
+    }
   }
   return { cash, qty };
 }
@@ -416,6 +458,13 @@ export function estimate({ market, kind, currency, side, qty, price, t = Date.no
 // before the current session started also fills on the session's high or
 // low having reached its price (the page can't watch every tick).
 export function triggerPrice(order, quote, now) {
+  // Taiwan's after-hours sessions: one match at 14:30, at the close.
+  if (order.after) {
+    if (!quote || now < order.after || !(quote.marketTime >= order.after - 3_600_000)) return null;
+    const close = quote.price;
+    if (order.type === 'limit') return order.side === 'buy' ? (order.limit >= close ? close : null) : order.limit <= close ? close : null;
+    return order.type === 'market' ? close : null;
+  }
   if (!quote || !isOpen(quote, now)) return null;
   if (isOddLot(order.market, order.kind, order.qty) && !oddLotOpen(now)) return null;
   if (quote.kind !== 'crypto' && quote.session && quote.marketTime < quote.session.start) return null;
@@ -531,13 +580,31 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
     const rate = collateralRate(quote.kind, quote.market, quote.symbol);
     if (!(rate > 0)) return { error: 'notMarginable' };
     if (!valuation || valuation.margin !== 'ok' || account.call) return { error: 'margin' };
+    // Taiwan's 融資: through the credit account, within its limit.
+    if (quote.market === 'TW') {
+      const credit = creditAccount(account, now);
+      if (!credit.open) return { error: 'creditNeeded' };
+      const loan = quote.price * qty * rate;
+      const room = credit.limit - creditUsed(valuation).loan;
+      if (loan > room + EPS) return { error: 'creditLimit', room: Math.max(0, Math.floor(room)), limit: credit.limit };
+    }
     order.margin = rate;
+  }
+  // After Taiwan's close and before 14:30: the after-hours sessions (盤後定價,
+  // 盤後零股), limit or market orders, matched once at 14:30 at the close;
+  // what doesn't match ends with the day.
+  if (quote.market === 'TW' && !req.forced) {
+    const after = afterHours(now);
+    if (after && type !== 'stop') {
+      order.after = after.match;
+      order.tif = 'day';
+    }
   }
   // How long it lasts: a day order ends with its session (what exchanges
   // and brokers do by default); good-till-cancelled lasts GTC_DAYS. Crypto
   // and currency pairs never close, so theirs are GTC.
-  order.tif = req.tif === 'gtc' || quote.kind === 'crypto' || quote.kind === 'fx' ? 'gtc' : 'day';
-  order.expires = order.tif === 'gtc' ? now + GTC_DAYS * 86_400_000 : dayOrderEnd(quote, now);
+  if (!order.after) order.tif = req.tif === 'gtc' || quote.kind === 'crypto' || quote.kind === 'fx' ? 'gtc' : 'day';
+  order.expires = order.after ? order.after + 9 * 3_600_000 : order.tif === 'gtc' ? now + GTC_DAYS * 86_400_000 : dayOrderEnd(quote, now);
   if (side === 'sell') {
     const have = Math.max(0, avail.qty[quote.symbol] || 0);
     const short = qty - have;
@@ -546,13 +613,33 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
       if (!isShortable(quote.kind)) return { error: 'shares', have };
       if (!valuation) return { error: 'noValuation' };
       if (valuation.margin !== 'ok') return { error: 'margin' };
+      if (defaulted(account, now)) return { error: 'defaulted' };
+      // Taiwan: 融券 through the credit account (a 90% deposit, within its
+      // limit), or else a day trade sold first (現股當沖) that must be bought
+      // back by the close.
+      if (quote.market === 'TW') {
+        const credit = creditAccount(account, now);
+        if (credit.open) {
+          const room = credit.limit - creditUsed(valuation).short;
+          if (short * quote.price > room + EPS) return { error: 'creditLimit', room: Math.max(0, Math.floor(room)), limit: credit.limit };
+          const deposit = roundCash(SHORT_DEPOSIT * short * quote.price, quote.currency);
+          const cash = avail.cash[quote.currency] || 0;
+          if (deposit > cash + EPS) return { error: 'funds', need: deposit, have: Math.max(0, cash), currency: quote.currency };
+          order.short = true;
+          order.credit = true;
+          order.deposit = deposit;
+        } else if (dayTradeSellFirst(account, now) && !order.after && twSession(now)) {
+          order.short = true;
+          order.dayShort = true;
+          order.tif = 'day';
+        } else return { error: 'creditNeeded' };
+      }
       const value = short * quote.price * rates[quote.currency];
       const owed = valuation.debtTWD + valuation.shortTWD + value;
-      if ((valuation.assets + value) / owed < SHORT_INITIAL - EPS) {
+      if (!order.credit && !order.dayShort && (valuation.assets + value) / owed < SHORT_INITIAL - EPS) {
         const room = Math.max(0, (valuation.assets - SHORT_INITIAL * (valuation.debtTWD + valuation.shortTWD)) / (SHORT_INITIAL - 1));
         return { error: 'shortMargin', max: roundQty(have + room / (quote.price * rates[quote.currency]), quote.kind) };
       }
-      if (defaulted(account, now)) return { error: 'defaulted' };
       order.short = true;
     }
   } else {
@@ -605,8 +692,14 @@ function fillOrder(account, order, price, rates, now, at = now) {
   if (order.type !== 'limit') price = marketFill(order.market, order.kind, order.side, price);
   else price = order.side === 'buy' ? Math.min(price, order.limit) : Math.max(price, order.limit);
   // A Taiwan stock sold the day it was bought pays the day-trade tax.
-  const dayTrade = order.side === 'sell' && order.market === 'TW' && account.events.some(e => e.type === 'fill' && e.symbol === order.symbol && e.side === 'buy' && e.t <= at && localDayOf(e.t, 'TW') === localDayOf(at, 'TW'));
+  const dayTrade = order.side === 'sell' && order.market === 'TW' && (order.dayShort || account.events.some(e => e.type === 'fill' && e.symbol === order.symbol && e.side === 'buy' && e.t <= at && localDayOf(e.t, 'TW') === localDayOf(at, 'TW')));
   let est = estimate({ market: order.market, kind: order.kind, currency: order.currency, side: order.side, qty: order.qty, price, t: at, dayTrade, first: firstTrade(account) });
+  // 融券手續費: 0.08% of what's sold short (Taiwan drops the fraction).
+  if (order.credit) {
+    const held = Math.max(0, replay(account, at).positions[order.symbol]?.qty || 0);
+    const handling = Math.floor((est.gross * Math.max(0, order.qty - held)) / order.qty * SHORT_HANDLING);
+    if (handling > 0) est = { ...est, fee: est.fee + handling, costs: est.costs + handling, total: est.total - handling, handling };
+  }
   // A commission voucher from the points catalogue: off this fill's commission.
   const voucher = feeVoucher(account, at);
   const off = voucherOff(voucher, est.commission, order.currency, rates[order.currency]);
@@ -654,6 +747,10 @@ function fillOrder(account, order, price, rates, now, at = now) {
   if (off > 0) Object.assign(fill, { voucher: voucher.id, voucherOff: off });
   if (order.forced) fill.forced = true;
   if (order.cover) fill.cover = true;
+  if (order.credit) fill.credit = true;
+  if (order.dayShort) fill.dayShort = true;
+  if (est.handling) fill.handling = est.handling;
+  if (order.after) fill.after = true;
   const extra = [];
   // 融資買進: the loan for this purchase, made as it fills, tied to the stock.
   if (order.side === 'buy' && order.margin) {
@@ -974,6 +1071,9 @@ export function valuate(s, quotes, rates) {
   let feesTWD = 0;
   let dayChange = 0;
   let collateral = 0;
+  // 融券 collateral the broker holds (the deposit and the sale money): the
+  // account's own, counted in its assets.
+  let shortCashTWD = 0;
   for (const p of Object.values(s.positions)) {
     const q = quotes?.get?.(p.symbol);
     const r = rate(p.currency);
@@ -995,6 +1095,7 @@ export function valuate(s, quotes, rates) {
     } else {
       shortTWD -= valueTWD;
       feesTWD += fee;
+      shortCashTWD += ((p.shortDeposit || 0) + (p.shortHeld || 0)) * (r ?? 0);
     }
     out.positions.push({
       ...p,
@@ -1018,7 +1119,7 @@ export function valuate(s, quotes, rates) {
     debtTWD += twd;
     out.loans.push({ ...loan, twd });
   }
-  const assets = cashTWD + longTWD;
+  const assets = cashTWD + longTWD + shortCashTWD;
   const owed = debtTWD + shortTWD;
   const receivable = s.receivable || 0;
   // Time deposits are the bank's, not collateral: in net worth, not assets.
@@ -1036,6 +1137,7 @@ export function valuate(s, quotes, rates) {
   return {
     ...out,
     cashTWD,
+    shortCashTWD,
     tds,
     savedTWD,
     lent: Object.values(s.lent || {}).sort((a, b) => a.t - b.t),

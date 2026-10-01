@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+// A credit account at the top tier, opened before T0 (the tests' trading is about the loans, not the limit).
+const withCredit = (a, at) => ({ ...a, events: [...a.events, { id: 'credit:t', type: 'credit', t: at - 1, limit: 5_000_000 }] });
 import {
   newAccount, replay, available, placeOrder, requiredCash, processOrders, cancelOrder, exchange, quoteExchange, amountFor, deposit, valuate,
   borrow, repay, repayAll, liquidationPlan, applyCorporateActions, mergeAccounts, recordSnapshot, benchmarkValue, triggerPrice,
@@ -78,7 +80,7 @@ test('what the ticket says an order holds is exactly what placing it needs (held
 });
 
 test('融資買進: the broker lends 60% of a Taiwan buy as it fills; selling repays it first', () => {
-  const a = newAccount(1_000_000, T0, 'acc');
+  const a = withCredit(newAccount(1_000_000, T0, 'acc'), T0);
   const q = quote('2330.TW', 2475);
   const v = valuate(replay(a, T0), new Map([['2330.TW', q]]), RATES);
   const r = placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: v, now: T0, id: 'm1' });
@@ -125,7 +127,7 @@ test('a default: 7% penalty, and no margin or shorting for 5 years; a missed mar
   const v = valuate(replay(a, T0), new Map([['2330.TW', q]]), RATES);
   assert.equal(placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100, margin: true }, { quote: q, rates: RATES, valuation: v, now: T0, id: 'd1' }).error, 'defaulted');
   // 斷頭: a holding bought on margin is sold whole.
-  let b = newAccount(1_000_000, T0, 'acc2');
+  let b = withCredit(newAccount(1_000_000, T0, 'acc2'), T0);
   const vb = valuate(replay(b, T0), new Map([['2330.TW', q]]), RATES);
   b = placeOrder(b, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: vb, now: T0, id: 'm1' }).account;
   const plan = callPlan(b, valuate(replay(b, T0), new Map([['2330.TW', q]]), RATES));

@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { newAccount, replay, valuate, placeOrder, available, openDeposit, breakDeposit, matureDeposits, lendShares, lendableQty, recallShares, matureLending, recallAll, incomeSummary } from '../public/lib/account.mjs';
 import { TD_TERMS, tdInterest, addMonths, incomeTaxes, lendFee, addWeekdays, LEND_CUT } from '../public/lib/savings.mjs';
+// A credit account at the top tier, opened before T0 (the tests' trading is about the loans, not the limit).
+const withCredit = (a, at) => ({ ...a, events: [...a.events, { id: 'credit:t', type: 'credit', t: at - 1, limit: 5_000_000 }] });
 
 const T0 = Date.UTC(2026, 8, 21, 2); // Monday 10:00 Taipei
 const HOUR = 3_600_000;
@@ -104,7 +106,7 @@ test('lending ends by itself after 180 days; a default or call recalls everythin
 });
 
 test('shares bought on margin can’t be lent', () => {
-  let a = newAccount(2_000_000, T0 - DAY, 'acc');
+  let a = withCredit(newAccount(2_000_000, T0 - DAY, 'acc'), T0);
   const q = quote('2330.TW', 1_000);
   const v = valuate(replay(a, T0), new Map(), RATES);
   a = placeOrder(a, { side: 'buy', type: 'market', qty: 1_000, margin: true }, { quote: q, rates: RATES, valuation: v, now: T0, id: 'm1' }).account;

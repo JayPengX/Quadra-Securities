@@ -20,43 +20,62 @@ const quote = (symbol, price, over = {}) => {
 };
 const val = (a, t, quotes) => valuate(replay(a, t), new Map(quotes), RATES);
 
-test('short selling: proceeds in cash, owed at market, borrowing fee, profit when bought back lower', () => {
+test('融券 in Taiwan: a 90% deposit and the sale money held, 0.08% handling, no yearly fee; both back when bought back', () => {
   let a = newAccount(1_000_000, T0, 'acc');
   const q = quote('2330.TW', 2000);
   let v = val(a, T0, [['2330.TW', q]]);
-  // Limit orders at the price, so the numbers are the fee and the borrowing cost alone.
   const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 2000, qty: 100 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' });
   assert.equal(r.error, undefined);
   assert.equal(r.order.short, true);
+  assert.equal(r.fill.credit, true);
+  // 200,000 sold: commission 285, tax 600, 融券手續費 160.
+  assert.equal(r.fill.handling, 160);
+  assert.equal(r.fill.total, 200_000 - 285 - 600 - 160);
   a = r.account;
   let s = replay(a, T0);
   assert.equal(s.positions['2330.TW'].qty, -100);
-  assert.equal(s.cash.TWD, 1_000_000 + 200_000 - 285 - 600);
+  assert.equal(s.cash.TWD, 1_000_000 - 180_000);
   v = val(a, T0, [['2330.TW', q]]);
   assert.equal(v.shortTWD, 200_000);
-  assert.ok(Math.abs(v.netWorth - (1_000_000 - 885)) < 1e-6);
-  // A month later at 1,800: bought back, 3% a year on NT$199,115 for 30 days.
+  assert.equal(v.shortCashTWD, 180_000 + 198_955);
+  assert.ok(Math.abs(v.netWorth - (1_000_000 - 1_045)) < 1e-6);
+  // A month later at 1,800: bought back; no borrowing fee, the collateral back.
   const later = T0 + 30 * DAY;
   const q2 = quote('2330.TW', 1800, { at: later });
   const b = placeOrder(a, { side: 'buy', type: 'limit', limit: 1800, qty: 100 }, { quote: q2, rates: RATES, now: later, id: 'b' });
   s = replay(b.account, later);
   assert.equal(s.positions['2330.TW'], undefined);
-  const fee = (199_115 * 0.03 * 30) / 365;
-  assert.ok(Math.abs(s.paid.borrow - fee) < 1e-6);
-  assert.ok(Math.abs(s.realized - (199_115 - 180_256 - fee)) < 1e-6);
+  assert.equal(s.paid.borrow, 0);
+  assert.equal(s.cash.TWD, 1_000_000 + 198_955 - 180_256);
+  assert.ok(Math.abs(s.realized - (198_955 - 180_256)) < 1e-6);
   assert.equal(s.closed[0].short, true);
 });
 
-test('shorts need 150% cover to open, get called and bought back when the price runs up', () => {
+test('short selling elsewhere: proceeds in cash, owed at market, a yearly borrowing fee', () => {
+  let a = newAccount(1_000_000, T0, 'acc');
+  const q = quote('X', 2000, { market: 'US', currency: 'TWD' });
+  let v = val(a, T0, [['X', q]]);
+  const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 2000, qty: 100 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' });
+  assert.equal(r.error, undefined);
+  a = r.account;
+  const got = r.fill.total;
+  assert.equal(replay(a, T0).cash.TWD, 1_000_000 + got);
+  const later = T0 + 30 * DAY;
+  const b = placeOrder(a, { side: 'buy', type: 'limit', limit: 1800, qty: 100 }, { quote: quote('X', 1800, { at: later, market: 'US', currency: 'TWD' }), rates: RATES, now: later, id: 'b' });
+  const s = replay(b.account, later);
+  assert.ok(Math.abs(s.paid.borrow - (got * 0.03 * 30) / 365) < 1e-6);
+});
+
+test('shorts elsewhere need 150% cover to open, get called and bought back when the price runs up', () => {
   let a = newAccount(100_000, T0, 'acc');
-  const q = quote('X.TW', 100);
-  const v = val(a, T0, [['X.TW', q]]);
+  const q = quote('X', 100, { market: 'US', currency: 'TWD' });
+  const v = val(a, T0, [['X', q]]);
   const big = placeOrder(a, { side: 'sell', qty: 3000 }, { quote: q, rates: RATES, valuation: v, now: T0 });
   assert.equal(big.error, 'shortMargin');
   assert.ok(big.max > 1500 && big.max < 2100);
   a = placeOrder(a, { side: 'sell', qty: 1900 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' }).account;
-  const up = quote('X.TW', 160, { at: T0 + DAY });
-  const v2 = val(a, T0 + DAY, [['X.TW', up]]);
+  const up = quote('X', 160, { at: T0 + DAY, market: 'US', currency: 'TWD' });
+  const v2 = val(a, T0 + DAY, [['X', up]]);
   assert.equal(v2.margin, 'liquidate');
   assert.deepEqual(liquidationPlan(a, v2).map(p => [p.side, p.qty]), [['buy', 1900]]);
   // Crypto can be shorted too, funds and passbooks can't.

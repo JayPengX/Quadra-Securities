@@ -5,7 +5,7 @@ import { newAccount, replay, estimate, quoteExchange, usePlus, plusAt, loanRateA
 
 const OCT = Date.UTC(2026, 9, 10, 2);
 const NOV = Date.UTC(2026, 10, 10, 2);
-const plus = { months: new Set(['2026-10']), commission: 0.5, fxSpread: 0.5, cashRate: 0.02, cashCap: 100_000, loanCut: 0.01 };
+const plus = { months: new Set(['2026-10']), commission: 0.5, fxSpread: 0.5, loanCut: 0.01 };
 
 test('Plus: half the commission and FX spread, a cheaper loan, only in a paid month', () => {
   const buy = t => estimate({ market: 'TW', kind: 'stock', currency: 'TWD', side: 'buy', qty: 1000, price: 1000, t }).commission;
@@ -27,25 +27,38 @@ test('Plus: half the commission and FX spread, a cheaper loan, only in a paid mo
   }
 });
 
-test('Plus: NT$ cash earns 2% in member months, 0.8% otherwise', () => {
+test('Plus is about trading: cash interest, deposits and lending are the same for everyone', async () => {
+  const { openDeposit, lendShares } = await import('../public/lib/account.mjs');
+  const { CASH_RATE } = await import('../public/lib/markets.mjs');
+  const { LEND_CUT, tdRate } = await import('../public/lib/savings.mjs');
   const a = newAccount(100_000, Date.UTC(2026, 9, 1) - 8 * 3_600_000);
   const end = Date.UTC(2026, 10, 1) - 8 * 3_600_000;
-  usePlus(null);
-  const normal = replay(a, end).cashInterest;
   usePlus(plus);
   try {
-    const member = replay(a, end).cashInterest;
-    assert.ok(Math.abs(member / normal - 0.02 / 0.008) < 1e-6);
-    // November isn't paid for: the plain rate.
-    const nov = replay(a, Date.UTC(2026, 11, 1) - 8 * 3_600_000).cashInterest - member;
-    assert.ok(Math.abs(nov / (normal * 30 / 31) - 1) < 1e-6);
-    // Above cashCap the plain rate: NT$300,000 earns 2% on 100,000, 0.8% on 200,000.
-    const big = newAccount(300_000, Date.UTC(2026, 9, 1) - 8 * 3_600_000);
-    const got = replay(big, end).cashInterest;
-    assert.ok(Math.abs(got / normal - (0.02 * 100_000 + 0.008 * 200_000) / (0.008 * 100_000)) < 1e-6);
+    const interest = replay(a, end).cashInterest;
+    assert.ok(Math.abs(interest / ((100_000 * CASH_RATE * (end - (Date.UTC(2026, 9, 1) - 8 * 3_600_000))) / (365 * 86_400_000)) - 1) < 0.01);
+    assert.equal(openDeposit(a, { amount: 50_000, months: 12 }, OCT, 'x').event.rate, tdRate(12));
+    assert.equal(lendShares(a, { symbol: '2330.TW', qty: 1_000, price: 1_000 }, OCT, 'l').event?.cutRate, undefined);
+    assert.equal(LEND_CUT, 0.3);
   } finally {
     usePlus(null);
   }
+});
+
+test('the pool mirrors the wallet: a deposit whose entry the clean-up retired goes', () => {
+  const a = newAccount(0, Date.UTC(2026, 8, 1));
+  const t = Date.UTC(2026, 8, 2);
+  const before = { entries: [{ id: 'eco:pay:2026-09', t, app: 'eco', kind: 'pay', amount: 6_000 }, { id: 'vocab:shop:pack:toeic', t, app: 'vocab', kind: 'shop', amount: -990 }] };
+  const { account } = applyPool(a, before);
+  assert.equal(replay(account, t + 1).cash.TWD, 5_010);
+  // The clean keeps the money as one entry instead.
+  const after = { entries: [before.entries[0], { id: 'eco:rebase:hub', t: t + 5, app: 'eco', kind: 'rebase', amount: -990 }] };
+  const next = applyPool(account, after);
+  assert.deepEqual(next.added.map(e => e.id), ['x:eco:rebase:hub']);
+  assert.ok(!next.account.events.some(e => e.id === 'x:vocab:shop:pack:toeic'));
+  assert.equal(replay(next.account, t + 10).cash.TWD, 5_010);
+  // Nothing changed: the same account back.
+  assert.equal(applyPool(next.account, after).account, next.account);
 });
 
 import { coverPlan } from '../public/lib/account.mjs';

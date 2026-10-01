@@ -44,7 +44,7 @@ import {
   localDayOf
 } from './markets.mjs';
 import { nextTradingStart, isTradingDay } from './holidays.mjs';
-import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
+import { TD_MIN, tdRate, addMonths, tdInterest, incomeTaxes, lendable, LEND_RATE, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, addWeekdays, lendFee } from './savings.mjs';
 import { BONDS, couponDates } from './bonds.mjs';
 import { creditAccount, creditUsed, dayTradeSellFirst, termDue, afterHours, SHORT_DEPOSIT, SHORT_HANDLING } from './credit.mjs';
 
@@ -94,73 +94,23 @@ const add = (map, key, amount) => (map[key] = (map[key] || 0) + amount);
 
 // ---- Quadra Plus ---------------------------------------------------------------
 //
-// A member (quadra.mjs PLUS.stock) pays part of the commission and FX spread,
-// borrows cheaper and earns more on NT$ cash. Each counts by when it happens:
-// a trade, exchange or loan by the moment it's made, cash interest by each
-// Taiwan month the membership was paid for. The app keeps `months` current
-// from the wallet (usePlus); with none, nothing here changes anything.
-// A member also gets +tdBonus on a new 定存 and keeps more of a lending fee
-// (the broker's lendCut instead of LEND_CUT), both by when it's made.
-const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, cashRate: CASH_RATE, cashCap: 0, loanCut: 0, tdBonus: 0, lendCut: LEND_CUT };
+// A member (quadra.mjs PLUS.stock) pays part of the commission and FX spread
+// and borrows cheaper, each by the moment the trade, exchange or loan is
+// made. The app keeps `months` current from the wallet (usePlus); with
+// none, nothing here changes anything.
+const PLUS_NONE = { months: new Set(), commission: 1, fxSpread: 1, loanCut: 0 };
 let plus = PLUS_NONE;
 export function usePlus(settings) {
   plus = settings ? { ...PLUS_NONE, ...settings } : PLUS_NONE;
 }
 export const plusAt = (t = Date.now()) => plus.months.has(taipeiDay(t).slice(0, 7));
-const tdPlus = t => (plusAt(t) ? plus.tdBonus : 0);
-
-// ---- Points catalogue vouchers (Rewards' 積分兌換, the kit's CATALOG) -------------
-//
-// Tokens redeemed with points, kept current from the wallet (useVouchers,
-// the kit's catalogTokens): `fee` takes up to its NT$ value off the
-// commission of the next fill that pays one (`fill.voucher`, the rest of it
-// lost); `td` adds its rate to one new 定存 of up to its cap
-// (`td.bonus`). Each is used once: a fill or deposit naming it spends it,
-// and the app writes 'stock:xs-<token id>' to the wallet so every app knows.
-let vouchers = { fee: [], td: [] };
-export function useVouchers(list) {
-  vouchers = { fee: list?.fee || [], td: list?.td || [] };
-}
-const spentVouchers = account => new Set((account?.events || []).flatMap(e => [e.voucher, e.bonus]).filter(Boolean));
-const voucherAt = (account, kind, t) => {
-  const spent = spentVouchers(account);
-  return vouchers[kind].filter(x => x.t <= t && t < x.until && !spent.has(x.id)).sort((a, b) => a.until - b.until)[0] ?? null;
-};
-// The commission voucher a fill at `t` would use, or null.
-export const feeVoucher = (account, t = Date.now()) => voucherAt(account, 'fee', t);
-// The 定存 bonus tokens free to use now.
-export const tdVouchers = (account, t = Date.now()) => {
-  const spent = spentVouchers(account);
-  return vouchers.td.filter(x => x.t <= t && t < x.until && !spent.has(x.id));
-};
-// Tokens this account has spent (for the wallet's markers).
-export const usedVouchers = account => (account?.events || []).flatMap(e => (e.voucher ? [[e.voucher, e.t]] : e.bonus ? [[e.bonus, e.t]] : []));
-// What a voucher takes off a commission, in its currency.
-export const voucherOff = (voucher, commission, currency, rate) => (voucher && commission > 0 && rate > 0 ? Math.min(commission, roundCash(voucher.value / rate, currency)) : 0);
-// NT$ cash interest between two moments, month by month, as rate × time:
-// `base` on all the cash, and Plus's `extra` rate on the first cashCap only
-// (like a Taiwan digital bank's high-interest tier).
-function cashYield(from, to) {
-  const out = { base: CASH_RATE * (to - from), extra: 0 };
-  if (!plus.months.size) return out;
-  for (let a = from; a < to; ) {
-    const d = new Date(a + 8 * 3_600_000);
-    const b = Math.min(to, Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - 8 * 3_600_000);
-    if (plusAt(a)) out.extra += Math.max(0, plus.cashRate - CASH_RATE) * (b - a);
-    a = b;
-  }
-  return out;
-}
 
 // ---- Replay ------------------------------------------------------------------
 
 function accrue(s, t) {
-  // NT$ cash earns the demand-deposit rate (Quadra Plus: more).
+  // NT$ cash earns the demand-deposit rate.
   const cash = s.cash[BASE] || 0;
-  if (t > s.cashLast && cash > 0) {
-    const y = cashYield(s.cashLast, t);
-    s.cashInterest += (cash * y.base + Math.min(cash, plus.cashCap) * y.extra) / YEAR_MS;
-  }
+  if (t > s.cashLast && cash > 0) s.cashInterest += (cash * CASH_RATE * (t - s.cashLast)) / YEAR_MS;
   s.cashLast = Math.max(s.cashLast, t);
   for (const p of Object.values(s.positions)) {
     if (p.qty < 0 && t > p.feeLast && !p.credit && !p.dayShort) p.borrowFee += (-p.cost * SHORT_FEE * (t - p.feeLast)) / YEAR_MS;
@@ -700,10 +650,6 @@ function fillOrder(account, order, price, rates, now, at = now) {
     const handling = Math.floor((est.gross * Math.max(0, order.qty - held)) / order.qty * SHORT_HANDLING);
     if (handling > 0) est = { ...est, fee: est.fee + handling, costs: est.costs + handling, total: est.total - handling, handling };
   }
-  // A commission voucher from the points catalogue: off this fill's commission.
-  const voucher = feeVoucher(account, at);
-  const off = voucherOff(voucher, est.commission, order.currency, rates[order.currency]);
-  if (off > 0) est = { ...est, commission: est.commission - off, costs: est.costs - off, total: order.side === 'buy' ? est.total - off : est.total + off };
   // A fill found in the past must have fitted the cash (or shares) at that
   // moment and still fit today's.
   const moments = at < now ? [at, now] : [now];
@@ -744,7 +690,6 @@ function fillOrder(account, order, price, rates, now, at = now) {
     total: est.total,
     twd: rates[order.currency]
   };
-  if (off > 0) Object.assign(fill, { voucher: voucher.id, voucherOff: off });
   if (order.forced) fill.forced = true;
   if (order.cover) fill.cover = true;
   if (order.credit) fill.credit = true;
@@ -905,23 +850,14 @@ export function deposit(account, amount, now = Date.now(), id = randomId()) {
 // NT$ cash settled and not held for orders: what can go into a deposit.
 const freeCash = (account, s, now) => Math.max(0, withdrawable(account, s, now)[BASE] || 0);
 
-// The rate a new deposit gets: the posted one, Plus's bonus, and a bonus
-// token's (its first term only: a roll-over is at the posted rate again).
-export const depositRate = (months, now = Date.now(), bonus = null) => {
-  const posted = tdRate(Number(months));
-  return posted == null ? null : Math.round((posted + tdPlus(now) + (bonus?.rate || 0)) * 1e6) / 1e6;
-};
-export function openDeposit(account, { amount, months, renew = false, bonus = null }, now = Date.now(), id = randomId()) {
+export function openDeposit(account, { amount, months, renew = false }, now = Date.now(), id = randomId()) {
   amount = Math.round(Number(amount));
-  const token = bonus ? tdVouchers(account, now).find(x => x.id === bonus) : null;
-  if (bonus && !token) return { error: 'tdBonusGone' };
-  if (token && amount > token.cap) return { error: 'tdBonusCap', cap: token.cap };
-  const rate = depositRate(months, now, token);
+  const rate = tdRate(Number(months));
   if (rate == null) return { error: 'tdTerm' };
   if (!(amount >= TD_MIN)) return { error: 'tdMin', min: TD_MIN };
   const have = freeCash(account, replay(account, now), now);
   if (amount > have + EPS) return { error: 'funds', need: amount, have, currency: BASE };
-  const event = { id: `td:${id}`, type: 'td', t: now, currency: BASE, amount, months: Number(months), rate, ends: addMonths(now, Number(months)), renew: Boolean(renew), ...(token ? { bonus: token.id } : {}) };
+  const event = { id: `td:${id}`, type: 'td', t: now, currency: BASE, amount, months: Number(months), rate, ends: addMonths(now, Number(months)), renew: Boolean(renew) };
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 
@@ -948,8 +884,7 @@ export function matureDeposits(account, now = Date.now()) {
     if (!due) break;
     const events = [tdEnd(due, due.ends)];
     if (due.renew) {
-      const { bonus, ...rest } = due;
-      events.push({ ...rest, id: `${due.id}r`, t: due.ends, rate: depositRate(due.months, due.ends) ?? due.rate, ends: addMonths(due.ends, due.months) });
+      events.push({ ...due, id: `${due.id}r`, t: due.ends, rate: tdRate(due.months) ?? due.rate, ends: addMonths(due.ends, due.months) });
     }
     next = { ...next, events: [...next.events, ...events] };
   }
@@ -1013,7 +948,7 @@ export function lendShares(account, { symbol, qty, price }, now = Date.now(), id
   const can = lendableQty(account, symbol, now);
   if (qty > can + EPS) return { error: 'lendQty', can };
   if (!(price > 0)) return { error: 'noQuote' };
-  const event = { id: `lend:${id}`, type: 'lend', t: now, symbol, name: p.name, market: p.market, kind: p.kind, currency: p.currency, qty, price, rate: LEND_RATE[p.kind], ...(plusAt(now) && plus.lendCut !== LEND_CUT ? { cutRate: plus.lendCut } : {}) };
+  const event = { id: `lend:${id}`, type: 'lend', t: now, symbol, name: p.name, market: p.market, kind: p.kind, currency: p.currency, qty, price, rate: LEND_RATE[p.kind] };
   return { account: { ...account, events: [...account.events, event] }, event };
 }
 
@@ -1990,16 +1925,20 @@ export const startIncome = (account, now = Date.now()) => (account.income ? acco
 // ---- The Quadra pool -----------------------------------------------------------
 //
 // With a Quadra Pass this account's NT$ cash is the shared money pool (see
-// quadra.mjs): money the other apps put in or took out (Sportsbook's bets
-// and winnings, Words' rewards, transfers) arrives here as NT$ deposits with
+// quadra.mjs): money the other apps put in or took out (Play's bets and
+// winnings, Quadra's pay and Plus) arrives here as NT$ deposits with
 // fixed ids ('x:<entry id>', `pool: true`), counted as money put in or taken
 // out rather than as return. What this account shares back is its own part:
 // its NT$ cash less those deposits.
 
-// The wallet's entries from the other apps that aren't in the log yet, added.
+// The pool's deposits as the wallet has them: its entries from the other
+// apps that aren't in the log yet, added, and a deposit whose entry the
+// wallet no longer has (the store's clean-up retired it) gone.
 export function applyPool(account, wallet) {
   if (!account || !wallet) return { account, added: [] };
-  const have = new Set(account.events.map(e => e.id));
+  const ids = new Set((wallet.entries || []).map(e => `x:${e.id}`));
+  const kept = account.events.filter(e => !e.pool || ids.has(e.id));
+  const have = new Set(kept.map(e => e.id));
   const added = [];
   for (const e of wallet.entries || []) {
     if (e.app === 'stock') continue;
@@ -2010,8 +1949,8 @@ export function applyPool(account, wallet) {
     if (e.peer) event.peer = e.peer;
     added.push(event);
   }
-  if (!added.length) return { account, added };
-  return { account: { ...account, events: [...account.events, ...added] }, added };
+  if (!added.length && kept.length === account.events.length) return { account, added };
+  return { account: { ...account, events: [...kept, ...added] }, added };
 }
 
 // This account's own part of the pool: spendable NT$ (open orders' cash

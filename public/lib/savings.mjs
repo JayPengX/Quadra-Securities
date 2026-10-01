@@ -10,8 +10,7 @@
 //
 // 借券出借 (securities lending): Taiwan stocks and ETFs held whole lots,
 // settled and not bought on margin, lent through the broker for a fee on
-// their value when lent. The broker keeps LEND_CUT of the fee (a Plus
-// member's contract, PLUS.stock.lendCut: its `cutRate`). Lent shares
+// their value when lent. The broker keeps LEND_CUT of the fee. Lent shares
 // can't be sold; a recall returns them in LEND_RECALL business days, and
 // a contract ends by itself after LEND_TERM_DAYS. The fee is paid when the
 // shares come back.
@@ -93,7 +92,7 @@ export function addWeekdays(t, n) {
 // broker's cut, the taxes, what's paid.
 export function lendFee(lend, until) {
   const gross = Math.max(0, Math.round((lend.qty * lend.price * lend.rate * (until - lend.t)) / YEAR_MS));
-  const cut = Math.round(gross * (lend.cutRate ?? LEND_CUT));
+  const cut = Math.round(gross * LEND_CUT);
   const taxes = incomeTaxes(gross - cut);
   return { gross, cut, ...taxes };
 }

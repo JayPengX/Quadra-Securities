@@ -1,9 +1,9 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, callState, callNeed, payDown, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, useVouchers, linkOldLoans, feeVoucher, tdVouchers, usedVouchers, depositRate, voucherOff, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, callState, callNeed, payDown, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, linkOldLoans, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
-import { TD_TERMS, TD_MIN, TD_EARLY, tdInterest, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, lendFee, lendable } from './lib/savings.mjs';
+import { TD_TERMS, TD_MIN, TD_EARLY, tdRate, tdInterest, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, lendFee, lendable } from './lib/savings.mjs';
 import {
   BASE, CURRENCIES, MARKETS, METALS, collateralRate, MARGIN_CALL, MARGIN_LIQUIDATE, MARGIN_RESTORE, SHORT_FEE, currencyInfo, isOpen, isTradable, isShortable, qtyStep, roundQty, dealPrice, delayOf, tickSize, onTick, priceLimits, marketFill, isOddLot, oddLotOpen, CASH_RATE, lotSize, lunchOf, atLunch, limitShare, settleDays
 } from './lib/markets.mjs';
@@ -21,7 +21,7 @@ import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
 import {
-  APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, recordAffinity, activityPatch, affinity, notify, notifyOn, kindOn, schedulePush, ask, translate, paydayFor, PLUS, plusMonths, plusCard, openPlus, affinityPatch, catalogTokens, catalogItem
+  APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, recordAffinity, affinity, notify, notifyOn, kindOn, schedulePush, ask, translate, paydayFor, PLUS, plusMonths, plusCard, openPlus, affinityPatch
 } from './lib/quadra.mjs';
 
 const $ = id => document.getElementById(id);
@@ -63,7 +63,7 @@ const state = {
   // mode 'pay': the amount is what you give; 'get': what you want to receive.
   fx: { from: BASE, to: 'USD', amount: '', mode: 'pay', view: 'exchange' },
   loan: { currency: BASE, amount: '', mode: 'borrow' },
-  td: { amount: '', months: 12, renew: false, bonus: false },
+  td: { amount: '', months: 12, renew: false },
   alloc: 'kind',
   historyView: 'activity',
   activityFilter: 'all',
@@ -1075,13 +1075,8 @@ function renderSearch() {
 
 // ---- Detail sheet: chart, facts, trade ticket ------------------------------------------
 
-// Stocks opened today, each once (Rewards' mission counts different ones).
-const viewedToday = { day: '', set: new Set() };
 async function openDetail(symbol) {
-  const day = new Date(Date.now() + 8 * 3_600_000).toISOString().slice(0, 10);
-  if (viewedToday.day !== day) Object.assign(viewedToday, { day, set: new Set() });
-  track(viewedToday.set.has(symbol) ? null : 'view', symbolKeys(symbol), 1);
-  viewedToday.set.add(symbol);
+  track(symbolKeys(symbol), 1);
   const q0 = state.quotes.get(symbol);
   const held = snap()?.positions[symbol];
   state.detail = {
@@ -1443,15 +1438,11 @@ async function addPlan() {
   planAddedAt = Date.now();
   // The keyboard away, so the sheet redraws with the plan in place.
   document.activeElement?.blur?.();
-  // A plan for a symbol that never had one (not an edit, not one stopped and started again).
-  const fresh = !Object.values(state.account.plans || {}).some(p => p.symbol === d.symbol);
   const r = setPlan(state.account, { symbol: d.symbol, amount: state.plan.amount, day: state.plan.day, name: q.name, kind: q.kind, market: q.market, currency: q.currency });
   if (r.error) return toast(t(`err_${r.error}`), 'bad');
   commit(r.account);
   state.planEdit = null;
-  // Rewards' mission: a new monthly plan (an edit keeps the affinity, not the mission).
-  if (fresh) track('plan', symbolKeys(d.symbol), 2);
-  else recordAffinity('stock', symbolKeys(d.symbol), 2);
+  track(symbolKeys(d.symbol), 2);
   toast(t('planSet', { date: fmtDate(nextPlanRun(r.plan)) }), 'good');
   redrawDetail();
 }
@@ -1710,10 +1701,7 @@ function ticketInfo() {
   const last = d.type === 'stop' ? (d.side === 'buy' ? Math.max(Number(d.stop), q.price) : Number(d.stop)) || q.price : q.price;
   const ref = d.type === 'limit' ? Number(d.limit) : marketFill(q.market, q.kind, d.side, last);
   const welcome = firstTrade(state.account);
-  const est0 = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref, first: welcome }) : null;
-  // A commission voucher from points comes off what the fill costs.
-  const vOff = ticketVoucher(est0, q.currency);
-  const est = vOff ? { ...est0, voucherOff: vOff, total: d.side === 'buy' ? est0.total - vOff : est0.total + vOff } : est0;
+  const est = qty > 0 && ref > 0 ? estimate({ market: q.market, kind: q.kind, currency: q.currency, side: d.side, qty, price: ref, first: welcome }) : null;
   const cash = Math.max(0, avail.cash[q.currency] || 0);
   const shares = Math.max(0, avail.qty[d.symbol] || 0);
   // Largest quantity whose held amount fits the cash, NT$ that could be
@@ -1797,8 +1785,6 @@ function renderTicket() {
         [t('estPrice'), fmtPrice(est.price, q.currency)],
         [t('gross'), money(est.gross, q.currency)],
         ...(est.commission ? [[t('commission'), money(est.commission, q.currency)]] : []),
-        // A commission voucher from points: used by the fill, shown here.
-        ...(est.voucherOff ? [[t('voucherLine'), `−${money(est.voucherOff, q.currency)}`]] : []),
         ...(est.tax ? [[t(d.side === 'buy' ? 'buyTax' : 'sellTax'), money(est.tax, q.currency)]] : []),
         ...(est.fee ? [[t('exchangeFee'), money(est.fee, q.currency)]] : [])
       ]
@@ -1888,7 +1874,7 @@ function placeFromTicket() {
     d.msg = { kind: 'bad', text: errorText(r) };
   } else {
     commit(r.account);
-    track('trade', symbolKeys(d.symbol), 3);
+    track(symbolKeys(d.symbol), 3);
     if (r.fill) {
       d.msg = { kind: 'good', text: t('filledMsg', { side: t(r.fill.side), qty: fmtQty(r.fill.qty), price: fmtPrice(r.fill.price, r.fill.currency), total: money(r.fill.total, r.fill.currency) }) };
       toast(d.msg.text, 'good');
@@ -1955,11 +1941,6 @@ function placeWithFx(need) {
   placeFromTicket();
 }
 
-// What a commission voucher would take off this ticket's commission (0 for none).
-function ticketVoucher(est, currency) {
-  if (!est?.commission || !state.account) return 0;
-  return voucherOff(feeVoucher(state.account, Date.now()), est.commission, currency, state.rates[currency]);
-}
 
 function errorText(r) {
   switch (r.error) {
@@ -1989,8 +1970,6 @@ function errorText(r) {
       return t('err_tPlus1', { can: fmtQty(r.can) });
     case 'tdMin':
       return t('err_tdMin', { min: money(r.min, BASE) });
-    case 'tdBonusCap':
-      return t('err_tdBonusCap', { cap: money(r.cap, BASE) });
     case 'lendLot':
       return t('err_lendLot', { lot: fmtQty(r.lot) });
     case 'lendQty':
@@ -2511,26 +2490,22 @@ function growHtml() {
   const free = Math.max(0, withdrawable(state.account, s)[BASE] || 0);
   const amount = Math.round(Number(d.amount) || 0);
   const term = TD_TERMS.find(x => x.months === d.months) || TD_TERMS.at(-1);
-  // A bonus token from points (積分兌換), up to its cap; Plus's bonus by itself.
-  const bonus = d.bonus ? tdVouchers(state.account, now)[0] ?? null : null;
-  const rate = depositRate(term.months, now, bonus);
+  const rate = tdRate(term.months);
   const gross = amount > 0 ? Math.round((amount * rate * term.months) / 12) : 0;
-  const ok = amount >= TD_MIN && amount <= free && !(bonus && amount > bonus.cap);
+  const ok = amount >= TD_MIN && amount <= free;
   const tds = v.tds || [];
   const lendRows = v.positions.filter(p => !p.short && lendable(p.market, p.kind));
   const lent = v.lent || [];
   return `<div class="fx-page">
     <div class="card loan-card">
       <div class="card-head"><h3 class="card-title">🏦 ${h(t('tdTitle'))}</h3>${v.savedTWD > 0 ? `<strong class="num">${h(money(v.savedTWD, BASE))}</strong>` : ''}</div>
-      <div class="segmented small td-terms" role="group">${TD_TERMS.map(x => `<button type="button" data-action="td-term" data-months="${x.months}" aria-pressed="${x.months === term.months}"><span>${h(t('tdMonths', { n: x.months }))}</span><small class="num">${h(pct(depositRate(x.months, now, bonus), { digits: 2, sign: false }))}</small></button>`).join('')}</div>
+      <div class="segmented small td-terms" role="group">${TD_TERMS.map(x => `<button type="button" data-action="td-term" data-months="${x.months}" aria-pressed="${x.months === term.months}"><span>${h(t('tdMonths', { n: x.months }))}</span><small class="num">${h(pct(tdRate(x.months), { digits: 2, sign: false }))}</small></button>`).join('')}</div>
       <div class="fx-side">
         <label class="fx-side-row"><span class="fx-unit">NT$</span><input id="td-amount" class="fx-input num" inputmode="numeric" enterkeyhint="done" autocomplete="off" value="${h(amount > 0 ? num(amount) : '')}" placeholder="${h(num(TD_MIN))}" aria-label="${h(t('amount'))}" /></label>
         <div class="fx-side-foot"><span class="muted">${h(t('tdHave', { v: money(free, BASE) }))}</span>${free >= TD_MIN ? `<button class="link" type="button" data-action="td-max">${h(t('tdAll'))}</button>` : ''}</div>
       </div>
       <label class="check-row"><input id="td-renew" type="checkbox" ${d.renew ? 'checked' : ''} /> <span>${h(t('tdRenew'))}</span></label>
-      ${tdVouchers(state.account, now).length ? `<label class="check-row"><input id="td-bonus" type="checkbox" ${d.bonus ? 'checked' : ''} /> <span>${h(t('tdBonusUse', { rate: pct(catalogItem('td').rate, { digits: 1, sign: false }), cap: money(catalogItem('td').cap, BASE), n: tdVouchers(state.account, now).length }))}</span></label>` : ''}
-      ${plusAt(now) ? `<p class="muted">${h(t('tdPlusOn', { rate: pct(PLUS.stock.tdBonus, { digits: 1, sign: false }) }))}</p>` : ''}
-      ${amount > 0 ? `<p class="muted">${h(amount < TD_MIN ? t('err_tdMin', { min: money(TD_MIN, BASE) }) : amount > free ? t('tdTooMuch') : bonus && amount > bonus.cap ? t('err_tdBonusCap', { cap: money(bonus.cap, BASE) }) : t('tdWillEarn', { v: money(gross, BASE), date: fmtDate(addMonthsTPE(now, term.months)) }))}</p>` : ''}
+      ${amount > 0 ? `<p class="muted">${h(amount < TD_MIN ? t('err_tdMin', { min: money(TD_MIN, BASE) }) : amount > free ? t('tdTooMuch') : t('tdWillEarn', { v: money(gross, BASE), date: fmtDate(addMonthsTPE(now, term.months)) }))}</p>` : ''}
       <div class="button-row"><button class="primary-button grow" type="button" data-action="td-open" ${ok ? '' : 'disabled'}>${h(t('tdOpen'))}</button></div>
       <p class="note">${h(t('tdNote', { early: pct(TD_EARLY, { digits: 0, sign: false }) }))}</p>
     </div>
@@ -2548,7 +2523,7 @@ function growHtml() {
       <div class="card-head"><h3 class="card-title">🤝 ${h(t('lendTitle'))}</h3>${v.lendIncome > 0 ? `<strong class="num up-ink">+${h(money(v.lendIncome, BASE))}</strong>` : ''}</div>
       ${lendRows.length ? lendRows.map(p => lendRowHtml(p, now)).join('') : `<p class="muted">${h(t('lendNone'))}</p>`}
       ${lent.map(l => lentRowHtml(l, now)).join('')}
-      <p class="note">${h(t('lendNote', { cut: pct(lendCut(), { digits: 0, sign: false }), days: LEND_RECALL, term: LEND_TERM_DAYS }))}</p>
+      <p class="note">${h(t('lendNote', { cut: pct(LEND_CUT, { digits: 0, sign: false }), days: LEND_RECALL, term: LEND_TERM_DAYS }))}</p>
     </div>
   </div>`;
 }
@@ -2558,14 +2533,12 @@ const addMonthsTPE = (t0, n) => {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, d.getUTCDate()) - 8 * 3_600_000;
 };
 
-// The broker's share of a lending fee on a contract made now (Plus: less).
-const lendCut = () => (plusAt() ? PLUS.stock.lendCut : LEND_CUT);
 function lendRowHtml(p, now) {
   const can = lendableQty(state.account, p.symbol, now);
   const rate = p.kind === 'etf' ? 0.006 : 0.012;
-  const yearNet = can ? lendFee({ qty: can, price: p.price, rate, t: 0, cutRate: lendCut() }, 365 * 86_400_000).net : 0;
+  const yearNet = can ? lendFee({ qty: can, price: p.price, rate, t: 0 }, 365 * 86_400_000).net : 0;
   const why = p.financed > 0 ? t('lendWhyMargin') : can ? '' : p.qty - (p.lent || 0) < LEND_LOT ? t('lendWhyLot') : t('lendWhySettle');
-  return `<div class="order-row"><span class="side-tag buy">${h(t('lendTag'))}</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span><span class="row-sub">${h(can ? t('lendCan', { qty: fmtQty(can), rate: pct(rate * (1 - lendCut()), { digits: 2, sign: false }), v: money(yearNet, BASE) }) : why)}</span></span>${can ? `<button class="ghost-button small" type="button" data-action="lend" data-symbol="${h(p.symbol)}" data-qty="${can}">${h(t('lendGo'))}</button>` : ''}</div>`;
+  return `<div class="order-row"><span class="side-tag buy">${h(t('lendTag'))}</span><span class="row-main"><span class="row-title"><button class="link" type="button" data-action="open" data-symbol="${h(p.symbol)}">${h(nameOf(p.symbol))}</button></span><span class="row-sub">${h(can ? t('lendCan', { qty: fmtQty(can), rate: pct(rate * (1 - LEND_CUT), { digits: 2, sign: false }), v: money(yearNet, BASE) }) : why)}</span></span>${can ? `<button class="ghost-button small" type="button" data-action="lend" data-symbol="${h(p.symbol)}" data-qty="${can}">${h(t('lendGo'))}</button>` : ''}</div>`;
 }
 
 function lentRowHtml(l, now) {
@@ -2578,15 +2551,13 @@ async function doOpenDeposit() {
   const amount = Math.round(Number(d.amount) || 0);
   const term = TD_TERMS.find(x => x.months === d.months);
   if (!term) return;
-  const bonus = d.bonus ? tdVouchers(state.account)[0] ?? null : null;
-  const rate = depositRate(term.months, Date.now(), bonus);
+  const rate = tdRate(term.months);
   const gross = Math.round((amount * rate * term.months) / 12);
-  if (!(await ask({ lang: locale, icon: '🏦', title: t('tdAsk', { v: money(amount, BASE), n: term.months }), points: [['📈', t('tdAskRate', { rate: pct(rate, { digits: 3, sign: false }) }), t('tdAskEarn', { v: money(gross, BASE) })], ['🔒', t('tdAskLock', { date: fmtDate(addMonthsTPE(Date.now(), term.months)) }), t(bonus ? 'tdAskEarlyBonus' : 'tdAskEarly', { early: pct(TD_EARLY, { digits: 0, sign: false }) })]], ok: t('tdOpen'), cancel: t('orderAskCancel') }))) return;
-  const r = openDeposit(state.account, { amount, months: term.months, renew: d.renew, bonus: bonus?.id ?? null }, Date.now());
+  if (!(await ask({ lang: locale, icon: '🏦', title: t('tdAsk', { v: money(amount, BASE), n: term.months }), points: [['📈', t('tdAskRate', { rate: pct(rate, { digits: 3, sign: false }) }), t('tdAskEarn', { v: money(gross, BASE) })], ['🔒', t('tdAskLock', { date: fmtDate(addMonthsTPE(Date.now(), term.months)) }), t('tdAskEarly', { early: pct(TD_EARLY, { digits: 0, sign: false }) })]], ok: t('tdOpen'), cancel: t('orderAskCancel') }))) return;
+  const r = openDeposit(state.account, { amount, months: term.months, renew: d.renew }, Date.now());
   if (r.error) return toast(errorText(r), 'bad');
   commit(r.account);
   d.amount = '';
-  d.bonus = false;
   toast(t('tdDone', { v: money(amount, BASE) }), 'good');
   render();
 }
@@ -2611,8 +2582,8 @@ async function doLend(symbol, qty) {
   const v = valuation();
   const p = v.positions.find(x => x.symbol === symbol);
   const rate = p?.kind === 'etf' ? 0.006 : 0.012;
-  const yearNet = lendFee({ qty, price: q.price, rate, t: 0, cutRate: lendCut() }, 365 * 86_400_000).net;
-  if (!(await ask({ lang: locale, icon: '🤝', title: t('lendAsk', { qty: fmtQty(qty), name: nameOf(symbol) }), points: [['💰', t('lendAskEarn', { v: money(yearNet, BASE) }), t('lendAskCut', { cut: pct(lendCut(), { digits: 0, sign: false }) })], ['🔒', t('lendAskLock'), t('lendAskRecall', { days: LEND_RECALL })]], ok: t('lendGo'), cancel: t('orderAskCancel') }))) return;
+  const yearNet = lendFee({ qty, price: q.price, rate, t: 0 }, 365 * 86_400_000).net;
+  if (!(await ask({ lang: locale, icon: '🤝', title: t('lendAsk', { qty: fmtQty(qty), name: nameOf(symbol) }), points: [['💰', t('lendAskEarn', { v: money(yearNet, BASE) }), t('lendAskCut', { cut: pct(LEND_CUT, { digits: 0, sign: false }) })], ['🔒', t('lendAskLock'), t('lendAskRecall', { days: LEND_RECALL })]], ok: t('lendGo'), cancel: t('orderAskCancel') }))) return;
   const r = lendShares(state.account, { symbol, qty, price: q.price }, Date.now());
   if (r.error) return toast(errorText(r), 'bad');
   commit(r.account);
@@ -2785,14 +2756,14 @@ const ICON_PATHS = {
   hand: 'M4 14l4-4 3 3 3-3 6 6M4 20h16',
   play: 'M7 5v14l11-7-11-7z',
   trophy: 'M8 4h8v5a4 4 0 0 1-8 0V4zM8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M10 14h4v3h-4zM8 20h8',
-  gift: 'M4 10h16v10H4zM3 7h18v3H3zM12 7v13M12 7S10 3 8 4.5 10 7 12 7zm0 0s2-4 4-2.5S14 7 12 7z',
+  book: 'M5 5.5A2.5 2.5 0 0 1 7.5 3H19v14.5H7.5A2.5 2.5 0 0 0 5 20zM5 20a1.5 1.5 0 0 0 1.5 1.5H19v-4M9.5 7.5h6M9.5 11h4',
   planet: 'M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM3 15c-1.5 2.5 3 3 9 1s10-5.5 9-8c-.4-1-2-1.3-4-1',
   calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 20a2 2 0 0 0 4 0',
   check: 'M5 12.5l4.5 4.5L19 7'
 };
 const icon = (name, cls = '') => `<span class="act-ic ${cls}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON_PATHS[name]}"/></svg></span>`;
-const APP_ICON_NAMES = { odds: 'play', match: 'trophy', vocab: 'gift', orbit: 'planet' };
+const APP_ICON_NAMES = { odds: 'play', match: 'trophy', vocab: 'book', orbit: 'planet' };
 function activityRow(e) {
   const q = state.quotes.get(e.symbol);
   let lead;
@@ -2807,7 +2778,7 @@ function activityRow(e) {
       lead = `<span class="act-sym">${symbolBadge(e.symbol, q)}<i class="act-side ${e.side}">${h(e.side === 'buy' ? t('buyShort') : t('sellShort'))}</i></span>`;
       title = nameOf(e.symbol, q);
       line = `${e.maturity ? t('maturedTag') : t(e.side)} ${fmtQty(e.qty)} ${unitOf(e.symbol)} @ ${fmtPrice(e.price, e.currency)}`;
-      meta = fees([e.commission ? `${t('commission')} ${money(e.commission, e.currency)}` : '', e.voucherOff ? `${t('voucherLine')} −${money(e.voucherOff, e.currency)}` : '', e.tax ? `${t('tax')} ${money(e.tax, e.currency)}` : '', e.fee ? `${t(e.handling ? 'shortFees' : 'exchangeFee')} ${money(e.fee, e.currency)}` : '', e.settle > e.t ? (e.settle > Date.now() ? t('settlesOn', { date: shortDate(e.settle) }) : t('settledOn', { date: shortDate(e.settle) })) : '']);
+      meta = fees([e.commission ? `${t('commission')} ${money(e.commission, e.currency)}` : '', e.tax ? `${t('tax')} ${money(e.tax, e.currency)}` : '', e.fee ? `${t(e.handling ? 'shortFees' : 'exchangeFee')} ${money(e.fee, e.currency)}` : '', e.settle > e.t ? (e.settle > Date.now() ? t('settlesOn', { date: shortDate(e.settle) }) : t('settledOn', { date: shortDate(e.settle) })) : '']);
       if (e.forced) tag = t('forcedTag');
       else if (e.credit) tag = t('termShort');
       else if (e.dayShort) tag = t('dayTradeTag');
@@ -2928,7 +2899,7 @@ const ACTIVITY_FILTERS = {
   income: e => ['div', 'split', 'interest', 'td', 'tdend', 'lend', 'recall', 'lendpay'].includes(e.type),
   loans: e => e.type === 'borrow' || e.type === 'repay' || e.type === 'link',
   cash: e => e.type === 'deposit' && !ACTIVITY_FILTERS.apps(e),
-  // Money moved by the other Quadra apps (bets, games, rewards): one line per
+  // Money moved by the other Quadra apps (bets, the pay, Plus): one line per
   // app and day under 全部, each record here (one app at a time, or all).
   apps: e => e.type === 'deposit' && Boolean(e.pool) && Boolean(APPS[e.app]) && e.app !== 'stock'
 };
@@ -3317,7 +3288,7 @@ async function runTimeMachine() {
 // Signing in is required (quadra.mjs shows the sign-in screen). The account
 // is this app's data on the pass; the pass's wallet is the one Quadra money
 // pool, which this account's NT$ cash shows: the other apps' money (Play's
-// bets and winnings, Rewards' shop, Quadra's own pay, transfers)
+// bets and winnings, Quadra's own pay and Plus)
 // arrives as pool deposits, and this account's own NT$ goes back to the
 // wallet as its figure.
 
@@ -3392,15 +3363,11 @@ async function mergeRemote(remote, { pull = false } = {}) {
   const moved = Number.isFinite(holdings) && !(Math.abs((prev?.holdings ?? Infinity) - holdings) < Math.max(1_000, Math.abs(holdings) * 0.02));
   const snapPatch = prev?.cash === figure && !moved ? undefined : { stock: { cash: figure, ...(Number.isFinite(holdings) ? { holdings } : {}), t: Date.now() } };
   const changed = !their || JSON.stringify(account) !== JSON.stringify(their);
-  // Catalogue vouchers spent here, marked in the wallet once (fixed ids), so
-  // Rewards and every app count them as used.
-  const have = new Set((wallet?.entries || []).map(e => e.id));
-  const spent = usedVouchers(account).filter(([id]) => !have.has(`stock:xs-${id}`)).map(([id, at]) => ({ id: `stock:xs-${id}`, t: at, app: 'stock', kind: 'voucher', amount: 0 }));
   if (account !== state.account) commit(account, { sync: false });
-  if (changed || snapPatch || spent.length || (remote.inbox || []).length) {
+  if (changed || snapPatch || (remote.inbox || []).length) {
     const payload = changed ? await pack(account) : undefined;
     if (payload && payload.length > 1_000_000) throw Object.assign(new Error('too big'), { code: 'TOO_BIG' });
-    const patch = { snap: snapPatch, settings: { ...affinityPatch('stock').settings }, ...(spent.length ? { entries: spent } : {}) };
+    const patch = { snap: snapPatch, settings: { ...affinityPatch('stock').settings } };
     const res = await q.write({ payload, wallet: patch });
     wallet = res.wallet || wallet;
   }
@@ -3410,12 +3377,9 @@ async function mergeRemote(remote, { pull = false } = {}) {
   state.sync.at = Date.now();
 }
 
-// What the person does here, for Rewards' missions and every app's
-// recommendations (quadra.mjs).
-function track(action, keys = [], weight = 1) {
+// What the person does here, for every app's recommendations (quadra.mjs).
+function track(keys = [], weight = 1) {
   if (keys.length) recordAffinity('stock', keys, weight);
-  if (!action || !q.active) return;
-  q.write({ wallet: activityPatch(q.wallet, 'stock', action) }).catch(() => {});
 }
 const symbolKeys = symbol => {
   const info = catalogInfo(symbol);
@@ -3578,7 +3542,6 @@ document.addEventListener('click', event => {
       }
       if (sold) {
         commit(account);
-        track('trade', [], 1);
         toast(t('coverDone', { n: sold }), 'good');
       }
       render();
@@ -3602,7 +3565,7 @@ document.addEventListener('click', event => {
     case 'star':
       if (!state.account) return;
       commit(toggleWatch(state.account, d.symbol));
-      track('watch', symbolKeys(d.symbol), 2);
+      track(symbolKeys(d.symbol), 2);
       renderDetail();
       if (state.tab === 'markets') renderMarkets();
       break;
@@ -4009,10 +3972,6 @@ document.addEventListener('change', event => {
     renderFx();
   }
   if (el.id === 'td-renew') state.td.renew = el.checked;
-  if (el.id === 'td-bonus') {
-    state.td.bonus = el.checked;
-    renderFx();
-  }
   if (el.id === 'loan-cur') {
     state.loan.currency = el.value;
     renderFx();
@@ -4091,8 +4050,6 @@ renderStatic();
 function syncPlus(wallet) {
   const months = plusMonths(wallet);
   usePlus(months.size ? { months, ...PLUS.stock } : null);
-  // The points catalogue's vouchers (Rewards' 積分兌換) still to use.
-  useVouchers({ fee: catalogTokens(wallet, 'fee'), td: catalogTokens(wallet, 'td') });
   memo.at = 0;
 }
 q.on('wallet', wallet => {
@@ -4101,7 +4058,7 @@ q.on('wallet', wallet => {
   // Money the other apps moved arrives in this account's NT$ cash.
   if (state.account) {
     const pooled = applyPool(state.account, wallet);
-    if (pooled.added.length) {
+    if (pooled.account !== state.account) {
       commit(pooled.account);
       for (const e of pooled.added.filter(x => x.kind !== 'stake' && x.kind !== 'payout')) toast(`${describeEntry(e, locale)} ${money(e.amount, BASE, { sign: true })}`, e.amount >= 0 ? 'good' : '');
     }
@@ -4163,7 +4120,7 @@ setTimeout(() => ($('loading').hidden = true), BOOT_LIMIT_MS);
 setInterval(() => {
   if (document.visibilityState === 'visible' && q.active) refresh().then(checkBonds);
 }, QUOTE_REFRESH_MS);
-// What the other apps did (bets, rewards, pay) arrives with the wallet
+// What the other apps did (bets, the pay, Plus) arrives with the wallet
 // (quadra.mjs checks it every minute); the account itself every few.
 setInterval(() => {
   if (document.visibilityState === 'visible' && q.active && state.account) syncNow();

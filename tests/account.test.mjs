@@ -77,6 +77,42 @@ test('what the ticket says an order holds is exactly what placing it needs (held
   assert.equal(placeOrder(less, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100, fresh: true }, { quote: q, rates: RATES, now: T0, id: 'x2' }).error, 'funds');
 });
 
+test('融資買進: the broker lends 60% of a Taiwan buy as it fills; selling repays it first', () => {
+  const a = newAccount(1_000_000, T0, 'acc');
+  const q = quote('2330.TW', 2475);
+  const v = valuate(replay(a, T0), new Map([['2330.TW', q]]), RATES);
+  const r = placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 1000, margin: true }, { quote: q, rates: RATES, valuation: v, now: T0, id: 'm1' });
+  assert.equal(r.error, undefined);
+  assert.equal(r.order.status, 'filled');
+  const s = replay(r.account, T0);
+  const total = r.fill.total;
+  // 40% one's own, 60% lent, tied to the stock.
+  assert.equal(r.fill.financed, Math.round(total * 0.6));
+  assert.equal(s.loans.TWD.balance, Math.round(total * 0.6));
+  assert.equal(s.positions['2330.TW'].financed, Math.round(total * 0.6));
+  assert.equal(Math.round(s.cash.TWD), Math.round(1_000_000 - total + total * 0.6));
+  // Half sold: half the loan repaid out of the proceeds.
+  const v2 = valuate(s, new Map([['2330.TW', q]]), RATES);
+  const sell = placeOrder(r.account, { symbol: '2330.TW', side: 'sell', type: 'market', qty: 500 }, { quote: q, rates: RATES, valuation: v2, now: T0 + 1000, id: 's1' });
+  assert.equal(sell.fill.repaid, Math.round(total * 0.3));
+  const s2 = replay(sell.account, T0 + 1000);
+  assert.ok(Math.abs(s2.loans.TWD.balance - total * 0.3) < 2);
+  assert.ok(Math.abs(s2.positions['2330.TW'].financed - total * 0.3) < 2);
+  // Not what a broker lends against: refused.
+  const btc = { ...quote('BTC-USD', 60_000), kind: 'crypto', market: 'CRYPTO', currency: 'USD' };
+  assert.equal(placeOrder(a, { symbol: 'BTC-USD', side: 'buy', type: 'market', qty: 0.01, margin: true }, { quote: btc, rates: RATES, valuation: v, now: T0, id: 'm2' }).error, 'notMarginable');
+});
+
+test('an overdraft collected by a sale: a cover order is forced and marked as such', () => {
+  let a = newAccount(1_000_000, T0, 'acc');
+  const q = quote('2330.TW', 2475);
+  a = placeOrder(a, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100 }, { quote: q, rates: RATES, now: T0, id: 'b1' }).account;
+  const r = placeOrder(a, { symbol: '2330.TW', side: 'sell', type: 'market', qty: 10, forced: true, cover: true }, { quote: q, rates: RATES, now: T0 + 1000, id: 'c1' });
+  assert.equal(r.order.cover, true);
+  assert.equal(r.fill.cover, true);
+  assert.equal(r.fill.forced, true);
+});
+
 test('the welcome offer: an account marked by the app pays no commission on its first trade, only then', async () => {
   const { withWelcome, firstTrade } = await import('../public/lib/account.mjs');
   const a = withWelcome(newAccount(1_000_000, T0, 'acc'));

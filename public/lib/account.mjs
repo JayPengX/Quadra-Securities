@@ -201,6 +201,8 @@ export function replay(account, now = Date.now()) {
         loan.borrowed += e.amount;
         loan.rate = e.rate;
         add(s.cash, e.currency, e.amount);
+        // A purchase's own loan (融資): what of the holding is financed.
+        if (e.symbol && s.positions[e.symbol]) s.positions[e.symbol].financed = (s.positions[e.symbol].financed || 0) + e.amount;
         break;
       }
       case 'repay': {
@@ -210,6 +212,7 @@ export function replay(account, now = Date.now()) {
         loan.repaid += e.amount;
         if (loan.balance < 10 ** -currencyInfo(e.currency).digits / 2) loan.balance = 0;
         add(s.cash, e.currency, -e.amount);
+        if (e.symbol && s.positions[e.symbol]) s.positions[e.symbol].financed = Math.max(0, (s.positions[e.symbol].financed || 0) - e.amount);
         break;
       }
     }
@@ -437,9 +440,22 @@ export function placeOrder(account, req, { quote, rates, valuation, now = Date.n
   if (type === 'limit') order.limit = Number(req.limit);
   if (type === 'stop') order.stop = Number(req.stop);
   if (req.forced) order.forced = true;
+  // Sold to collect an overdraft the account didn't cover in time.
+  if (req.cover) order.cover = true;
   // Held for a fresh price: it fills only at a quote read after it was
   // placed (processOrders), never at the figure on screen.
   if (req.fresh) order.waitFresh = now;
+  // 融資買進: a buy the broker lends part of (the holding's loan value,
+  // collateralRate), the shares bought its collateral. Only buys of what it
+  // lends against, and only with the account's margin in order. The loan is
+  // made when it fills (fillOrder), never as cash beforehand.
+  if (req.margin) {
+    if (side !== 'buy') return { error: 'side' };
+    const rate = collateralRate(quote.kind, quote.market, quote.symbol);
+    if (!(rate > 0)) return { error: 'notMarginable' };
+    if (!valuation || valuation.margin !== 'ok') return { error: 'margin' };
+    order.margin = rate;
+  }
   // How long it lasts: a day order ends with its session (what exchanges
   // and brokers do by default); good-till-cancelled lasts GTC_DAYS. Crypto
   // and currency pairs never close, so theirs are GTC.
@@ -492,7 +508,9 @@ export function requiredCash(order, quote, now = Date.now()) {
   // its most); RESERVE_BUFFER while it waits for its market; FRESH_BUFFER
   // for one held a moment for a fresh price (the price may tick up).
   const extra = order.type === 'limit' ? 0 : !fillsNow ? RESERVE_BUFFER : order.waitFresh ? FRESH_BUFFER : 0;
-  const reserve = roundCash(est.total * (1 + extra), quote.currency);
+  // On margin, only one's own part is held (自備款); the broker lends the rest.
+  const own = order.margin ? 1 - order.margin : 1;
+  const reserve = roundCash(est.total * own * (1 + extra), quote.currency);
   return { est, reserve, buffer: Math.max(0, reserve - est.total), fillsNow, ref };
 }
 
@@ -517,9 +535,10 @@ function fillOrder(account, order, price, rates, now, at = now) {
   if (order.side === 'buy' && !order.forced) {
     // This order's own hold is released as it fills.
     const have = Math.min(...moments.map(tt => (available(account, replay(account, tt)).cash[order.currency] || 0))) + (order.reserve || 0);
-    if (est.total > have + EPS) {
+    const lent = order.margin ? roundCash(est.total * order.margin, order.currency) : 0;
+    if (est.total - lent > have + EPS) {
       const rejected = { ...order, status: 'rejected', reason: 'funds', rev: order.rev + 1, done: now };
-      return { account: updateOrder(account, rejected), order: rejected, fill: null, error: 'funds', need: est.total, have };
+      return { account: updateOrder(account, rejected), order: rejected, fill: null, error: 'funds', need: est.total - lent, have };
     }
   } else if (order.side === 'sell' && (!order.short || !isShortable(order.kind))) {
     const held = Math.min(...moments.map(tt => replay(account, tt).positions[order.symbol]?.qty || 0));
@@ -551,8 +570,32 @@ function fillOrder(account, order, price, rates, now, at = now) {
     twd: rates[order.currency]
   };
   if (order.forced) fill.forced = true;
+  if (order.cover) fill.cover = true;
+  const extra = [];
+  // 融資買進: the loan for this purchase, made as it fills, tied to the stock.
+  if (order.side === 'buy' && order.margin) {
+    const amount = roundCash(est.total * order.margin, order.currency);
+    if (amount > 0) {
+      fill.financed = amount;
+      extra.push({ id: `loan:${order.id}`, type: 'borrow', t: at, currency: order.currency, amount, rate: loanRateAt(order.currency, at), symbol: order.symbol });
+    }
+  }
+  // Selling shares bought on margin repays their loan first (融資賣出,
+  // 償還): that share of what's financed, out of the proceeds.
+  if (order.side === 'sell') {
+    const s0 = replay(account, at);
+    const pos = s0.positions[order.symbol];
+    const loan = s0.loans[order.currency];
+    if (pos?.financed > 0 && pos.qty > 0 && loan?.balance > 0) {
+      const amount = roundCash(Math.min(pos.financed * Math.min(1, order.qty / pos.qty), loan.balance, est.total), order.currency);
+      if (amount > 0) {
+        fill.repaid = amount;
+        extra.push({ id: `repay:${order.id}`, type: 'repay', t: at, currency: order.currency, amount, symbol: order.symbol });
+      }
+    }
+  }
   const done = { ...order, status: 'filled', rev: order.rev + 1, done: at, fillId: fill.id, price: est.price };
-  const next = updateOrder({ ...account, events: [...account.events, fill] }, done);
+  const next = updateOrder({ ...account, events: [...account.events, fill, ...extra] }, done);
   return { account: next, order: done, fill };
 }
 

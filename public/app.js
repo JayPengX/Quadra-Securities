@@ -2822,9 +2822,9 @@ async function mergeRemote(remote, { pull = false } = {}) {
   const sAll = replay(account);
   const owedTWD = Object.values(sAll.loans || {}).reduce((sum, l) => sum + Math.max(0, l.balance) * (l.currency === BASE ? 1 : state.rates[l.currency] || 0), 0);
   const figure = Math.max(0, Math.round((ownCash(account, sAll) - owedTWD) * 100) / 100);
-  // What the holdings are worth (less loans and shorts), for the monthly
-  // allowance, which goes by the whole account's worth: sent once prices are
-  // in, again when it moves 2% (or NT$1,000).
+  // What the holdings are worth (less loans and shorts), for the account's
+  // worth across apps: sent once prices are in, again when it moves 2% (or
+  // NT$1,000).
   const prev = wallet?.snap?.stock;
   const v = state.loaded ? valuate(replay(account), state.quotes, state.rates) : null;
   const holdings = v && !v.missingRates.length ? Math.round(v.netWorth - v.cashTWD) : prev?.holdings;

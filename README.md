@@ -25,8 +25,7 @@ apps sharing one account and one money pool:
   back, so two apps never overwrite each other.
 - **One money pool.** This account's NT$ cash is the Quadra balance: Play's
   bets and winnings, Rewards' shop, transfers and Quadra's own pay (a
-  monthly allowance by what the account is worth, NT$8,000 down to 500,
-  paid into the pool by the Worker) all move it. A new pass opens with
+  fixed NT$6,000 a month, like a salary, paid into the pool by the Worker) all move it. A new pass opens with
   NT$30,000 from Quadra; those two are the only money Quadra gives (v7:
   Rewards gives points, not money).
 - **The guide lives in Rewards.** Every explanation (fees, orders, FX,

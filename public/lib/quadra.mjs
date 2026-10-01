@@ -40,11 +40,9 @@ export const appName = app => APPS[app]?.name || app;
 // ---- The economy -------------------------------------------------------------------
 //
 // Balanced so money matters (Shared-Proxy/tools/economy.mjs has the model):
-// a new pass opens with NT$30,000; the 1st of every Taiwan month pays an
-// allowance by what the account is worth (the pool plus Securities'
-// holdings): NT$8,000 under NT$40,000, 4,000 under 100,000, 1,500 under
-// 250,000, 500 above: the full amount to get going or back in the game,
-// half once past the opening money, a token with plenty (eco.js pays it).
+// a new pass opens with NT$30,000; the 1st of every Taiwan month pays a
+// fixed NT$6,000, the same for every account, like a salary (v10; eco.js
+// pays it, back pay for months nobody came).
 // Those two are the only money Quadra gives (v7). Securities is where it
 // grows (the market, real costs); Play and the lottery are where it goes
 // (the house keeps about 14% of a single, a third of a treble, half of a
@@ -52,13 +50,7 @@ export const appName = app => APPS[app]?.name || app;
 // is the only money it moves, and that only out of the pool.
 export const ECONOMY = {
   start: 30_000,
-  monthly: 8_000,
-  payTiers: [
-    [40_000, 8_000],
-    [100_000, 4_000],
-    [250_000, 1_500],
-    [Infinity, 500]
-  ],
+  monthly: 6_000,
   // Rewards' points: a right answer, a word mastered the first time, and a
   // game's minute (about).
   vocab: { perCorrect: 2, perMastered: 15 },
@@ -247,11 +239,11 @@ export const streakCards = longest => STREAK.milestones.filter(m => longest >= m
 export const levelCards = level => Math.max(0, Math.floor((level + 5) / 10));
 
 const finiteOr0 = v => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-// What the account is worth for the allowance: the pool and Securities' holdings.
+// What the account is worth: the pool and Securities' holdings.
 export const worthOf = wallet => poolBalance(wallet) + finiteOr0(wallet?.snap?.stock?.holdings);
-export const payFor = worth => ECONOMY.payTiers.find(([below]) => !(worth >= below))[1];
-// The next allowance, as the account stands now.
-export const paydayFor = wallet => payFor(worthOf(wallet));
+// The monthly pay: fixed, whatever the account holds (eco.js PAY_MONTH).
+export const payFor = () => ECONOMY.monthly;
+export const paydayFor = () => payFor();
 // Below zero: an overdraft (1% a month, eco.js), fixed by selling something
 // in Securities or borrowing on margin there.
 export const OVERDRAFT_RATE = 0.01;
@@ -270,14 +262,14 @@ function resetNotice(s) {
     icon: '⚖️',
     title: en ? 'Quadra’s new economy' : 'Quadra 經濟調整',
     body: en
-      ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. The monthly allowance now goes by what you're worth (NT$6,000 down to 500).${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
-      : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月津貼改為依資產發放（NT$6,000 到 500）。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
+      ? `So every dollar counts, every account now opens on NT$30,000: yours was adjusted by ${money(e.amount)}. Every month pays a fixed ${money(ECONOMY.monthly)}.${owed ? ` Your cash is ${money(-owed)} (an overdraft, 1% a month): sell some holdings in Quadra Securities to cover it.` : ''}`
+      : `為了讓每一塊錢都有份量，所有帳戶的開戶金統一為 NT$30,000，你的帳戶調整了 ${money(e.amount)}。每月固定發薪 ${money(ECONOMY.monthly)}。${owed ? `目前現金 ${money(-owed)}（透支，每月計息 1%）：到 Quadra Securities 賣出部分持股就能補足。` : ''}`
   });
   return true;
 }
 
 // Once per device, for an account made before v7: Rewards gives points, not
-// money, and they level up and buy things there; the allowance is higher;
+// money, and they level up and buy things there; the monthly pay;
 // Plus is new (v8).
 const V8_SEEN = 'quadra.seen.v8';
 // 2026-10-01 in Taiwan.
@@ -293,7 +285,7 @@ function v8Notice(s) {
     body: en ? 'What you’ve earned is still yours.' : '已經賺到的錢都還在。',
     points: [
       ['⭐', en ? 'Rewards gives points (XP)' : 'Rewards 改發積分', en ? 'Level up, and trade them for cards and packs' : '升等級，還能換保護卡和單字包'],
-      ['💰', en ? `Allowance up to ${money(ECONOMY.payTiers[0][1])}` : `每月津貼最多 ${money(ECONOMY.payTiers[0][1])}`, en ? 'On the 1st of every month' : '每月 1 日入帳'],
+      ['💰', en ? `Pay ${money(ECONOMY.monthly)} a month` : `每月薪水 ${money(ECONOMY.monthly)}`, en ? 'On the 1st of every month' : '每月 1 日入帳'],
       ['✦', en ? `Plus is ${money(PLUS.fee)} a month` : `Plus 每月 ${money(PLUS.fee)}`, en ? `A ${money(PLUS.odds.bonusBet)} free bet every week` : `每週送 ${money(PLUS.odds.bonusBet)} 免費投注`]
     ]
   });
@@ -1039,7 +1031,7 @@ export const entriesNotFrom = (wallet, app) => (wallet?.entries || []).filter(e 
 const KIND = {
   start: ['開戶金', 'Opening money'],
   grant: ['零用金', 'Allowance'],
-  pay: ['每月津貼', 'Monthly allowance'],
+  pay: ['每月薪水', 'Monthly pay'],
   stake: ['下注', 'Bet'],
   payout: ['彩金', 'Winnings'],
   refund: ['退款', 'Refund'],
@@ -1500,8 +1492,8 @@ export function paydayText(lang, now = Date.now(), wallet = null) {
   const next = `${d.getUTCMonth() + 1}/1`;
   const amount = money(wallet ? paydayFor(wallet) : ECONOMY.monthly);
   return lang === 'en'
-    ? `Next allowance ${amount} · ${next}`
-    : `下次津貼 ${amount} · ${next}`;
+    ? `Next pay ${amount} · ${next}`
+    : `下次發薪 ${amount} · ${next}`;
 }
 
 // The account at a glance: its number, since when, this month's money in

@@ -173,6 +173,112 @@ body {
 .loading[hidden] {
   display: none;
 }
+/* The shared loading screen (boot.js draws it). */
+.q-boot-box {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(300px, 100%);
+  text-align: center;
+}
+.q-boot-logo {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px -10px rgba(14, 17, 22, 0.35);
+  animation: quadra-breathe 1.8s ease-in-out infinite;
+}
+.q-boot-brand {
+  margin: 12px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  color: var(--q-muted);
+}
+.q-boot-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 750;
+  color: var(--q-text);
+}
+.q-boot-bar {
+  width: 160px;
+  height: 4px;
+  margin-top: 14px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--q-accent) 16%, transparent);
+}
+.q-boot-bar i {
+  display: block;
+  height: 100%;
+  background: var(--q-accent);
+  transform-origin: left center;
+  transition: transform 0.25s ease-out;
+}
+.q-boot-step {
+  margin: 2px 0 0;
+  min-height: 1.4em;
+  font-size: 12.5px;
+  color: var(--q-muted);
+}
+.q-boot-error {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+.q-boot-error[hidden],
+.q-boot-bar[hidden],
+.q-boot-step[hidden] {
+  display: none;
+}
+.q-boot-error p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--q-text);
+}
+.q-boot-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+/* An update being put in place (watchUpdates): a veil over the app. */
+.q-updating {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--q-page) 88%, transparent);
+  backdrop-filter: blur(4px);
+  font: 600 15px var(--q-font);
+  color: var(--q-text);
+}
+.q-update-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 2147482500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  border-radius: 999px;
+  background: var(--q-text);
+  color: var(--q-page);
+  font: 600 13.5px var(--q-font);
+  box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+.q-update-bar button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: var(--q-accent);
+  color: #fff;
+  font: inherit;
+}
 .loading-box {
   display: grid;
   justify-items: center;

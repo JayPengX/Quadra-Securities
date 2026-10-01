@@ -58,39 +58,8 @@
 <link rel="stylesheet" href="./quadra.css" />
 </head>
 <body>
-<div id="loading" class="loading" role="status" aria-live="polite">
-  <div class="loading-box">
-    <img class="loading-logo" src="./favicon.svg" alt="" width="76" height="76" />
-    <p class="loading-brand">QUADRA</p>
-    <p class="loading-title">Quadra Securities</p>
-    <div id="loading-spinner" class="spinner" aria-hidden="true"></div>
-    <div id="loading-error" class="loading-error" hidden>
-      <p id="loading-error-text"></p>
-      <div class="button-row">
-        <button id="loading-reload" class="ghost-button" type="button">重新整理 · Reload</button>
-        <button id="loading-skip" class="ghost-button" type="button">直接開啟 · Open anyway</button>
-      </div>
-    </div>
-  </div>
-</div>
-<script>
-  // Failsafe that doesn't depend on the app's own scripts: if they fail to
-  // load or never start, offer a way out instead of an endless loading screen.
-  (function () {
-    var zh = /^zh/i.test(navigator.language || '');
-    function $(id) { return document.getElementById(id); }
-    window.__stockFail = function (message) {
-      if ($('loading').hidden) return;
-      $('loading-error-text').textContent = message || (zh ? '頁面沒有正常啟動，可能是網路不穩。' : "The page didn't start, maybe a network hiccup.");
-      $('loading-error').hidden = false;
-      $('loading-spinner').hidden = true;
-    };
-    $('loading-reload').onclick = function () { location.reload(); };
-    $('loading-skip').onclick = function () { $('loading').hidden = true; };
-    window.addEventListener('error', function () { if (!window.__stockStarted) window.__stockFail(); });
-    setTimeout(function () { if (!window.__stockStarted) window.__stockFail(); }, 15000);
-  })();
-</script>
+<div id="loading" data-title="Quadra Securities" data-cache="stock-study-"></div>
+<script src="./boot.js"></script>
 <header class="q-appbar">
   <div class="q-appbar-inner">
     <div class="q-brand">

@@ -2623,54 +2623,91 @@ export function phoneOnlyGate(app, { lang = detectLang(), qr = '' } = {}) {
   return true;
 }
 
-// Always the newest deploy (version.json, checked on opening, on coming back
-// and every few minutes): old caches are dropped and the page reloads once.
-//
-// Never in the person's face: a new deploy found right after opening loads
-// at once (nothing's been done yet); found later, while the app is in use or
-// on coming back to it, it waits for the app to be put away and loads then,
-// so coming back to an app never reloads it under the person's thumb. Away
-// longer than `stale` (the app would have been refreshed anyway), it loads
-// at once on coming back.
-export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 5 * 60_000, stale = 30 * 60_000 } = {}) {
+// Keeps every open Quadra page on the latest deploy. version.json is read
+// when the page opens (boot.js has already loaded a newer deploy before the
+// app started), every `every` ms, whenever the page comes back into view or
+// online, and as soon as any other open Quadra page (any app, same site) has
+// found an update: they tell each other through a BroadcastChannel. A newer
+// deploy is put in place at once (a short veil, the place on the page kept),
+// unless the person is in the middle of something: busy() (a round, an
+// order), typing in a field, or a sheet open. Then a bar offers it and it
+// happens the moment they're done (checked every 2 s) or the page is hidden.
+export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 60_000 } = {}) {
   if (!current || current === 'dev') return;
-  const opened = Date.now();
   let checking = false;
   let pending = null;
-  let hiddenAt = 0;
+  let waiter = 0;
+  let bar = null;
+  const zh = !/^en/i.test(document.documentElement.lang || '');
+  const channel = globalThis.BroadcastChannel ? new BroadcastChannel('quadra-updates') : null;
+  const occupied = () => {
+    if (busy()) return true;
+    const a = document.activeElement;
+    if (a && (a.isContentEditable || (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !/^(button|checkbox|radio|range)$/i.test(a.type || '')))) return true;
+    return Boolean(document.querySelector('dialog[open]:not(.q-passive)'));
+  };
   async function apply(latest) {
     const flag = `${key || 'quadra'}.reloadedTo`;
     if (sessionStorage.getItem(flag) === latest) return;
     sessionStorage.setItem(flag, latest);
     rememberPlace();
+    if (document.visibilityState === 'visible') {
+      const veil = document.createElement('div');
+      veil.className = 'q-updating';
+      veil.textContent = zh ? '正在更新到最新版本…' : 'Updating to the latest version…';
+      document.body.append(veil);
+    }
     if (globalThis.caches && cachePrefix) for (const name of await caches.keys()) if (name.startsWith(cachePrefix)) await caches.delete(name);
     const reg = await navigator.serviceWorker?.getRegistration?.(location.pathname);
     await reg?.update?.().catch(() => {});
     location.replace(`${location.pathname}?v=${encodeURIComponent(latest)}${location.hash}`);
   }
-  async function check({ back = false } = {}) {
-    if (checking || document.visibilityState === 'hidden') return;
+  function offer(latest) {
+    pending = latest;
+    if (!bar && document.body) {
+      bar = document.createElement('div');
+      bar.className = 'q-update-bar';
+      bar.setAttribute('role', 'status');
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.textContent = zh ? '現在更新' : 'Update now';
+      go.addEventListener('click', () => apply(latest).catch(() => {}));
+      bar.append(document.createTextNode(zh ? '有新版本，忙完會自動更新' : 'A new version is ready'), go);
+      document.body.append(bar);
+    }
+    if (!waiter)
+      waiter = setInterval(() => {
+        if (!occupied()) {
+          clearInterval(waiter);
+          apply(pending).catch(() => {});
+        }
+      }, 2000);
+  }
+  async function check() {
+    if (checking || pending) return;
     checking = true;
     try {
       const res = await fetch(`./version.json?t=${Date.now()}`, { cache: 'no-store' });
       const latest = res.ok ? (await res.json())?.version : null;
       if (!latest || latest === current) return;
-      const now = Date.now() - opened < 6000 || (back && hiddenAt && Date.now() - hiddenAt > stale);
-      if (now && !busy()) await apply(latest);
-      else pending = latest;
+      channel?.postMessage({ update: key || location.pathname });
+      if (occupied()) offer(latest);
+      else await apply(latest);
     } catch {
     } finally {
       checking = false;
     }
   }
   check();
+  channel?.addEventListener('message', () => check());
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') {
-      if (pending && !busy()) apply(pending).catch(() => {});
-      else hiddenAt = Date.now();
-    } else check({ back: true });
+      if (pending) apply(pending).catch(() => {});
+    } else check();
   });
-  globalThis.addEventListener?.('pageshow', event => event.persisted && check({ back: true }));
+  globalThis.addEventListener?.('focus', () => check());
+  globalThis.addEventListener?.('online', () => check());
+  globalThis.addEventListener?.('pageshow', event => event.persisted && check());
   setInterval(check, every);
 }
 

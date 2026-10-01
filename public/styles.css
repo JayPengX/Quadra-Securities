@@ -746,17 +746,21 @@ a.activity-row { color: inherit; text-decoration: none; }
 /* A line with nothing to say isn't drawn. */
 .note:empty, .muted:empty, p.sub:empty, .card-sub:empty { display: none; }
 .lede:empty, small:empty { display: none; }
-/* A company's logo over its ticker badge (white tile; the badge shows if it fails). */
+/* A symbol's picture: a round badge, light grey until the picture is in. A
+   picture not seen before fades in; one seen before is drawn at once. An
+   icon fills the circle, a logo sits on white inside it, a currency pair
+   shows two flags. */
 .sym-badge { position: relative; }
-/* TradingView's icons fill the badge as a circle; a currency pair shows two. */
-.sym-badge.has-tv { border-radius: 50%; }
-.sym-badge .sym-logo.tv { padding: 0; object-fit: cover; border-radius: 50%; box-shadow: none; background: #fff; }
-.sym-badge .sym-pair { position: absolute; inset: 0; }
-.sym-badge .sym-pair .sym-logo.tv { width: 72%; height: 72%; inset: auto; }
-.sym-badge .sym-pair .sym-logo.tv:first-child { top: 0; left: 0; z-index: 1; box-shadow: 0 0 0 2px var(--surface, #fff); }
-.sym-badge .sym-pair .sym-logo.tv:last-child { right: 0; bottom: 0; }
-.sym-badge.has-tv:has(.sym-pair) { border-radius: 0; overflow: visible; background: transparent; color: transparent; }
-.sym-badge .sym-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 5px; background: #fff; box-sizing: border-box; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
+.sym-badge.has-logo { border-radius: 50%; background: var(--surface-sunken); }
+.sym-badge .sym-logo { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; border-radius: 50%; background: #fff; }
+.sym-badge.icon .sym-logo { object-fit: cover; }
+.sym-badge.logo .sym-logo { object-fit: contain; padding: 18%; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
+.sym-badge .sym-logo.fresh { opacity: 0; transition: opacity 0.2s; }
+.sym-badge .sym-logo.fresh.in { opacity: 1; }
+.sym-badge.pair { overflow: visible; background: transparent; }
+.sym-badge.pair .sym-logo { width: 72%; height: 72%; inset: auto; }
+.sym-badge.pair .sym-logo:first-child { top: 0; left: 0; z-index: 1; box-shadow: 0 0 0 2px var(--surface, #fff); }
+.sym-badge.pair .sym-logo:last-child { right: 0; bottom: 0; }
 
 /* ---- Activity (交易明細) ---- */
 .activity-row { align-items: flex-start; padding: 12px 10px; gap: 12px; }

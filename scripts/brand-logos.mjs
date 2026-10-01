@@ -1,24 +1,63 @@
 // Builds public/lib/brands.mjs: each catalogue company's official logo (a
 // Wikimedia Commons file, from Wikidata's "logo image" by its ticker on its
-// exchange), and each fund's by its issuer. Run it when the catalogue
-// changes: `node scripts/brand-logos.mjs`. It uses curl (the container's
-// proxy) and writes the map; the app never asks Wikidata itself.
+// exchange), its square icon where Wikidata has one ("small logo or icon"),
+// and each fund's issuer's logo. Run it when the catalogue changes:
+// `node scripts/brand-logos.mjs`. It uses curl (the container's proxy) and
+// writes the map; the app never asks Wikidata itself.
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { CATEGORIES } from '../public/lib/catalog.mjs';
 
-const UA = 'QuadraSecurities/1.0 (https://github.com/jaypengx/quadra-securities)';
-const sparql = query => {
-  const out = execFileSync('curl', ['-s', '-G', 'https://query.wikidata.org/sparql', '--data-urlencode', `query=${query}`, '-H', 'Accept: application/sparql-results+json', '-A', UA], { maxBuffer: 64 << 20 });
-  return JSON.parse(out).results.bindings;
+const UA = 'QuadraSecurities/1.0 (https://github.com/jaypengx/Quadra-Securities)';
+const curl = args => {
+  for (let tries = 0; ; tries++) {
+    const out = execFileSync('curl', ['-s', '-A', UA, ...args], { maxBuffer: 64 << 20 }).toString();
+    if (out.startsWith('{')) return JSON.parse(out);
+    // Wikimedia's "too many requests": wait and ask again.
+    if (tries === 5) throw new Error(out.slice(0, 200));
+    execFileSync('sleep', [String(10 * (tries + 1))]);
+  }
 };
+const sparql = query => curl(['https://query.wikidata.org/sparql', '--data-urlencode', `query=${query}`, '-H', 'Accept: application/sparql-results+json']).results.bindings;
 const fileOf = url => decodeURIComponent(url.replace(/^.*Special:FilePath\//, ''));
-// Of an item's logos, the plain one: not the white or inverted one, the
-// English one before the Chinese.
-const better = (a, b) => {
-  const score = f => (/white|negative|invert|reverse|dark/i.test(f) ? 4 : 0) + (/zh|chinese/i.test(f) ? 1 : 0) + (/icon|symbol/i.test(f) ? 0.5 : 0);
-  return score(a) <= score(b) ? a : b;
-};
+
+// An item's logo statements, as Wikidata ranks and dates them: a logo with
+// an end date is a past one; a preferred one is the current one; then the
+// latest start; then the plain file (not white or inverted, English before
+// Chinese).
+const LOGO = 'P154';
+const ICON = 'P8972';
+const statements = `?item ?claim ?st . VALUES ?claim { p:${LOGO} p:${ICON} } ?st wikibase:rank ?rank . FILTER(?rank != wikibase:DeprecatedRank)
+  { ?st ps:${LOGO} ?file } UNION { ?st ps:${ICON} ?file }
+  OPTIONAL { ?st pq:P580 ?start } OPTIONAL { ?st pq:P582 ?end }`;
+const NOW = new Date().toISOString();
+const plainScore = f => (/white|negative|invert|reverse|dark/i.test(f) ? 4 : 0) + (/zh|chinese/i.test(f) ? 1 : 0);
+const rankOf = r => (/Preferred/.test(r.rank.value) ? 1 : 0);
+const startOf = r => r.start?.value || '';
+function current(rows) {
+  const live = rows.filter(r => !(r.end && r.end.value <= NOW));
+  live.sort((a, b) => rankOf(b) - rankOf(a) || (startOf(a) < startOf(b) ? 1 : startOf(a) > startOf(b) ? -1 : 0) || plainScore(fileOf(a.file.value)) - plainScore(fileOf(b.file.value)));
+  return live[0] ? fileOf(live[0].file.value) : null;
+}
+// Rows grouped by a key: its current logo and icon.
+function marks(rows, keyOf) {
+  const groups = new Map();
+  for (const r of rows) {
+    const k = keyOf(r);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  const out = new Map();
+  for (const [k, list] of groups) {
+    const logo = current(list.filter(r => r.claim.value.endsWith(LOGO)));
+    const icon = current(list.filter(r => r.claim.value.endsWith(ICON)));
+    out.set(k, { logo, icon });
+  }
+  return out;
+}
 
 // Yahoo's suffix: the exchange on Wikidata and the ticker as it's written there.
 const EXCHANGES = {
@@ -43,19 +82,40 @@ const placeOf = symbol => {
   return EXCHANGES[suffix] ? { ex: EXCHANGES[suffix], ticker } : null;
 };
 
+// The brand a listed company trades as, when the brand is what people know
+// and Wikidata keeps the logo there (統一超 runs 7-ELEVEN in Taiwan; Roblox
+// the company has no logo of its own on Wikidata, Roblox the platform has).
+const BRAND_OF = { '2912.TW': '7-Eleven', RBLX: 'Roblox' };
+
 const items = CATEGORIES.flatMap(c => c.items.map(([symbol, zh, en, kind]) => ({ symbol, zh, en, kind: kind || (/etf/.test(c.id) || c.id === 'bond' ? 'etf' : c.id === 'fund' ? 'fund' : c.id === 'crypto' ? 'crypto' : 'stock'), cat: c.id })));
 const exIds = [...new Set(Object.values(EXCHANGES).flat())];
-const rows = sparql(`SELECT ?ticker ?ex ?logo WHERE {
-  ?item p:P414 ?st . ?st ps:P414 ?ex ; pq:P249 ?ticker .
+const byTicker = marks(
+  sparql(`SELECT ?ticker ?ex ?claim ?file ?rank ?start ?end WHERE {
+  ?item p:P414 ?listing . ?listing ps:P414 ?ex ; pq:P249 ?ticker .
   VALUES ?ex { ${exIds.map(q => `wd:${q}`).join(' ')} }
-  ?item wdt:P154 ?logo .
-}`);
-const byTicker = new Map();
-for (const r of rows) {
-  const key = `${r.ex.value.split('/').pop()}|${r.ticker.value}`;
-  const f = fileOf(r.logo.value);
-  byTicker.set(key, byTicker.has(key) ? better(byTicker.get(key), f) : f);
-}
+  ${statements}
+}`),
+  r => `${r.ex.value.split('/').pop()}|${r.ticker.value}`
+);
+const listed = symbol => {
+  const p = placeOf(symbol);
+  for (const ex of p?.ex || []) {
+    const m = byTicker.get(`${ex}|${p.ticker}`);
+    if (m?.logo || m?.icon) return m;
+  }
+  return null;
+};
+// Items by an English (or Chinese, as written here) name. `where` narrows
+// the items: companies only, say, so a word doesn't find a place.
+const byName = (names, where = '') => {
+  const list = [...new Set(names)].filter(Boolean);
+  const rows = [];
+  for (let k = 0; k < list.length; k += 60) {
+    const values = list.slice(k, k + 60).flatMap(n => [`"${n.replace(/"/g, '')}"@en`, `"${n.replace(/"/g, '')}"@zh-tw`, `"${n.replace(/"/g, '')}"@zh`]);
+    rows.push(...sparql(`SELECT ?name ?claim ?file ?rank ?start ?end WHERE { VALUES ?name { ${values.join(' ')} } ?item rdfs:label|skos:altLabel ?name . ${where} ${statements} }`));
+  }
+  return marks(rows, r => r.name.value);
+};
 
 // Funds and ETFs: their issuer's logo, by the name's first word: a listed
 // parent by its symbol, or the issuer by its English name on Wikidata.
@@ -65,90 +125,90 @@ const ISSUERS = [
   [/^iShares/, 'BLK'], [/^SPDR|Select Sector$/, 'STT'], [/^Invesco/, 'IVZ'], [/^Schwab/, 'SCHW'], [/^JPMorgan/, 'JPM'],
   [/^Vanguard/, 'The Vanguard Group'], [/^ProShares/, 'ProShares'], [/^Global X/, 'Global X'], [/^ARK/, 'ARK Invest'], [/^VanEck/, 'VanEck'], [/^Fidelity|^富達/, 'Fidelity Investments']
 ];
-const issuerLogo = new Map();
-const labels = ISSUERS.map(x => x[1]).filter(x => / /.test(x) || /^[A-Z][a-z]/.test(x));
-for (const r of sparql(`SELECT ?name ?logo WHERE { VALUES ?name { ${labels.map(n => `"${n}"@en`).join(' ')} } ?item rdfs:label ?name ; wdt:P154 ?logo . }`)) {
-  const n = r.name.value;
-  const f = fileOf(r.logo.value);
-  issuerLogo.set(n, issuerLogo.has(n) ? better(issuerLogo.get(n), f) : f);
-}
-const listedLogo = symbol => {
-  const p = placeOf(symbol);
-  for (const ex of p?.ex || []) {
-    const f = byTicker.get(`${ex}|${p.ticker}`);
-    if (f) return f;
-  }
-  return null;
-};
-
-// Coins: by their English name.
-const coinNames = items.filter(i => i.kind === 'crypto').map(i => i.en.replace(/\s*\(.*\)$/, ''));
-const coinLogo = new Map();
-for (const r of sparql(`SELECT ?name ?logo WHERE { VALUES ?name { ${coinNames.map(n => `"${n}"@en`).join(' ')} } ?item rdfs:label ?name ; wdt:P31/wdt:P279* wd:Q13479982 ; wdt:P154 ?logo . }`)) {
-  const n = r.name.value;
-  const f = fileOf(r.logo.value);
-  coinLogo.set(n, coinLogo.has(n) ? better(coinLogo.get(n), f) : f);
-}
-
-// The rest, by name (English, or Chinese as written here), among companies
-// only (an industry or a listing on Wikidata), so a word doesn't find a place.
+const issuers = byName(ISSUERS.map(x => x[1]).filter(x => / /.test(x) || /^[A-Z][a-z]/.test(x)));
+const coins = byName(
+  items.filter(i => i.kind === 'crypto').map(i => i.en.replace(/\s*\(.*\)$/, '')),
+  '?item wdt:P31/wdt:P279* wd:Q13479982 .'
+);
 const plain = n => n.replace(/\s*\(.*\)$/, '').replace(/ ADR$/, '');
-const named = new Map();
-const nameRows = names => {
-  const list = [...new Set(names)].filter(Boolean);
-  const res = [];
-  for (let k = 0; k < list.length; k += 60) {
-    res.push(...sparql(`SELECT ?name ?logo WHERE {
-      VALUES ?name { ${list.slice(k, k + 60).flatMap(n => [`"${n.replace(/"/g, '')}"@en`, `"${n.replace(/"/g, '')}"@zh-tw`, `"${n.replace(/"/g, '')}"@zh`]).join(' ')} }
-      ?item rdfs:label|skos:altLabel ?name ; wdt:P154 ?logo .
-      FILTER EXISTS { { ?item wdt:P452 ?ind } UNION { ?item wdt:P414 ?ex } UNION { ?item wdt:P31 wd:Q891723 } }
-    }`));
-  }
-  for (const r of res) {
-    const n = r.name.value;
-    const f = fileOf(r.logo.value);
-    named.set(n, named.has(n) ? better(named.get(n), f) : f);
-  }
-};
+const companies = byName(
+  items.filter(i => i.kind === 'stock').flatMap(i => [plain(i.en), i.zh]),
+  'FILTER EXISTS { { ?item wdt:P452 ?ind } UNION { ?item wdt:P414 ?ex } UNION { ?item wdt:P31 wd:Q891723 } }'
+);
+const brands = byName(Object.values(BRAND_OF));
 
-nameRows(items.filter(i => i.kind === 'stock').flatMap(i => [plain(i.en), i.zh]));
-const out = {};
+// What `a` lacks, from `b`.
+const fill = (a, b) => ({ logo: a?.logo || b?.logo || null, icon: a?.icon || b?.icon || null });
+const found = new Map();
 const missing = [];
-// Compact, current marks for symbols where a default Wikidata match is
-// missing or too detailed for a small badge. 2912.TW is President Chain
-// Store, the listed operator of 7-Eleven in Taiwan.
-const LOGO_OVERRIDES = {
-  '2912.TW': '7-Eleven logo 2021.svg',
-  RBLX: 'Roblox Logo 2022.svg',
-  MCD: "McDonald's Golden Arches.svg"
-};
 for (const i of items) {
-  let f = null;
-  if (i.kind === 'crypto') f = coinLogo.get(i.en.replace(/\s*\(.*\)$/, ''));
+  let m = null;
+  if (i.kind === 'crypto') m = coins.get(i.en.replace(/\s*\(.*\)$/, ''));
   else if (i.kind === 'etf' || i.kind === 'fund' || i.kind === 'bond') {
+    // A fund shows its issuer's logo, never the issuer's app icon.
     const hit = ISSUERS.find(([re]) => re.test(i.zh) || re.test(i.en));
-    f = hit ? issuerLogo.get(hit[1]) || listedLogo(hit[1]) : null;
-  } else f = listedLogo(i.symbol);
-  if (!f && (i.kind === 'stock' || !i.kind)) f = named.get(plain(i.en)) || named.get(i.zh);
-  f = LOGO_OVERRIDES[i.symbol] || f;
+    const issuer = hit && (issuers.get(hit[1])?.logo ? issuers.get(hit[1]) : listed(hit[1]));
+    m = issuer?.logo ? { logo: issuer.logo } : null;
+  } else m = BRAND_OF[i.symbol] ? brands.get(BRAND_OF[i.symbol]) : listed(i.symbol);
+  if (!m?.logo && (i.kind === 'stock' || !i.kind)) m = fill(fill(m, companies.get(plain(i.en))), companies.get(i.zh));
   // A photo (a sign on a building, say) isn't a logo.
-  if (f && !/\.(svg|png)$/i.test(f)) f = null;
-  if (f) out[i.symbol] = f;
+  for (const k of ['logo', 'icon']) if (m?.[k] && !/\.(svg|png)$/i.test(m[k])) delete m[k];
+  if (m?.logo || m?.icon) found.set(i.symbol, m);
   else if (i.cat !== 'fx' && i.cat !== 'index' && i.cat !== 'metal' && i.cat !== 'govbond') missing.push(i.symbol);
 }
-const body = Object.entries(out)
-  .map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)}`)
-  .join(',\n');
+
+// Each file as the app loads it: an SVG as it is (sharp at any size; one
+// over 100 kB, or a PNG wider than 250 pixels, as a 250-pixel thumbnail, a
+// size Wikimedia keeps rendered). Paths are under Wikimedia's commons/
+// folder (a file's folder is the MD5 of its name): thumb/… on its thumbnail
+// host, the rest on its upload host.
+const peek = (url, args) => {
+  const tmp = join(tmpdir(), 'brand-logo-peek');
+  for (let tries = 0; ; tries++) {
+    const status = execFileSync('curl', ['-s', '-A', UA, ...args, '-o', tmp, '-w', '%{http_code}', url]).toString();
+    if (/^20/.test(status)) return readFileSync(tmp);
+    if (tries === 5) throw new Error(`${status} ${url}`);
+    execFileSync('sleep', [String(5 * (tries + 1))]);
+  }
+};
+const files = [...new Set([...found.values()].flatMap(m => [m.logo, m.icon]).filter(Boolean))];
+const path = new Map();
+for (const file of files) {
+  const name = file.replace(/ /g, '_');
+  const md5 = createHash('md5').update(name).digest('hex');
+  const dir = `${md5[0]}/${md5.slice(0, 2)}/${name}`;
+  const url = `https://upload.wikimedia.org/wikipedia/commons/${dir.split('/').map(encodeURIComponent).join('/')}`;
+  // An SVG's size, or a PNG's first bytes (its width is from the 17th).
+  const svg = /\.svg$/i.test(name);
+  const head = peek(url, svg ? ['-I'] : ['-r', '0-23']);
+  const small = svg ? Number(head.toString().match(/content-length: *(\d+)/i)?.[1]) <= 100_000 : head.readUInt32BE(16) <= 250;
+  path.set(file, small ? dir : `thumb/${dir}/250px-${name}${/\.svg$/i.test(name) ? '.png' : ''}`);
+}
+const logos = {};
+const icons = {};
+for (const [symbol, m] of found) {
+  if (m.logo && path.has(m.logo)) logos[symbol] = path.get(m.logo);
+  if (m.icon && path.has(m.icon)) icons[symbol] = path.get(m.icon);
+}
+const list = map =>
+  Object.entries(map)
+    .map(([k, v]) => `  ${JSON.stringify(k)}: ${JSON.stringify(v)}`)
+    .join(',\n');
 writeFileSync(
   new URL('../public/lib/brands.mjs', import.meta.url),
-  `// Made by scripts/brand-logos.mjs (Wikidata's logo of each company, by its
-// ticker; a fund's issuer's): a Wikimedia Commons file per symbol. Don't edit
-// by hand; run the script again.
+  `// Made by scripts/brand-logos.mjs (Wikidata's current logo of each company,
+// by its ticker; a fund's issuer's): Wikimedia Commons files. Don't edit by
+// hand; run the script again.
 export const BRANDS = {
-${body}
+${list(logos)}
 };
-// A logo as a PNG of about this width (Commons renders the SVG).
-export const brandLogo = (symbol, width = 96) => (BRANDS[symbol] ? \`https://commons.wikimedia.org/wiki/Special:FilePath/\${encodeURIComponent(BRANDS[symbol])}?width=\${width}\` : null);
+// The company's own square icon (Wikidata's "small logo or icon").
+export const ICONS = {
+${list(icons)}
+};
+const commons = path => \`https://\${path.startsWith('thumb/') ? 'thumb' : 'upload'}.wikimedia.org/wikipedia/commons/\${path.split('/').map(encodeURIComponent).join('/')}\`;
+export const brandLogo = symbol => (BRANDS[symbol] ? commons(BRANDS[symbol]) : null);
+export const brandIcon = symbol => (ICONS[symbol] ? commons(ICONS[symbol]) : null);
 `
 );
-console.log(`${Object.keys(out).length} logos; none for ${missing.length}: ${missing.join(' ')}`);
+console.log(`${Object.keys(logos).length} logos, ${Object.keys(icons).length} icons; none for ${missing.length}: ${missing.join(' ')}`);

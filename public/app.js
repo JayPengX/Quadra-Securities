@@ -11,7 +11,7 @@ import { BONDS } from './lib/bonds.mjs';
 import { nextTradingStart, upcomingHolidays, localDay } from './lib/holidays.mjs';
 import { fetchQuotes, fetchChart, fetchBars, fetchCorporateActions, fetchFundamentals, searchSymbols, fxSymbol } from './lib/quotes.mjs';
 import { CATEGORIES, OVERVIEW, TRACKERS, catalogInfo, searchCatalog } from './lib/catalog.mjs';
-import { BRANDS, brandLogo } from './lib/brands.mjs';
+import { brandIcon, brandLogo } from './lib/brands.mjs';
 import { tvLogos } from './lib/tvlogos.mjs';
 import { afterHours, creditAccount, creditCheck, openCredit, bestTier, creditUsed, terms as creditTerms, extendTerm, closeOutPlan, yearOfTrading, dayTradeSellFirst, CREDIT_TIERS, CREDIT_MIN_TRADES, CREDIT_TURNOVER, CREDIT_PROOF } from './lib/credit.mjs';
 import { money, price as fmtPrice, pct, qty as fmtQty, num, compact, dateTime, date as fmtDate, shortDate, clock, weekdayClock, monthYear, escapeHtml as h, setFormatLocale } from './lib/format.mjs';
@@ -824,66 +824,95 @@ function marketStatus(q) {
   const next = opens ? t('opensAt', { time: weekdayClock(opens) }) : t('marketClosed');
   return `<span class="mkt-status">${statusDot(q)}${h(next)} <small>(${h(t('localTime'))} ${h(clock(now, q.tz))})</small></span>`;
 }
-// A company's logo (Financial Modeling Prep's free images, by ticker: US,
-// Taiwan, Tokyo, Hong Kong…) over its ticker badge; a ticker without one
-// keeps the badge (remembered, so it isn't asked for again).
-const LOGO_MISS_KEY = 'stock.logoMiss.v2';
-const tvMiss = new Set();
-const logoMiss = (() => {
+// A symbol's picture, in order: TradingView's round icon (two for a
+// currency pair), the company's own icon or else its official logo
+// (Wikidata's), and outside Taiwan Financial Modeling Prep's image by ticker
+// (its Taiwan ones are often photos: a T-shirt for Foxconn). An icon fills
+// the round badge; a logo sits on white inside it.
+const twSymbol = symbol => /\.TWO?$/.test(symbol);
+function logoChoices(symbol, kind) {
+  if (BONDS[symbol]) return [];
+  const tv = tvLogos(symbol);
+  return [
+    tv && { urls: tv, fit: 'icon' },
+    ...[brandIcon(symbol), brandLogo(symbol)].filter(Boolean).map(url => ({ urls: [url], fit: 'logo' })),
+    !twSymbol(symbol) && (kind === 'stock' || kind === 'etf') && { urls: [`https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.png`], fit: 'logo', guess: true }
+  ].filter(Boolean);
+}
+// Pictures seen to load (kept on the device: drawn at once next time, with
+// no fade) and ones that failed twice (this visit; a guessed FMP picture
+// that isn't there, for good).
+const LOGO_OK_KEY = 'stock.logoOk.v1';
+const LOGO_MISS_KEY = 'stock.logoMiss.v3';
+const stored = key => {
   try {
-    return new Set(JSON.parse(localStorage.getItem(LOGO_MISS_KEY) || '[]'));
+    return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
   } catch {
     return new Set();
   }
-})();
+};
+const logoOk = stored(LOGO_OK_KEY);
+const logoMiss = stored(LOGO_MISS_KEY);
+const logoBad = new Set();
+let logoSave = 0;
+const saveLogos = () => {
+  clearTimeout(logoSave);
+  logoSave = setTimeout(() => {
+    try {
+      localStorage.setItem(LOGO_OK_KEY, JSON.stringify([...logoOk].slice(-800)));
+      localStorage.setItem(LOGO_MISS_KEY, JSON.stringify([...logoMiss].slice(-400)));
+    } catch {}
+  }, 1000);
+};
+function symbolBadge(symbol, q) {
+  const kind = q?.kind || catalogInfo(symbol)?.kind || 'stock';
+  const zhShort = twSymbol(symbol) && catalogInfo(symbol)?.zh ? catalogInfo(symbol).zh.replace(kind === 'etf' ? /^(元大|富邦|國泰|群益|復華|統一|凱基|大華|中信|永豐|兆豐)/ : /[-*].*$/, '').slice(0, 2) : '';
+  const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : zhShort || bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
+  const plain = `<span class="sym-badge k-${h(kind)}${text === zhShort && zhShort ? ' zh' : ''}">${h(text)}</span>`;
+  const choice = logoChoices(symbol, kind).find(c => c.urls.every(u => !logoBad.has(u) && !logoMiss.has(u)));
+  if (!choice) return plain;
+  const imgs = choice.urls
+    .map(u => (logoOk.has(u) ? `<img class="sym-logo" src="${h(u)}" alt="" referrerpolicy="no-referrer">` : `<img class="sym-logo fresh" src="${h(u)}" alt="" loading="lazy" referrerpolicy="no-referrer"${choice.guess ? ' data-guess' : ''}>`))
+    .join('');
+  return `<span class="sym-badge has-logo ${choice.fit}${choice.urls.length > 1 ? ' pair' : ''}" data-symbol="${h(symbol)}" data-kind="${h(kind)}">${imgs}</span>`;
+}
+document.addEventListener(
+  'load',
+  e => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains('sym-logo')) return;
+    // A guessed picture that loads as a speck (an empty placeholder) isn't there.
+    if (img.hasAttribute('data-guess') && img.naturalWidth < 24 && img.naturalHeight < 24) return void img.dispatchEvent(new Event('error'));
+    img.classList.add('in');
+    const url = img.getAttribute('src');
+    if (!logoOk.has(url)) {
+      logoOk.add(url);
+      saveLogos();
+    }
+  },
+  true
+);
+// A picture that fails is asked for once more; failing again, the badge
+// draws the next one (or the symbol's name).
 document.addEventListener(
   'error',
   e => {
     const img = e.target;
     if (!(img instanceof HTMLImageElement) || !img.classList.contains('sym-logo')) return;
-    img.closest('.sym-badge')?.classList.remove('has-tv', 'has-logo');
-    (img.closest('.sym-pair') || img).remove();
-    // TradingView's icons exist for every symbol mapped: a miss is the
-    // network, so only for this visit.
-    if (img.classList.contains('tv')) return void tvMiss.add(img.dataset.symbol);
-    logoMiss.add(img.dataset.symbol);
-    try {
-      localStorage.setItem(LOGO_MISS_KEY, JSON.stringify([...logoMiss].slice(-400)));
-    } catch {}
+    const url = img.getAttribute('src');
+    if (!img.dataset.retried && !img.hasAttribute('data-guess')) {
+      img.dataset.retried = '1';
+      return void setTimeout(() => img.isConnected && img.setAttribute('src', url), 1500);
+    }
+    logoOk.delete(url);
+    if (img.hasAttribute('data-guess')) logoMiss.add(url);
+    else logoBad.add(url);
+    saveLogos();
+    const badge = img.closest('.sym-badge');
+    if (badge?.isConnected) badge.outerHTML = symbolBadge(badge.dataset.symbol, { kind: badge.dataset.kind });
   },
   true
 );
-// The official logo (Wikidata's, scripts/brand-logos.mjs) first; Financial
-// Modeling Prep's only outside Taiwan (its Taiwan images are often photos:
-// a T-shirt for Foxconn, a container for Evergreen). A Taiwan company
-// without one shows its short Chinese name on the badge instead.
-const twSymbol = symbol => /\.TWO?$/.test(symbol);
-const logoUrl = symbol => brandLogo(symbol, 96) || (twSymbol(symbol) ? null : `https://financialmodelingprep.com/image-stock/${encodeURIComponent(symbol)}.png`);
-// A logo that loads as a speck (an empty placeholder) counts as missing.
-document.addEventListener(
-  'load',
-  e => {
-    const img = e.target;
-    if (img instanceof HTMLImageElement && img.classList.contains('sym-logo') && !img.classList.contains('tv') && img.naturalWidth < 24 && img.naturalHeight < 24) img.dispatchEvent(new Event('error'));
-  },
-  true
-);
-function symbolBadge(symbol, q) {
-  const kind = q?.kind || catalogInfo(symbol)?.kind || 'stock';
-  const zhShort = twSymbol(symbol) && catalogInfo(symbol)?.zh ? catalogInfo(symbol).zh.replace(kind === 'etf' ? /^(元大|富邦|國泰|群益|復華|統一|凱基|大華|中信|永豐|兆豐)/ : /[-*].*$/, '').slice(0, 2) : '';
-  const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : zhShort || bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
-  const img = (url, cls = 'sym-logo') => `<img class="${cls}" src="${h(url)}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
-  // TradingView's round icon first (every company, coin, metal, index, a
-  // pair's two flags, a bond's country), then the official logo, then FMP's.
-  const tv = !tvMiss.has(symbol) && tvLogos(symbol);
-  if (tv) {
-    const logo = tv.length > 1 ? `<span class="sym-pair">${img(tv[0], 'sym-logo tv')}${img(tv[1], 'sym-logo tv')}</span>` : img(tv[0], 'sym-logo tv');
-    return `<span class="sym-badge k-${h(kind)} has-logo has-tv">${h(text)}${logo}</span>`;
-  }
-  const url = !BONDS[symbol] && !logoMiss.has(symbol) && (BRANDS[symbol] || kind === 'stock' || kind === 'etf') ? logoUrl(symbol) : null;
-  const logo = url ? img(url) : '';
-  return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}${text === zhShort && zhShort ? ' zh' : ''}">${h(text)}${logo}</span>`;
-}
 
 function quoteRow(symbol, { note = '' } = {}) {
   const q = state.quotes.get(symbol);

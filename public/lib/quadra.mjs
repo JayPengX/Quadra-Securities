@@ -393,7 +393,14 @@ const plusMonth = t => new Date(t + 8 * 3_600_000).toISOString().slice(0, 7);
 export const plusMonths = wallet => new Set((wallet?.entries || []).filter(e => e.kind === 'plus' && e.app === 'eco').map(e => e.id.slice(9)));
 export const plusMember = (wallet, t = Date.now()) => (wallet?.entries || []).some(e => e.id === `eco:plus:${plusMonth(t)}` && e.app === 'eco');
 // Renewing next month (the member hasn't left).
-export const plusRenewing = wallet => wallet?.settings?.plus?.value?.on === true;
+// A charge the balance couldn't cover (eco.js `eco:plusfail:<month>`) after
+// the last paid month: the membership lapsed and won't renew until joined again.
+export const plusLapsed = wallet => {
+  const entries = wallet?.entries || [];
+  const last = entries.filter(e => e.app === 'eco' && e.id?.startsWith('eco:plus:')).map(e => e.id.slice(9)).sort().at(-1);
+  return Boolean(last) && entries.some(e => e.app === 'eco' && e.id?.startsWith('eco:plusfail:') && e.id.slice(13) > last);
+};
+export const plusRenewing = wallet => wallet?.settings?.plus?.value?.on === true && !plusLapsed(wallet);
 export const plusTried = wallet => plusMonths(wallet).size > 0;
 export const plusPlan = wallet => (wallet?.settings?.plus?.value?.plan === 'year' ? 'year' : 'month');
 // The last month already paid for (YYYY-MM), or null.
@@ -1678,9 +1685,16 @@ export const plusTenure = (wallet, now = Date.now()) => [...plusMonths(wallet)].
 // with where to stop it (the free month included, so nobody is surprised).
 export function plusNotices(s, now = Date.now()) {
   const w = s.wallet;
-  if (!w || !plusMember(w, now)) return;
+  if (!w) return;
   const en = s.lang === 'en';
   const T = (zh, e) => (en ? e : zh);
+  // A renewal the balance couldn't cover: said once.
+  const failed = (w.entries || []).filter(e => e.app === 'eco' && e.id?.startsWith('eco:plusfail:')).at(-1);
+  if (failed && plusLapsed(w) && readStore('quadra.seen.plusfail') !== failed.id) {
+    writeStore('quadra.seen.plusfail', failed.id);
+    notify(s, { title: T('✦ Plus 扣款失敗，會員已停止', '✦ Plus payment failed; membership stopped'), body: T(`餘額不足 ${money(PLUS.fee)}。補足後到 Plus 重新加入。`, `Your balance didn’t cover ${money(PLUS.fee)}. Join again from Plus once it does.`), tag: failed.id, kind: 'plus' });
+  }
+  if (!plusMember(w, now)) return;
   const week = (w.entries || []).find(e => e.app === 'eco' && e.id === `eco:fb:${taipeiDay(weekMonday(now))}`);
   if (week && readStore('quadra.seen.fb') !== week.id) {
     writeStore('quadra.seen.fb', week.id);
@@ -1863,7 +1877,8 @@ export function openPlus(s) {
       group('odds', 'Quadra Play'),
       group('stock', 'Quadra Securities'),
       group('vocab', 'Quadra Rewards'),
-      ...cta
+      ...cta,
+      node('p', { class: 'q-plus-fine', text: T('每月 1 日從 Quadra 餘額自動扣款，沒打開 App 也照扣；餘額不足扣款失敗，會員就停止。取消後用到期滿，已付不退費。價格含 5% 營業稅。', 'Charged from your Quadra balance on the 1st of every month, whether or not you open an app; a charge the balance can’t cover fails and the membership stops. Cancelling keeps what’s paid; nothing is refunded. Prices include 5% VAT.') })
     );
   };
   dialog.append(node('div', { class: 'q-sheet-head' }, [node('h2', { text: 'Quadra Plus' }), node('button', { class: 'q-close', type: 'button', 'aria-label': T('關閉', 'Close'), text: '×', onclick: close })]), body, note);

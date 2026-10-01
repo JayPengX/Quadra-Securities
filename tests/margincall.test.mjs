@@ -25,6 +25,7 @@ test('a call is due at the close of the second business day after the close it w
 
 function marginAccount() {
   let a = newAccount(100_000, T0, 'acc');
+  a = { ...a, events: [...a.events, { id: 'credit:test', type: 'credit', t: T0, limit: 5_000_000 }] };
   const v = valuate(replay(a, T0), new Map(), RATES);
   const r = placeOrder(a, { side: 'buy', qty: 2000, margin: true }, { quote: quote('2330.TW', 100), rates: RATES, valuation: v, now: T0, id: 'b' });
   assert.ok(r.fill, r.error);

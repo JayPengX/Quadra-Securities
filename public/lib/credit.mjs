@@ -22,10 +22,6 @@ export const CREDIT_MIN_MONTHS = 3;
 export const CREDIT_MIN_TRADES = 10;
 export const CREDIT_TURNOVER = 0.5;
 export const CREDIT_PROOF = 0.3;
-// Accounts opened before the rules came in keep the margin they had: their
-// credit account counts as open, at the first tier (or what their trading
-// qualifies for).
-export const CREDIT_RULES_AT = Date.UTC(2026, 9, 1, 16);
 // 融資 and 融券 each run six months from the trade; 展延 adds six more,
 // asked for in the last month before it's due, while the account isn't
 // under a margin call. Past due, the broker closes it (sells, or buys back).
@@ -52,17 +48,12 @@ export function yearOfTrading(account, now = Date.now()) {
 
 const monthsOpen = (account, months, now) => Boolean(account?.created) && addMonths(account.created, months) <= now;
 
-// The credit account: { open, limit, since, grandfathered }.
+// The credit account: { open, limit, since }. Every account opens one the
+// same way (openCredit), once it meets the rules.
 export function creditAccount(account, now = Date.now()) {
   const opened = (account?.events || []).filter(e => e.type === 'credit' && e.t <= now).sort((a, b) => a.t - b.t);
   const last = opened.at(-1);
-  if (last) return { open: true, limit: last.limit, since: opened[0].t, grandfathered: false };
-  if (account?.created && account.created < CREDIT_RULES_AT) {
-    const { turnoverTWD } = yearOfTrading(account, now);
-    const limit = Math.max(CREDIT_TIERS[0], ...CREDIT_TIERS.filter(x => turnoverTWD >= x * CREDIT_TURNOVER));
-    return { open: true, limit, since: account.created, grandfathered: true };
-  }
-  return { open: false, limit: 0, since: null, grandfathered: false };
+  return last ? { open: true, limit: last.limit, since: opened[0].t } : { open: false, limit: 0, since: null };
 }
 
 // Whether `limit` can be had now, and why not: { ok, needs: [{ key, have, want }] }.

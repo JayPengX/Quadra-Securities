@@ -33,9 +33,9 @@ test('a new account has no credit account; margin and shorts in Taiwan need one'
   assert.equal(placeOrder(a, { side: 'sell', qty: 1000 }, { quote: q, rates: RATES, valuation: v, now: T0 }).error, 'creditNeeded');
 });
 
-test('accounts from before the rules keep their margin, at the first tier', () => {
+test('an older account still opens its credit account by the rules', () => {
   const old = newAccount(1_000_000, tpe('2026-09-01', '10:00'), 'acc');
-  assert.deepEqual(creditAccount(old, T0), { open: true, limit: 500_000, since: old.created, grandfathered: true });
+  assert.deepEqual(creditAccount(old, T0), { open: false, limit: 0, since: null });
 });
 
 test('opening one: three months, ten trades, turnover of half the limit, and means above the first tier', () => {

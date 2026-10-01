@@ -18,10 +18,12 @@ const quote = (symbol, price, over = {}) => {
     session: { start: at - HOUR, end: at + 4 * HOUR }, marketTime: at, line: [], ...over
   };
 };
+// A credit account already open (融資, 融券 in Taiwan).
+const withCredit = (a, limit = 5_000_000) => ({ ...a, events: [...a.events, { id: 'credit:test', type: 'credit', t: a.created, limit }] });
 const val = (a, t, quotes) => valuate(replay(a, t), new Map(quotes), RATES);
 
 test('融券 in Taiwan: a 90% deposit and the sale money held, 0.08% handling, no yearly fee; both back when bought back', () => {
-  let a = newAccount(1_000_000, T0, 'acc');
+  let a = withCredit(newAccount(1_000_000, T0, 'acc'));
   const q = quote('2330.TW', 2000);
   let v = val(a, T0, [['2330.TW', q]]);
   const r = placeOrder(a, { side: 'sell', type: 'limit', limit: 2000, qty: 100 }, { quote: q, rates: RATES, valuation: v, now: T0, id: 's' });
@@ -83,7 +85,7 @@ test('shorts elsewhere need 150% cover to open, get called and bought back when 
 });
 
 test('a short pays the dividends', () => {
-  let a = newAccount(1_000_000, T0, 'acc');
+  let a = withCredit(newAccount(1_000_000, T0, 'acc'));
   const q = quote('0056.TW', 40, { kind: 'etf' });
   a = placeOrder(a, { side: 'sell', qty: 1000 }, { quote: q, rates: RATES, valuation: val(a, T0, [['0056.TW', q]]), now: T0, id: 's' }).account;
   const r = applyCorporateActions(a, '0056.TW', { dividends: [{ date: T0 + DAY, amount: 1 }], splits: [] }, { rates: RATES, now: T0 + 2 * DAY });

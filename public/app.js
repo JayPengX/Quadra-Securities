@@ -1550,7 +1550,8 @@ function ticketInfo() {
   // exchanged for it included.
   const fromTwd = q.currency !== BASE && state.rates[q.currency] ? quoteExchange(BASE, q.currency, Math.max(0, avail.cash[BASE] || 0), state.rates, state.fxOpen)?.received || 0 : 0;
   const spendable = cash + fromTwd;
-  const holdFor = n => requiredCash({ type: d.type, qty: n, limit: Number(d.limit), stop: Number(d.stop) }, q, Date.now()).reserve;
+  // (Held for a fresh price, as every order from the ticket is.)
+  const holdFor = n => requiredCash({ type: d.type, qty: n, limit: Number(d.limit), stop: Number(d.stop), waitFresh: 1 }, q, Date.now()).reserve;
   let max = 0;
   if (ref > 0) {
     const step = qtyStep(q.kind);
@@ -1560,7 +1561,7 @@ function ticketInfo() {
   }
   // Exactly what the order will hold (placeOrder checks the same figure):
   // the estimate, plus a 3% buffer when it has to wait for its market.
-  const req = d.side === 'buy' && est ? requiredCash({ type: d.type, qty, limit: Number(d.limit), stop: Number(d.stop) }, q, Date.now()) : null;
+  const req = d.side === 'buy' && est ? requiredCash({ type: d.type, qty, limit: Number(d.limit), stop: Number(d.stop), waitFresh: 1 }, q, Date.now()) : null;
   const need = req ? req.reserve : 0;
   const short = d.side === 'buy' && est ? Math.max(0, need - cash) : 0;
   // Short of this currency but holding NT$: the exchange that covers it
@@ -1578,8 +1579,13 @@ function ticketInfo() {
   const marginBuy = short > 0 && !topUp?.enough && capCur >= short ? { amount: Math.min(capCur, short * 1.01), rate: loanRateAt(q.currency) } : null;
   let maxMargin = 0;
   if (d.side === 'buy' && capCur > 0 && ref > 0) {
-    const perUnit = dealPrice(q.market, 'buy', ref) * (1 + ((MARKETS[q.market] || MARKETS.INTL).commission.rate || 0) + 0.006) * 1.03;
-    maxMargin = roundQty((Math.max(0, cash) + capCur) / perUnit, q.kind);
+    // The most whose hold the cash and the loan cover, the loan with the
+    // 1% the margin button borrows on top (the same check as the order's).
+    const room = Math.max(0, cash) + capCur / 1.01;
+    const step = qtyStep(q.kind);
+    const perUnit = dealPrice(q.market, 'buy', ref) * (1 + ((MARKETS[q.market] || MARKETS.INTL).commission.rate || 0) + 0.006);
+    maxMargin = roundQty(room / perUnit, q.kind);
+    while (maxMargin > 0 && holdFor(maxMargin) > room) maxMargin = roundQty(maxMargin - (step >= 1 ? 1 : maxMargin * 0.001), q.kind);
   }
   // How much can be sold short on top of what's held.
   let shortRoom = 0;

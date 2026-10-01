@@ -57,6 +57,7 @@ const EPS = 1e-9;
 // A buy order waiting for its price holds this much more than its estimate
 // (a market order placed while the market is shut can open higher).
 const RESERVE_BUFFER = 0.03;
+const FRESH_BUFFER = 0.005;
 
 export function randomId() {
   if (globalThis.crypto?.randomUUID) return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
@@ -486,8 +487,12 @@ export function requiredCash(order, quote, now = Date.now()) {
   const last = order.type === 'stop' ? Math.max(Number(order.stop), quote.price) : quote.price;
   const ref = order.type === 'limit' ? Number(order.limit) : marketFill(quote.market, quote.kind, 'buy', last);
   const est = estimate({ market: quote.market, kind: quote.kind, currency: quote.currency, side: 'buy', qty: order.qty, price: ref });
-  const fillsNow = !order.waitFresh && triggerPrice({ ...order, side: 'buy', t: now }, quote, now) !== null;
-  const reserve = roundCash(fillsNow || order.type === 'limit' ? est.total : est.total * (1 + RESERVE_BUFFER), quote.currency);
+  const fillsNow = triggerPrice({ ...order, side: 'buy', t: now }, quote, now) !== null;
+  // What's held above the estimate: nothing for a limit order (its limit is
+  // its most); RESERVE_BUFFER while it waits for its market; FRESH_BUFFER
+  // for one held a moment for a fresh price (the price may tick up).
+  const extra = order.type === 'limit' ? 0 : !fillsNow ? RESERVE_BUFFER : order.waitFresh ? FRESH_BUFFER : 0;
+  const reserve = roundCash(est.total * (1 + extra), quote.currency);
   return { est, reserve, buffer: Math.max(0, reserve - est.total), fillsNow, ref };
 }
 

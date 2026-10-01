@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, deposit, valuate,
+  newAccount, replay, available, placeOrder, requiredCash, processOrders, cancelOrder, exchange, quoteExchange, amountFor, deposit, valuate,
   borrow, repay, repayAll, liquidationPlan, applyCorporateActions, mergeAccounts, recordSnapshot, benchmarkValue, triggerPrice,
   isAccount, toggleWatch, watched
 } from '../public/lib/account.mjs';
@@ -63,6 +63,18 @@ test('an order held for a fresh price waits as a 委託單, then fills at the ne
   const fresh = processOrders(r.account, new Map([['2330.TW', { ...quote('2330.TW', 2480), got: T0 + 2_000 }]]), RATES, T0 + 2_000);
   assert.equal(fresh.filled.length, 1);
   assert.equal(fresh.filled[0].quote, 2480);
+});
+
+test('what the ticket says an order holds is exactly what placing it needs (held for a fresh price)', () => {
+  const q = { ...quote('2330.TW', 2475), got: T0 };
+  const need = requiredCash({ type: 'market', qty: 100, waitFresh: 1 }, q, T0).reserve;
+  // A small cushion over the estimate, not the 3% of an order waiting for its market.
+  const est = requiredCash({ type: 'market', qty: 100 }, q, T0).reserve;
+  assert.ok(need > est && need <= Math.ceil(est * 1.005) + 1);
+  const exact = newAccount(need, T0, 'acc');
+  assert.equal(placeOrder(exact, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100, fresh: true }, { quote: q, rates: RATES, now: T0, id: 'x1' }).error, undefined);
+  const less = newAccount(need - 1, T0, 'acc');
+  assert.equal(placeOrder(less, { symbol: '2330.TW', side: 'buy', type: 'market', qty: 100, fresh: true }, { quote: q, rates: RATES, now: T0, id: 'x2' }).error, 'funds');
 });
 
 test('the welcome offer: an account marked by the app pays no commission on its first trade, only then', async () => {

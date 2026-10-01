@@ -114,6 +114,14 @@ const nameRows = names => {
 nameRows(items.filter(i => i.kind === 'stock').flatMap(i => [plain(i.en), i.zh]));
 const out = {};
 const missing = [];
+// Compact, current marks for symbols where a default Wikidata match is
+// missing or too detailed for a small badge. 2912.TW is President Chain
+// Store, the listed operator of 7-Eleven in Taiwan.
+const LOGO_OVERRIDES = {
+  '2912.TW': '7-Eleven logo 2021.svg',
+  RBLX: 'Roblox Logo 2022.svg',
+  MCD: "McDonald's Golden Arches.svg"
+};
 for (const i of items) {
   let f = null;
   if (i.kind === 'crypto') f = coinLogo.get(i.en.replace(/\s*\(.*\)$/, ''));
@@ -122,6 +130,7 @@ for (const i of items) {
     f = hit ? issuerLogo.get(hit[1]) || listedLogo(hit[1]) : null;
   } else f = listedLogo(i.symbol);
   if (!f && (i.kind === 'stock' || !i.kind)) f = named.get(plain(i.en)) || named.get(i.zh);
+  f = LOGO_OVERRIDES[i.symbol] || f;
   // A photo (a sign on a building, say) isn't a logo.
   if (f && !/\.(svg|png)$/i.test(f)) f = null;
   if (f) out[i.symbol] = f;

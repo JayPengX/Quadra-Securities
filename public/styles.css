@@ -654,10 +654,10 @@ a.activity-row { color: inherit; text-decoration: none; }
 .fx-side-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 0.85rem; font-weight: 700; color: var(--text-secondary); }
 .fx-side-row { display: flex; align-items: center; gap: 10px; }
 .fx-cur { width: auto; max-width: 62%; min-width: 0; padding: 8px 26px 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-primary); font: 700 0.95rem var(--q-font); text-overflow: ellipsis; }
-.fx-input, .fx-result { min-width: 0; width: 100%; text-align: right; font-size: 1.6rem; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.fx-input { border: 0; background: none; color: var(--text-primary); padding: 4px 0; font-family: var(--q-font); font-size: max(16px, 1.6rem); }
+.fx-input, .fx-result { min-width: 0; width: 100%; text-align: right; font-size: clamp(16px, 5vw, 1.6rem); font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; }
+.fx-input { overflow-x: auto; text-overflow: clip; border: 0; background: none; color: var(--text-primary); padding: 4px 0; font-family: var(--q-font); }
 .fx-input:focus { outline: none; }
-.fx-result { color: var(--text-secondary); }
+.fx-result { overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
 .fx-side-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.82rem; }
 .fx-quick { display: flex; gap: 6px; }
 .fx-swap { justify-self: center; width: 40px; height: 40px; margin: -20px 0; z-index: 1; border-radius: 50%; border: 1px solid var(--border); background: var(--surface); color: var(--accent); font-size: 1.15rem; box-shadow: var(--shadow-sm); cursor: pointer; }
@@ -756,6 +756,7 @@ a.activity-row { color: inherit; text-decoration: none; }
 .sym-badge .sym-pair .sym-logo.tv:last-child { right: 0; bottom: 0; }
 .sym-badge.has-tv:has(.sym-pair) { border-radius: 0; overflow: visible; background: transparent; color: transparent; }
 .sym-badge .sym-logo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; padding: 5px; background: #fff; box-sizing: border-box; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08); }
+.sym-badge.logo-neutral { background: #fff; color: #334155; }
 
 /* ---- Activity (交易明細) ---- */
 .activity-row { align-items: flex-start; padding: 12px 10px; gap: 12px; }

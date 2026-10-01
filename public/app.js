@@ -868,21 +868,21 @@ document.addEventListener(
   },
   true
 );
-function symbolBadge(symbol, q) {
+function symbolBadge(symbol, q, { neutral = false } = {}) {
   const kind = q?.kind || catalogInfo(symbol)?.kind || 'stock';
   const zhShort = twSymbol(symbol) && catalogInfo(symbol)?.zh ? catalogInfo(symbol).zh.replace(kind === 'etf' ? /^(元大|富邦|國泰|群益|復華|統一|凱基|大華|中信|永豐|兆豐)/ : /[-*].*$/, '').slice(0, 2) : '';
   const text = BONDS[symbol] ? symbol.split('-')[1] : /^[A-Z]{6}=X$/.test(symbol) ? symbol.slice(0, 3) : zhShort || bareSymbol(symbol).replace(/-USD$/, '').replace(/^\^/, '').slice(0, 4);
   const img = (url, cls = 'sym-logo') => `<img class="${cls}" src="${h(url)}" data-symbol="${h(symbol)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
   // TradingView's round icon first (every company, coin, metal, index, a
   // pair's two flags, a bond's country), then the official logo, then FMP's.
-  const tv = !tvMiss.has(symbol) && tvLogos(symbol);
+  const tv = !neutral && !tvMiss.has(symbol) && tvLogos(symbol);
   if (tv) {
     const logo = tv.length > 1 ? `<span class="sym-pair">${img(tv[0], 'sym-logo tv')}${img(tv[1], 'sym-logo tv')}</span>` : img(tv[0], 'sym-logo tv');
     return `<span class="sym-badge k-${h(kind)} has-logo has-tv">${h(text)}${logo}</span>`;
   }
   const url = !BONDS[symbol] && !logoMiss.has(symbol) && (BRANDS[symbol] || kind === 'stock' || kind === 'etf') ? logoUrl(symbol) : null;
   const logo = url ? img(url) : '';
-  return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}${text === zhShort && zhShort ? ' zh' : ''}">${h(text)}${logo}</span>`;
+  return `<span class="sym-badge k-${h(kind)}${logo ? ' has-logo' : ''}${neutral ? ' logo-neutral' : ''}${text === zhShort && zhShort ? ' zh' : ''}">${h(text)}${logo}</span>`;
 }
 
 function quoteRow(symbol, { note = '' } = {}) {
@@ -980,7 +980,7 @@ function renderHomeRows() {
       </button>
       ${overdrawnBy(v) >= 1 ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span></div>`}`
     : '';
-  const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}">${symbolBadge(q.symbol, q)}<span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
+  const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}">${symbolBadge(q.symbol, q, { neutral: true })}<span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
   const up = movers(state.quotes, { up: true }).slice(0, 5);
   const down = movers(state.quotes, { up: false }).slice(0, 5);
   const moversHtml =
@@ -3088,7 +3088,7 @@ function statsHtml() {
     ? `<div class="win-ring" style="--p:${(winRate * 100).toFixed(1)}"><strong class="num">${h(pct(winRate, { digits: 0, sign: false }))}</strong><small>${h(t('winRate'))}</small></div>`
     : '';
   const tradeRow = (label, c) =>
-    c ? `<button class="stat-trade" type="button" data-action="open" data-symbol="${h(c.symbol)}"><span>${h(label)}</span>${symbolBadge(c.symbol)}<strong>${h(nameOf(c.symbol))}</strong><span class="num ${dirClass(c.realized)}">${h(money(c.realized, BASE, { sign: true }))} · ${h(pct(c.pct))}</span></button>` : '';
+    c ? `<button class="stat-trade" type="button" data-action="open" data-symbol="${h(c.symbol)}"><span>${h(label)}</span>${symbolBadge(c.symbol, undefined, { neutral: true })}<strong>${h(nameOf(c.symbol))}</strong><span class="num ${dirClass(c.realized)}">${h(money(c.realized, BASE, { sign: true }))} · ${h(pct(c.pct))}</span></button>` : '';
   return `
     <div class="card stats-hero">
       <span class="muted">${h(t('totalReturn'))}</span>
@@ -3820,7 +3820,6 @@ document.addEventListener('click', event => {
       state.openFolds.delete('closed:tool:plan');
       if (el.dataset.row) {
         renderPortfolio();
-        $('plan-row-amount')?.focus({ preventScroll: true });
       } else {
         redrawDetail();
         scrollToPlanForm(plan.symbol);

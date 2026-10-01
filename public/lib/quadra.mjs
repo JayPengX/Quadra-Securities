@@ -4,8 +4,8 @@
 //
 //   Quadra Securities   stock   the financial powerhouse: where money lives and grows
 //   Quadra Play         odds    a place to play: sports betting and the lottery
-//   Quadra Fixtures     match   the sports data centre, and the way into Play
 //   Quadra Rewards      vocab   the centre of Quadra: points, goals and every app's guide
+//   Quadra Fixtures     match   a related add-on: scores, schedules and stats
 //   Orbit Class         orbit   a related add-on: the class schedule
 //
 // One account works everywhere: the Quadra Pass, a 10-character code for
@@ -26,15 +26,15 @@ export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev/sports-proxy
 export const SITE = 'https://jaypengx.github.io';
 export const BRAND = { name: 'Quadra', pass: 'Quadra Pass' };
 
-// The apps. `related`: an add-on outside the money pool (Orbit Class).
+// The apps. `related`: an add-on outside the money pool (Fixtures, Orbit Class).
 export const APPS = {
   stock: { name: 'Quadra Securities', short: 'Securities', path: '/Quadra-Securities/', color: '#0d9488', role: { zh: '投資與理財', en: 'Invest and grow' } },
   odds: { name: 'Quadra Play', short: 'Play', path: '/Quadra-Play/', color: '#2563eb', role: { zh: '運彩與彩券', en: 'Sports bets and lottery' } },
-  match: { name: 'Quadra Fixtures', short: 'Fixtures', path: '/Quadra-Fixtures/', color: '#ea580c', role: { zh: '賽事資料中心', en: 'Every sport, every stat' } },
   vocab: { name: 'Quadra Rewards', short: 'Rewards', path: '/Quadra-Rewards/', color: '#7c3aed', role: { zh: '積分、目標與說明', en: 'Points, goals and help' } },
+  match: { name: 'Quadra Fixtures', short: 'Fixtures', path: '/Quadra-Fixtures/', color: '#ea580c', related: true, role: { zh: '賽程與比分', en: 'Scores and schedules' } },
   orbit: { name: 'Orbit Class', short: 'Orbit Class', tile: 'Orbit', path: '/Orbit-Class/', color: '#0ea5e9', related: true, role: { zh: '課表', en: 'Class schedule' } }
 };
-export const FAMILY = ['stock', 'odds', 'match', 'vocab'];
+export const FAMILY = ['stock', 'odds', 'vocab'];
 export const appName = app => APPS[app]?.name || app;
 
 // ---- The economy -------------------------------------------------------------------
@@ -1239,11 +1239,6 @@ export function describeEntry(e, lang = 'zh') {
 
 export const setting = (wallet, key, fallback = null) => wallet?.settings?.[key]?.value ?? fallback;
 export const settingPatch = (key, value) => ({ settings: { [key]: { value, t: Date.now() } } });
-export const activePins = wallet =>
-  Object.entries(wallet?.pins || {})
-    .filter(([, p]) => p.on)
-    .map(([id, p]) => ({ id, ...p }))
-    .sort((a, b) => String(a.start).localeCompare(String(b.start)));
 
 export function money(x, { sign = false, cents = false } = {}) {
   const v = Number(x) || 0;
@@ -1299,8 +1294,8 @@ export function todayActivity(wallet, now = Date.now()) {
 // 'sport:baseball', 'sym:2330.TW', 'sector:tech' …), decaying with a half
 // life, so the model follows what the person does now. Each app keeps its
 // own map (and syncs its strongest keys to the wallet); ranking reads all
-// the apps' maps together, so a team followed in Fixtures lifts its bets in
-// Play and a sector traded in Securities lifts its stocks' news.
+// the apps' maps together, so a sector traded in Securities lifts its
+// stocks' news, and a team bet on in Play its games there.
 //
 // Ranking: score = quality × (1 + affinity) + exploration, then a diversity
 // pass (maximal marginal relevance) so one team or sector doesn't fill the
@@ -1336,11 +1331,12 @@ export function affinityPatch(app, now = Date.now()) {
   return settingPatch(`aff:${app}`, Object.fromEntries(top));
 }
 // Everything known: this device's maps and every app's synced map (the
-// larger of the two per key), key -> weight.
-export function affinity(wallet, now = Date.now()) {
+// larger of the two per key), key -> weight. `apps`: only those apps' maps
+// (Fixtures, an add-on, reads its own).
+export function affinity(wallet, now = Date.now(), apps = Object.keys(APPS)) {
   const out = {};
   const add = (k, v) => (out[k] = Math.max(out[k] || 0, v));
-  for (const app of Object.keys(APPS)) {
+  for (const app of apps) {
     for (const [k, a] of Object.entries(affinityOf(app))) add(k, decay(a.v, a.t, now));
     for (const [k, v] of Object.entries(setting(wallet, `aff:${app}`, {}) || {})) add(k, Number(v) || 0);
   }

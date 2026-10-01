@@ -243,14 +243,6 @@ export function replay(account, now = Date.now()) {
         }
         break;
       }
-      // An old cash loan tied to the purchase it paid for (linkOldLoans).
-      case 'link':
-        if (s.positions[e.symbol]) {
-          const p = s.positions[e.symbol];
-          p.financed = (p.financed || 0) + e.amount;
-          p.marginQty = p.qty;
-        }
-        break;
       case 'repay': {
         const loan = s.loans[e.currency];
         if (!loan) break;
@@ -912,42 +904,6 @@ export function matureDeposits(account, now = Date.now()) {
     next = { ...next, events: [...next.events, ...events] };
   }
   return next;
-}
-
-// Before 2026-10-01 10:49 Taipei a 融資 buy borrowed the shortfall as a
-// plain cash loan ('borrow:<id>', no symbol) and placed the order: the loan
-// paid for the shares but wasn't tied to them, so selling didn't repay it
-// first and a margin call didn't know them as bought on margin. Each such
-// loan is tied, once, to the buy placed within LINK_WINDOW after it (a
-// 'link' event, dated when it's made: what happened before stays as it
-// was): newest loans first, no more than the loan still owed, the buy's
-// cost or the shares' cost now. Loans already paid off are left alone.
-const LINK_BEFORE = Date.UTC(2026, 9, 1, 2, 49);
-const LINK_WINDOW = 5 * 60_000;
-export function linkOldLoans(account, now = Date.now()) {
-  const done = new Set(account.events.filter(e => e.type === 'link').map(e => e.borrow));
-  // Loans from before one was paid off in full are gone with it.
-  const cleared = cur => Math.max(0, ...account.events.filter(e => e.type === 'repay' && !e.symbol && e.currency === cur && !(replay(account, e.t).loans[cur]?.balance >= 1)).map(e => e.t));
-  const old = account.events.filter(e => e.type === 'borrow' && !e.symbol && e.id.startsWith('borrow:') && e.t < LINK_BEFORE && !done.has(e.id) && e.t > cleared(e.currency)).sort((a, b) => b.t - a.t);
-  if (!old.length) return account;
-  const s = replay(account, now);
-  const owed = Object.fromEntries(Object.entries(s.loans).map(([cur, l]) => [cur, Math.max(0, l.balance)]));
-  for (const p of Object.values(s.positions)) owed[p.currency] = Math.max(0, (owed[p.currency] || 0) - (p.financed || 0));
-  const room = Object.fromEntries(Object.values(s.positions).filter(p => p.qty > 0).map(p => [p.symbol, Math.max(0, p.cost - (p.financed || 0))]));
-  const used = {};
-  const links = [];
-  for (const b of old) {
-    const order = account.orders.filter(o => o.side === 'buy' && o.currency === b.currency && o.status === 'filled' && o.t >= b.t && o.t - b.t <= LINK_WINDOW).sort((x, y) => x.t - y.t)[0];
-    const fill = order && account.events.find(e => e.id === order.fillId);
-    if (!fill) continue;
-    const amount = roundCash(Math.min(b.amount, fill.total - (used[order.id] || 0), owed[b.currency] || 0, room[order.symbol] || 0), b.currency);
-    if (!(amount > 0)) continue;
-    used[order.id] = (used[order.id] || 0) + amount;
-    owed[b.currency] -= amount;
-    room[order.symbol] -= amount;
-    links.push({ id: `link:${b.id.slice(7)}`, type: 'link', t: now, borrow: b.id, symbol: order.symbol, currency: b.currency, amount });
-  }
-  return links.length ? { ...account, events: [...account.events, ...links] } : account;
 }
 
 // Shares of a holding that can be lent now: whole lots, settled, not lent

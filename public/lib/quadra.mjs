@@ -302,7 +302,7 @@ if (typeof document !== 'undefined') {
   document.addEventListener('pointerdown', () => root.removeAttribute('data-q-keys'), true);
 }
 
-const KEY = { refresh: 'quadra.refresh', account: 'quadra.account', wallet: 'quadra.wallet', aff: 'quadra.aff', dismiss: 'quadra.dismiss', notify: 'quadra.notify', oldPass: 'quadra.pass' };
+const KEY = { refresh: 'quadra.refresh', account: 'quadra.account', wallet: 'quadra.wallet', aff: 'quadra.aff', dismiss: 'quadra.dismiss' };
 function readStore(key) {
   try {
     return localStorage.getItem(key);
@@ -398,8 +398,8 @@ export function randomId() {
 //     the last copy of any age for painting at once while a fresh one loads;
 //   - requests made within a few milliseconds of each other go to the proxy
 //     as one batch (`?batch=1&u=…`, up to 12): the Worker plan bills per
-//     request, and a first paint asks for a dozen lists at once. A proxy
-//     that doesn't know batches yet is asked one by one.
+//     request, and a first paint asks for a dozen lists at once. A batch
+//     that fails is asked again one by one.
 //
 // The session token comes from the app's quadraSession (the last one made).
 let dataSession = null;
@@ -439,6 +439,23 @@ export function clearData() {
   memory.clear();
   if (hasCaches()) caches.delete(DATA_CACHE).catch(() => {});
 }
+// Signed out: nothing of the account stays on this device. The Quadra apps
+// share one origin, so every app's keys in this storage go (the account,
+// the wallet, each app's copy and its own settings; a home-screen app on a
+// phone has storage of its own), this tab's too, and the kept data. Only
+// how the device itself is set up stays: its language and its screen's
+// safe area (the app files stay cached, so the sign-in screen opens offline).
+const DEVICE_KEYS = new Set(['quadra.lang', 'quadra.safeBottom']);
+export function wipeDevice() {
+  for (const store of [globalThis.localStorage, globalThis.sessionStorage]) {
+    try {
+      const keys = [];
+      for (let i = 0; i < store.length; i++) keys.push(store.key(i));
+      for (const k of keys) if (!(store === globalThis.localStorage && DEVICE_KEYS.has(k))) store.removeItem(k);
+    } catch {}
+  }
+  clearData();
+}
 // The last copy kept on this device, of any age: { at, data } or null.
 export const peekJson = (url, { trim = '' } = {}) => persisted(dataKey(url, trim));
 
@@ -465,7 +482,6 @@ async function fetchOne(url, trim, timeout) {
 const BATCH_MAX = 12;
 let queue = [];
 let flushTimer = 0;
-let batchOff = false;
 function enqueue(url, trim, timeout) {
   return new Promise((resolve, reject) => {
     queue.push({ url, trim, timeout, resolve, reject });
@@ -480,16 +496,11 @@ async function flush() {
   if (queue.length) flushTimer = setTimeout(flush, 0);
   if (!items.length) return;
   const one = item => fetchOne(item.url, item.trim, item.timeout).then(item.resolve, item.reject);
-  if (items.length === 1 || batchOff) return void items.forEach(one);
+  if (items.length === 1) return void items.forEach(one);
   try {
     const token = await dataToken();
     const u = items.map(i => `&u=${encodeURIComponent(i.trim ? `${i.trim}!${i.url}` : i.url)}`).join('');
     const res = await fetch(`${PROXY_URL}?batch=1${u}${token ? `&qt=${encodeURIComponent(token)}` : ''}`, { signal: AbortSignal.timeout(Math.max(...items.map(i => i.timeout))) });
-    if (res.status === 400) {
-      // A proxy from before batches: one by one from now on.
-      batchOff = true;
-      return void items.forEach(one);
-    }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const { r } = await res.json();
     items.forEach((item, i) => {
@@ -549,7 +560,6 @@ export function proxyJson(url, { ttl = 60_000, trim = '', persist: keep = true, 
 //                               resolves to the first reply ({ payload, inbox,
 //                               wallet } or { offline })
 // q.pass                        the account's id on this device ('' signed out)
-// q.oldPass                     a pass older versions kept here (for their keys)
 // q.read({ data, inbox })       { wallet, pool, payload, inbox } (app data when data)
 // q.write({ payload, wallet })  only while live
 // q.proxy(url, extra)           the data proxy's address for `url`, signed in
@@ -599,14 +609,10 @@ function makeSession(app, { lang, heartbeat }) {
   let wallet = cachedWallet();
   let timer = 0;
   let started = false;
-  const oldPass = PASS_PATTERN.test(readStore(KEY.oldPass) || '') ? readStore(KEY.oldPass) : '';
-  // Signed in by an older version: the account's id from its refresh token.
-  if (readStore(KEY.refresh) && !readStore(KEY.account)) writeStore(KEY.account, accountOf(readStore(KEY.refresh)));
 
   const s = {
     app,
     lang,
-    oldPass,
     get pass() {
       return storedAccount();
     },
@@ -652,7 +658,6 @@ function makeSession(app, { lang, heartbeat }) {
     if (data.refresh) {
       writeStore(KEY.refresh, data.refresh);
       writeStore(KEY.account, accountOf(data.refresh));
-      writeStore(KEY.oldPass, null);
     }
     if (data.token) {
       token = data.token;
@@ -696,8 +701,10 @@ function makeSession(app, { lang, heartbeat }) {
   }
   function signedOut() {
     const had = Boolean(storedAccount());
-    for (const k of [KEY.refresh, KEY.account, KEY.wallet, KEY.oldPass, payloadKey(app)]) writeStore(k, null);
-    clearData();
+    // An account was signed in here: everything of it goes. (Never signed
+    // in, a token asked for by a data fetch: nothing to wipe.)
+    if (had) wipeDevice();
+    else for (const k of [KEY.refresh, KEY.account, KEY.wallet, payloadKey(app)]) writeStore(k, null);
     token = '';
     wallet = null;
     active = false;
@@ -784,9 +791,6 @@ function makeSession(app, { lang, heartbeat }) {
     try {
       first = await takeHandoff(app);
       if (first) absorb({ ...first, active: true });
-      // A pass an older version kept on this device: traded for a device
-      // sign-in, then forgotten.
-      else if (oldPass && !readStore(KEY.refresh)) first = await login(oldPass).catch(() => null);
       if (!first && storedAccount()) {
         first = await refresh({ claim: true, data });
         if (first?.signedOut) first = null;
@@ -795,7 +799,6 @@ function makeSession(app, { lang, heartbeat }) {
       // Offline: the cached wallet stands in until the next try.
       first = { offline: true, error };
     }
-    writeStore(KEY.oldPass, null);
     if (!first) first = await signInGate(s);
     s.first = first;
     // The loading screen's line (boot.js): signed in, the app's data next.
@@ -1722,7 +1725,7 @@ export function accountSheet(s, { extra = null } = {}) {
       act(
         T('在這台裝置登出', 'Sign out on this device'),
         async () => {
-          if (!(await ask({ lang: s.lang, icon: '👋', title: T('在這台裝置登出？', 'Sign out on this device?'), body: T('資料都保留在 Quadra Pass。', 'Everything stays on your Quadra Pass.'), ok: T('登出', 'Sign out') }))) return;
+          if (!(await ask({ lang: s.lang, icon: '👋', title: T('在這台裝置登出？', 'Sign out on this device?'), body: T('這台裝置上的資料會全部清除，都保留在 Quadra Pass。', 'Everything on this device is wiped; it all stays on your Quadra Pass.'), ok: T('登出', 'Sign out') }))) return;
           s.signOut();
           location.reload();
         },
@@ -1896,19 +1899,13 @@ export const NOTICE_KINDS = {
 // its app is the live one. `on` is "system notices wanted"; each device (and,
 // on an iPhone, each app) still has to be allowed once by the phone.
 const PREFS_KEY = 'quadra.notify.prefs';
-const KINDS_KEY = 'quadra.notify.kinds';
 const cleanPrefs = v => ({
   ...(typeof v?.on === 'boolean' ? { on: v.on } : {}),
   off: [...new Set((Array.isArray(v?.off) ? v.off : []).filter(k => typeof k === 'string' && /^[a-z]+:[a-z]+$/.test(k)))].sort()
 });
 export function notifyPrefs() {
   const saved = readJson(PREFS_KEY, null);
-  if (saved && typeof saved === 'object') return { ...cleanPrefs(saved), t: Number(saved.t) || 0 };
-  // Before the pass kept them: this device's own switches (t 0: the pass's
-  // copy wins over them; an account without one takes them).
-  const old = readJson(KINDS_KEY, {}) || {};
-  const flag = readStore(KEY.notify);
-  return { ...(flag === '1' ? { on: true } : flag === '0' ? { on: false } : {}), off: Object.keys(old).filter(k => old[k] === false).sort(), t: 0 };
+  return saved && typeof saved === 'object' ? { ...cleanPrefs(saved), t: Number(saved.t) || 0 } : { off: [], t: 0 };
 }
 const samePrefs = (a, b) => a.on === b.on && a.off.join() === b.off.join();
 function savePrefs(next, s) {

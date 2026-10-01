@@ -14,9 +14,8 @@
 //   page mixed an old version's files with a new one's), mends itself once
 //   in ten minutes: its cached files dropped, the latest deploy loaded from
 //   the network. Otherwise (or still failing, or 15 s) a way out: reload,
-//   or open anyway. The app says it started with window.__fxStarted (or the
-//   older __oddsStarted / __stockStarted) and hides #loading itself (the kit
-//   does).
+//   or open anyway. The app says it started with window.__fxStarted and
+//   hides #loading itself (the kit does).
 (function () {
   // A phone or a tablet (an iPad says Macintosh, with touch): the phone's
   // frame, set before the first paint (quadra.css .q-touch).
@@ -115,7 +114,7 @@
   };
 
   var started = function () {
-    return Boolean(window.__fxStarted || window.__oddsStarted || window.__stockStarted || window.__quadraStarted);
+    return Boolean(window.__fxStarted);
   };
   var cachePrefix = box.getAttribute('data-cache') || '';
   // The app's cached files dropped, then `then`.

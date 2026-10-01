@@ -1,7 +1,7 @@
 // Stock Study: rendering and wiring. The rules live in lib/ (account.mjs for
 // the ledger, markets.mjs for fees and hours, quotes.mjs for prices).
 import {
-  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, callState, callNeed, payDown, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, linkOldLoans, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
+  newAccount, replay, available, placeOrder, processOrders, cancelOrder, exchange, quoteExchange, amountFor, valuate, borrow, repay, repayAll, liquidationPlan, callPlan, callState, callNeed, payDown, penaltyEvent, openDeposit, breakDeposit, matureDeposits, lendShares, recallShares, matureLending, recallAll, lendableQty, defaulted, applyCorporateActions, applyBondCashflows, backfillPrice, fillFromHistory, netWorthSeries, mergeAccounts, recordSnapshot, benchmarkValue, isAccount, toggleWatch, watched, estimate, firstTrade, withWelcome, setPlan, activePlans, dedupePlans, planRuns, nextPlanRun, runPlan, planOrderId, setAlert, activeAlerts, alertsFor, checkAlerts, alertHitInBars, markAlertHit, marginHistory, pendingDividends, applyIncome, startIncome, applyCashInterest, unsettled, settlesBy, withdrawable, nextPayday, START_AMOUNT, PLAN_MIN, taipeiDay, applyPool, ownCash, mergeDistinct, requiredCash, incomeSummary, usePlus, plusAt, loanRateAt, fxSpread, coverPlan, expireOrders, GTC_DAYS
 } from './lib/account.mjs';
 import { TD_TERMS, TD_MIN, TD_EARLY, tdRate, tdInterest, LEND_CUT, LEND_LOT, LEND_RECALL, LEND_TERM_DAYS, lendFee, lendable } from './lib/savings.mjs';
 import {
@@ -31,7 +31,6 @@ const LIST_REFRESH_MS = 90_000;
 const ACTIONS_EVERY_MS = 12 * 3_600_000;
 const STORE = {
   account: 'stockStudy.account',
-  sync: 'stockStudy.syncCode',
   settings: 'stockStudy.settings',
   actions: 'stockStudy.actionsChecked',
   quotes: 'stockStudy.quotes',
@@ -108,27 +107,11 @@ function applySettings() {
 // copy under the pass so the app opens at once, and offline.
 const accountKey = () => `${STORE.account}:${q.pass}`;
 async function loadAccount() {
-  // (Also the copy older versions kept under the pass itself.)
-  for (const key of [accountKey(), q.oldPass ? `${STORE.account}:${q.oldPass}` : ''].filter(Boolean)) {
-    try {
-      const saved = await unpack(localStorage.getItem(key));
-      if (isAccount(saved)) return saved;
-    } catch {}
-  }
-  return null;
-}
-// The copy Quadra Securities kept on the device before accounts moved onto
-// the pass (left in place as a backup): folded in when it is the same
-// account, or when the pass's account has nothing in it yet.
-async function oldDeviceAccount(account) {
   try {
-    const old = await unpack(localStorage.getItem(STORE.account));
-    if (!isAccount(old) || !(old.events || []).length) return account;
-    if (!account) return old;
-    if (old.id === account.id) return mergeAccounts(account, old);
-    if (!(account.events || []).length) return mergeDistinct(account, old);
+    const saved = await unpack(localStorage.getItem(accountKey()));
+    if (isAccount(saved)) return saved;
   } catch {}
-  return account;
+  return null;
 }
 
 let saveTimer;
@@ -353,7 +336,7 @@ function afterPrices() {
   const now = Date.now();
   // Deposits that matured and lending contracts that ran their term.
   // (And old 融資 loans tied to what they bought, once.)
-  let account = linkOldLoans(matureLending(matureDeposits(state.account, now), now), now);
+  let account = matureLending(matureDeposits(state.account, now), now);
   for (const e of account.events.filter(e => e.type === 'tdend' && !state.account.events.some(x => x.id === e.id))) accountNotice('income', t('tdMatured', { v: money(e.amount + e.net, BASE) }), { tag: e.id, hash: 'fx' });
   // Day orders past their session end (and month-old GTC ones) lapse first.
   const ex = expireOrders(account, now);
@@ -4095,7 +4078,7 @@ window.addEventListener('resize', () => {
 
 // ---- Start ----------------------------------------------------------------------------------
 
-window.__stockStarted = true;
+window.__fxStarted = true;
 // Phones and tablets: from the home screen only. Always the newest deploy.
 const gated = installGate('stock', locale);
 watchUpdates({ current: document.querySelector('meta[name="build-version"]')?.content, key: 'stockStudy', cachePrefix: 'stock-study-' });
@@ -4136,11 +4119,6 @@ async function boot() {
   state.account = withWelcome(await loadAccount());
   // The pass's own copy, merged in (and the account made, the first time).
   if (first && !first.offline) await (syncChain = syncChain.then(() => mergeRemote(first)).catch(error => (state.sync.error = error.message)));
-  const recovered = await oldDeviceAccount(state.account);
-  if (recovered && recovered !== state.account) {
-    commit(recovered, { sync: false });
-    syncNow();
-  }
   if (!state.account) ensureAccount(q.wallet);
   state.accountReady = true;
   if (state.fromCache) $('loading').hidden = true;

@@ -2283,7 +2283,7 @@ export function phoneOnlyGate(app, { lang = detectLang(), qr = '' } = {}) {
 // unless the person is in the middle of something: busy() (a round, an
 // order), typing in a field, or a sheet open. Then a bar offers it and it
 // happens the moment they're done (checked every 2 s) or the page is hidden.
-export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 60_000 } = {}) {
+export function watchUpdates({ current, key, cachePrefix, busy = () => false, every = 30_000 } = {}) {
   if (!current || current === 'dev') return;
   let checking = false;
   let pending = null;
@@ -2296,9 +2296,14 @@ export function watchUpdates({ current, key, cachePrefix, busy = () => false, ev
     return Boolean(document.querySelector('dialog[open]:not(.q-passive)'));
   };
   async function apply(latest) {
+    // A reload that came back on the old page (GitHub's CDN still had it a
+    // moment after the deploy) tries again, 20 s apart, up to 4 times in
+    // the session, instead of waiting for the app to be closed and opened.
     const flag = `${key || 'quadra'}.reloadedTo`;
-    if (sessionStorage.getItem(flag) === latest) return;
-    sessionStorage.setItem(flag, latest);
+    const [was, tries = 0, at = 0] = String(sessionStorage.getItem(flag) || '').split('|');
+    const n = was === latest ? Number(tries) || 0 : 0;
+    if (n >= 4 || (n && Date.now() - Number(at) < 20_000)) return;
+    sessionStorage.setItem(flag, `${latest}|${n + 1}|${Date.now()}`);
     rememberPlace();
     if (globalThis.caches && cachePrefix) for (const name of await caches.keys()) if (name.startsWith(cachePrefix)) await caches.delete(name);
     const reg = await navigator.serviceWorker?.getRegistration?.(location.pathname);

@@ -19,7 +19,7 @@ import { sparkline, lineChart, attachHover, candleChart, attachCandleHover, donu
 import { timeMachine, movingAverage } from './lib/timemachine.mjs';
 import { detectLocale, makeT } from './lib/i18n.mjs';
 import { pack, unpack } from './lib/codec.mjs';
-import { forYou, movers, wantedSymbols } from './lib/foryou.mjs';
+import { forYou, movers, wantedSymbols, MOVER_GROUPS, moverGroupNow } from './lib/foryou.mjs';
 import {
   APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, recordAffinity, affinity, notify, notifyOn, kindOn, schedulePush, ask, translate, paydayFor, PLUS, plusMonths, plusCard, openPlus, affinityPatch
 } from './lib/quadra.mjs';
@@ -944,7 +944,7 @@ function valuation() {
 // row that scrolls sideways (the full lists stay below, by category).
 const homeSymbols = () => {
   const out = new Set(forYouSymbols());
-  for (const [id, n] of [['tw', 10], ['us', 10], ['twetf', 6], ['usetf', 6], ['crypto', 8]]) for (const [sym] of (CATEGORIES.find(c => c.id === id)?.items || []).slice(0, n)) out.add(sym);
+  for (const [id, n] of [['tw', 24], ['us', 24], ['twetf', 8], ['usetf', 8], ['crypto', 10], ['jp', 8], ['hk', 8], ['kr', 6], ['eu', 8]]) for (const [sym] of (CATEGORIES.find(c => c.id === id)?.items || []).slice(0, n)) out.add(sym);
   return out;
 };
 const forYouSymbols = () =>
@@ -957,7 +957,7 @@ function affinityMap() {
 function recCard(symbol, why) {
   const q = state.quotes.get(symbol);
   const info = catalogInfo(symbol);
-  const whyText = why ? t(why.key, { what: why.what ? kindOrCat(why.what) : '' }) : '';
+  const whyText = why ? t(why.key, { what: why.what ? (why.key === 'whyPeer' ? nameOf(why.what, state.quotes.get(why.what)) : kindOrCat(why.what)) : '' }) : '';
   return `<button class="q-rec" type="button" data-action="open" data-symbol="${h(symbol)}">
     ${whyText ? `<span class="q-rec-why">${h(whyText)}</span>` : ''}
     <p class="q-rec-title">${h(nameOf(symbol, q))}</p>
@@ -1006,11 +1006,15 @@ function renderHomeRows() {
       ${overdrawnBy(v) >= 1 && !coverPending(v) ? `<button class="od-strip" type="button" data-action="goto" data-tab="portfolio">${h(t('odStrip', { v: money(overdrawnBy(v), BASE) }))} ›</button>` : `<div class="power-strip"><span>${h(t('buyingPower'))} <strong class="num">${h(money(buyingPower(v), BASE))}</strong></span></div>`}`
     : '';
   const moverRow = q => `<button class="mover" type="button" data-action="open" data-symbol="${h(q.symbol)}">${symbolBadge(q.symbol, q)}<span class="mover-name">${h(nameOf(q.symbol, q))}</span><span class="mover-price num">${fmtPrice(q.price, q.currency)}</span>${pctPill(q)}</button>`;
-  const up = movers(state.quotes, { up: true }).slice(0, 5);
-  const down = movers(state.quotes, { up: false }).slice(0, 5);
+  // 今日漲跌 a market at a time: the one trading now unless another was picked.
+  const groups = MOVER_GROUPS.filter(g => movers(state.quotes, { up: true, n: 99, group: g }).length + movers(state.quotes, { up: false, n: 99, group: g }).length >= 3);
+  const group = groups.includes(state.moverGroup) ? state.moverGroup : groups.includes(moverGroupNow()) ? moverGroupNow() : groups[0];
+  const up = movers(state.quotes, { up: true, group }).slice(0, 5);
+  const down = movers(state.quotes, { up: false, group }).slice(0, 5);
   const moversHtml =
     up.length || down.length
       ? `<section class="q-section home-row"><div class="q-section-head"><h2>${h(t('moversTitle'))}</h2></div>
+          ${groups.length > 1 ? `<div class="segmented small mover-groups" role="group">${groups.map(g => `<button type="button" data-action="mover-group" data-v="${g}" aria-pressed="${g === group}">${h(t(`moverGroup_${g}`))}</button>`).join('')}</div>` : ''}
           <div class="movers">
             <div class="movers-col"><p class="movers-head">${h(t('moversUp'))}</p>${up.map(moverRow).join('') || `<p class="muted">—</p>`}</div>
             <div class="movers-col"><p class="movers-head">${h(t('moversDown'))}</p>${down.map(moverRow).join('') || `<p class="muted">—</p>`}</div>
@@ -3568,6 +3572,10 @@ document.addEventListener('click', event => {
   const a = el.dataset.action;
   const d = state.detail;
   switch (a) {
+    case 'mover-group':
+      state.moverGroup = el.dataset.v;
+      renderHomeRows();
+      break;
     case 'cat':
       state.category = el.dataset.id;
       state.query = '';

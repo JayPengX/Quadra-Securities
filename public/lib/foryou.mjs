@@ -53,6 +53,13 @@ export function forYou({ quotes, held = [], watched = [], wallet = null, aff, n 
   const heldKinds = new Set(held.map(s => quotes.get(s)?.kind || catalogInfo(s)?.kind).filter(Boolean));
   const heldCats = new Set(held.map(s => catalogInfo(s)?.category).filter(Boolean));
   const holdsIncome = held.some(s => INCOME.has(s));
+  // A holding's peers: the same list (the biggest holding's name, for the reason).
+  const peerOf = new Map();
+  for (const s of held) {
+    const cat = catalogInfo(s)?.category;
+    if (cat && !peerOf.has(cat)) peerOf.set(cat, s);
+  }
+  const heldMarkets = new Set(held.map(s => quotes.get(s)?.market).filter(Boolean));
   const items = [];
   for (const symbol of candidates()) {
     if (own.has(symbol)) continue;
@@ -77,20 +84,44 @@ export function forYou({ quotes, held = [], watched = [], wallet = null, aff, n 
       reason ||= { key: 'whyMover' };
     }
     if (POPULAR.includes(symbol)) quality += 0.12 * (1 - POPULAR.indexOf(symbol) / POPULAR.length);
-    if (info?.category && heldCats.has(info.category)) quality += 0.08;
+    if (info?.category && heldCats.has(info.category)) {
+      quality += 0.12;
+      reason ||= { key: 'whyPeer', what: peerOf.get(info.category) };
+    }
+    // A pullback in a well-known name: down 3% or more today.
+    if (POPULAR.includes(symbol) && (q.pct || 0) <= -0.03) {
+      quality += 0.1;
+      reason = { key: 'whyDip' };
+    }
+    // A market the person holds nothing in yet, once they hold something.
+    if (held.length && q.market && !heldMarkets.has(q.market) && ['US', 'TW'].includes(q.market)) quality += 0.08;
     items.push({
       id: `stock:${symbol}`,
       symbol,
       keys: [`sym:${symbol}`, info?.category ? `cat:${info.category}` : null, `kind:${kind}`, q.market ? `mkt:${q.market}` : null].filter(Boolean),
       quality: Math.min(1, quality),
-      group: info?.category || kind,
+      group: `${q.market || ''}:${info?.category || kind}`,
       reason
     });
   }
-  return rank(items, { wallet, n, now, ...(aff ? { aff } : {}) }).map(item => ({ symbol: item.symbol, why: whyOf(item) }));
+  // Never one market only: at most 60% from any one.
+  const ranked = rank(items, { wallet, n: n * 3, now, diversity: 0.45, ...(aff ? { aff } : {}) });
+  const cap = Math.max(2, Math.ceil(n * 0.6));
+  const per = new Map();
+  const out = [];
+  for (const item of ranked) {
+    const m = quotes.get(item.symbol)?.market || '';
+    if ((per.get(m) || 0) >= cap) continue;
+    per.set(m, (per.get(m) || 0) + 1);
+    out.push(item);
+    if (out.length >= n) break;
+  }
+  return out.map(item => ({ symbol: item.symbol, why: whyOf(item) }));
 }
 
 function whyOf(item) {
+  // What the portfolio itself says comes first (a peer, a gap, income, a dip).
+  if (['whyPeer', 'whyDiversify', 'whyIncome', 'whyDip'].includes(item.reason?.key)) return item.reason;
   const k = item.why || '';
   if (k.startsWith('cat:')) return { key: 'whySector', what: k.slice(4) };
   if (k.startsWith('mkt:')) return { key: 'whyMarket' };
@@ -99,10 +130,24 @@ function whyOf(item) {
   return item.reason || (POPULAR.includes(item.symbol) ? { key: 'whyPopular' } : { key: 'whyNew' });
 }
 
-// Today's biggest movers among the quotes on hand (tradable ones only).
-export function movers(quotes, { up = true, n = 6 } = {}) {
+// 今日漲跌's markets: Taiwan, the US, crypto, and the rest of the world.
+export const MOVER_GROUPS = ['tw', 'us', 'crypto', 'world'];
+export const moverGroupOf = q => (q.market === 'TW' ? 'tw' : q.market === 'US' ? 'us' : q.market === 'CRYPTO' || q.kind === 'crypto' ? 'crypto' : ['FX', 'BOND', 'METAL'].includes(q.market) ? null : 'world');
+// The market worth showing first: the one trading now (Taiwan by day in
+// Taipei, the US by night), else the last one that did.
+export function moverGroupNow(now = Date.now()) {
+  const tpe = new Date(now + 8 * 3_600_000);
+  const h = tpe.getUTCHours() + tpe.getUTCMinutes() / 60;
+  const day = tpe.getUTCDay();
+  if (day === 0 || day === 6) return 'us';
+  return h >= 7 && h < 20 ? 'tw' : 'us';
+}
+
+// Today's biggest movers among the quotes on hand (tradable ones only), of
+// one market group (or all).
+export function movers(quotes, { up = true, n = 6, group = null } = {}) {
   const list = candidates()
     .map(s => quotes.get(s))
-    .filter(q => q && Number.isFinite(q.pct) && q.kind !== 'fx');
+    .filter(q => q && Number.isFinite(q.pct) && q.kind !== 'fx' && (!group || moverGroupOf(q) === group));
   return list.sort((a, b) => (up ? b.pct - a.pct : a.pct - b.pct)).slice(0, n).filter(q => (up ? q.pct > 0 : q.pct < 0));
 }

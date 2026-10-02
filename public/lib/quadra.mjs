@@ -7,6 +7,7 @@
 //   Quadra Fixtures     match   a related add-on: scores, schedules and stats
 //   Quadra Hub          vocab   a related add-on: vocabulary, the pass, and how the money works
 //   Orbit Class         orbit   a related add-on: the class schedule
+//   Orbit Weather       weather a related add-on: one forecast, pinned places
 //
 // One account works everywhere: the Quadra Pass, a 10-character code for
 // Shared-Proxy's /eco. It is required: every app opens on a sign-in screen
@@ -26,13 +27,14 @@ export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev/sports-proxy
 export const SITE = 'https://jaypengx.github.io';
 export const BRAND = { name: 'Quadra', pass: 'Quadra Pass' };
 
-// `related`: an add-on outside the money pool (Fixtures, Hub, Orbit Class).
+// `related`: an add-on outside the money pool (Fixtures, Hub, Orbit Class, Orbit Weather).
 export const APPS = {
   stock: { name: 'Quadra Securities', short: 'Securities', path: '/Quadra-Securities/', color: '#0d9488', role: { zh: '投資與理財', en: 'Invest and grow' } },
   odds: { name: 'Quadra Play', short: 'Play', path: '/Quadra-Play/', color: '#2563eb', role: { zh: '運彩與彩券', en: 'Sports bets and lottery' } },
   vocab: { name: 'Quadra Hub', short: 'Hub', path: '/Quadra-Hub/', color: '#7c3aed', related: true, role: { zh: '單字、帳戶與錢的真相', en: 'Words, your pass and the truth about money' } },
   match: { name: 'Quadra Fixtures', short: 'Fixtures', path: '/Quadra-Fixtures/', color: '#ea580c', related: true, role: { zh: '賽程與比分', en: 'Scores and schedules' } },
-  orbit: { name: 'Orbit Class', short: 'Orbit Class', tile: 'Orbit', path: '/Orbit-Class/', color: '#0ea5e9', related: true, role: { zh: '課表', en: 'Class schedule' } }
+  orbit: { name: 'Orbit Class', short: 'Orbit Class', tile: 'Orbit', path: '/Orbit-Class/', color: '#0ea5e9', related: true, role: { zh: '課表', en: 'Class schedule' } },
+  weather: { name: 'Orbit Weather', short: 'Orbit Weather', tile: 'Weather', path: '/Orbit-Weather/', color: '#6366f1', related: true, role: { zh: '天氣', en: 'Weather' } }
 };
 export const appName = app => APPS[app]?.name || app;
 
@@ -1945,7 +1947,11 @@ export const NOTICE_KINDS = {
     ['margin', '維持率與斷頭', 'Margin call', '維持率偏低，或融資、放空被強制處理時。', 'When margin runs low, or a loan or short is force-closed.'],
     ['income', '股利與利息', 'Dividends and interest', '除息、股利入帳、債券配息和活存利息入帳時。', 'When a holding goes ex-dividend, and when dividends, coupons or interest arrive.']
   ],
-  orbit: [['class', '上課提醒', 'Class reminder', '每堂課開始前 5 分鐘。', 'Five minutes before each class.']]
+  orbit: [['class', '上課提醒', 'Class reminder', '每堂課開始前 5 分鐘。', 'Five minutes before each class.']],
+  weather: [
+    ['brief', '早晨天氣', 'Morning weather', '每天早上一句話：降雨、溫度、紫外線、空氣。', 'Each morning in one line: rain, temperature, UV, air.'],
+    ['rain', '降雨提醒', 'Rain alert', '白天 2 小時內可能下雨時，一天最多一次。', 'When rain is likely within 2 hours, once a day at most.']
+  ]
 };
 
 // The switches belong to the pass, not the device: the wallet setting

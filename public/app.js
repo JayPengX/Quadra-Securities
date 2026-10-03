@@ -22,7 +22,7 @@ import { pack, unpack } from './lib/codec.mjs';
 import { forYou, movers, wantedSymbols, MOVER_GROUPS, moverGroupNow } from './lib/foryou.mjs';
 import {
   APPS, appUrl, describeEntry, installGate, watchUpdates, quadraSession, tabBar, topActions, recordAffinity, affinity, notify, notifyOn, kindOn, schedulePush, ask, translate, paydayFor, PLUS, plusMonths, plusCard, openPlus, affinityPatch
-} from './lib/quadra.mjs';
+} from '#kit/quadra.mjs';
 
 const $ = id => document.getElementById(id);
 const TABS = ['markets', 'portfolio', 'fx', 'history'];

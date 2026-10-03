@@ -8,7 +8,7 @@
 // network first, the cache only when offline.
 // One copy per file is kept: a new version replaces the old one.
 // Pictures from other sites: the shared kit's (sw-images.js).
-importScripts('./sw-images.js');
+importScripts('../Shared-Proxy/kit/sw-images.js');
 
 const CACHE = 'stock-study-v1';
 

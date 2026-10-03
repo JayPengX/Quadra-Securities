@@ -12,7 +12,7 @@
 //   - popularity: a small prior for the well-known names.
 // Held and watched symbols are left out (they're on the portfolio already).
 import { CATEGORIES, catalogInfo } from './catalog.mjs';
-import { rank } from './quadra.mjs';
+import { rank } from '#kit/quadra.mjs';
 
 // The well-known names, a prior for new accounts.
 export const POPULAR = ['2330.TW', '0050.TW', '0056.TW', '00878.TW', '2317.TW', '2454.TW', 'NVDA', 'AAPL', 'MSFT', 'TSLA', 'VOO', 'QQQ', 'VT', 'SCHD', 'BTC-USD', 'ETH-USD', 'XAU', 'TLT', '006208.TW', '00919.TW', 'AMZN', 'GOOGL', 'META', 'TSM'];

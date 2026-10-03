@@ -4,7 +4,7 @@
 // splits from /v8/finance/chart, and symbol search from /v1/finance/search.
 import { BASE, METALS, GRAMS_PER_OUNCE, kindOf, marketOf, normalizeCurrency } from './markets.mjs';
 import { BONDS, ISSUERS, CURVE_SYMBOLS, bondQuote, bondLine, curveOf } from './bonds.mjs';
-import { proxyJson } from './quadra.mjs';
+import { proxyJson } from '#kit/quadra.mjs';
 
 export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev';
 const YAHOO = 'https://query1.finance.yahoo.com';

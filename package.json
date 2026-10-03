@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "pretest": "test -e .kit || ln -s ../Shared-Proxy/kit .kit"
+  },
+  "imports": {
+    "#kit/*": "./.kit/*"
   }
 }

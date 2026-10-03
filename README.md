@@ -9,14 +9,13 @@ apps sharing one account and one money pool:
 
 | App | Part it plays |
 | --- | --- |
-| **Quadra Securities** | Where money lives and grows: a play-money brokerage for markets worldwide |
+| **Quadra Securities** | Where money lives and grows |
 | **Quadra Play** | A place to play: sports bets and the lottery |
-| **Quadra Fixtures** | The sports data centre, and the way into Play |
-| **Quadra Hub** | Related add-on: words practice, the Quadra Pass and Plus, the truth about the money, every app's guide |
-| Orbit Class | A related add-on: the class schedule |
+| **Quadra Pass** | The account behind every app's top-right: Plus, the truth about the money, every app and its guide |
+| Orbit Class, Weather, Transit, Sports, Words | Orbit: the everyday tools, no money, the same pass |
 
 - **Quadra Pass required.** The app opens on the sign-in screen until there's
-  a pass (the shared kit, `public/lib/quadra.mjs`, from Shared-Proxy's
+  a pass (the shared kit, `#kit/quadra.mjs`, from Shared-Proxy's
   `kit/`). The account is kept with the pass (a copy on the device under the
   pass, so it opens at once), and the market data proxy answers signed-in
   apps only.
@@ -27,9 +26,9 @@ apps sharing one account and one money pool:
   bets and winnings, transfers and Quadra's own pay (a
   fixed NT$6,000 a month, like a salary, paid into the pool by the Worker) all move it. A new pass opens with
   NT$30,000 from Quadra; those two are the only money Quadra gives.
-- **The guide lives in Quadra Hub.** Every explanation (fees, orders, FX,
-  bonds, loans…) is in Quadra Hub's help centre; the account sheet links
-  to it.
+- **The guide lives in the Quadra Pass.** Every explanation (fees, orders,
+  FX, bonds, loans…) is in the Quadra Pass sheet's 說明, opened by the ?
+  at the top right.
 
 ## The app
 
@@ -228,10 +227,9 @@ Two devices' copies merge by uniting their logs:
 | `public/lib/i18n.mjs` | Traditional Chinese and English (follows the browser) |
 | `public/lib/holidays.mjs` | Exchange holiday calendars |
 | `public/lib/foryou.mjs` | For you: candidates and their qualities for the shared recommender |
-| `public/lib/quadra.mjs` | Quadra: the pass, the pool, the shell (shared by the four apps) |
 | `public/lib/timemachine.mjs` | The time machine and moving averages |
 | `public/sw.js` | Offline files and alert notifications |
-| `public/lib/quadra.mjs`, `public/quadra.css` | The shared Quadra kit (sign-in, session, pool, recommender; copied from Shared-Proxy's `kit/`) |
+| `#kit/quadra.mjs` | The shared kit, from Shared-Proxy's Pages (sign-in, session, pool, recommender, the Quadra Pass sheet) |
 | `public/lib/codec.mjs` | Compressed saves |
 | `public/app.js` | Rendering and wiring |
 

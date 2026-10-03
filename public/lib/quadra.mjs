@@ -8,6 +8,7 @@
 //   Quadra Hub          vocab   a related add-on: vocabulary, the pass, and how the money works
 //   Orbit Class         orbit   a related add-on: the class schedule
 //   Orbit Weather       weather a related add-on: one forecast, pinned places
+//   Orbit Transit       transit a related add-on: the map, buses, trains and metros
 //
 // One account works everywhere: the Quadra Pass, a 10-character code for
 // Shared-Proxy's /eco. It is required: every app opens on a sign-in screen
@@ -27,14 +28,15 @@ export const PROXY_URL = 'https://sports-proxy.pengzjay.workers.dev/sports-proxy
 export const SITE = 'https://jaypengx.github.io';
 export const BRAND = { name: 'Quadra', pass: 'Quadra Pass' };
 
-// `related`: an add-on outside the money pool (Fixtures, Hub, Orbit Class, Orbit Weather).
+// `related`: an add-on outside the money pool (Fixtures, Hub, Orbit Class, Orbit Weather, Orbit Transit).
 export const APPS = {
   stock: { name: 'Quadra Securities', short: 'Securities', path: '/Quadra-Securities/', color: '#0d9488', role: { zh: '投資與理財', en: 'Invest and grow' } },
   odds: { name: 'Quadra Play', short: 'Play', path: '/Quadra-Play/', color: '#2563eb', role: { zh: '運彩與彩券', en: 'Sports bets and lottery' } },
   vocab: { name: 'Quadra Hub', short: 'Hub', path: '/Quadra-Hub/', color: '#7c3aed', related: true, role: { zh: '單字、帳戶與錢的真相', en: 'Words, your pass and the truth about money' } },
   match: { name: 'Quadra Fixtures', short: 'Fixtures', path: '/Quadra-Fixtures/', color: '#ea580c', related: true, role: { zh: '賽程與比分', en: 'Scores and schedules' } },
   orbit: { name: 'Orbit Class', short: 'Orbit Class', tile: 'Orbit', path: '/Orbit-Class/', color: '#0ea5e9', related: true, role: { zh: '課表', en: 'Class schedule' } },
-  weather: { name: 'Orbit Weather', short: 'Orbit Weather', tile: 'Weather', path: '/Orbit-Weather/', color: '#6366f1', related: true, role: { zh: '天氣', en: 'Weather' } }
+  weather: { name: 'Orbit Weather', short: 'Orbit Weather', tile: 'Weather', path: '/Orbit-Weather/', color: '#6366f1', related: true, role: { zh: '天氣', en: 'Weather' } },
+  transit: { name: 'Orbit Transit', short: 'Orbit Transit', tile: 'Transit', path: '/Orbit-Transit/', color: '#22c55e', related: true, role: { zh: '大眾運輸', en: 'Public transport' } }
 };
 export const appName = app => APPS[app]?.name || app;
 

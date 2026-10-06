@@ -4072,7 +4072,7 @@ window.addEventListener('hashchange', () => {
 topActions(q, { refresh: () => refresh({ list: true }), extra: settingsEl });
 
 // Big numbers shrink (to 60% at most) to stay on one line.
-const FIT_SELECTOR = '.stat-value, .big-price, .hero-value';
+const FIT_SELECTOR = '.stat-value, .big-price, .hero-value, .q-rec-big';
 function fitNumbers(nodes) {
   for (const node of nodes) node.style.fontSize = '';
   const sizes = nodes.map(node => {

@@ -2093,7 +2093,9 @@ function renderPortfolio() {
     ${overdraftHtml(v)}
     ${marginCardHtml(v)}
     <div class="card nw-card">
-      <h3 class="card-title">${h(t('history'))}</h3>
+      <div class="card-head"><h3 class="card-title">${h(t('history'))}</h3>
+        <div class="segmented small" role="group">${['pl', 'nw'].map(k => `<button type="button" data-action="nw-view" data-v="${k}" aria-pressed="${(state.nwView || 'pl') === k}">${h(t(`nwView_${k}`))}</button>`).join('')}</div>
+      </div>
       <div id="nw-chart" class="chart-box"></div>
     </div>
     <div class="card">
@@ -2379,9 +2381,31 @@ function renderNetWorthChart(v, s) {
   deposits.push([now, total]);
   const width = Math.max(300, Math.round(box.clientWidth || 480));
   const dir = dirClass(v.totalReturn);
+  // 損益 (the default): what the money put in has made, around zero; a
+  // deposit is no rise (the total, with the salary in it, was a flat line
+  // high on an axis from the first deposit). 總資產: the total and what was
+  // put in, the axis on their own range.
+  if ((state.nwView || 'pl') === 'pl') {
+    const putInAt = tt => {
+      let at = deposits[0]?.[1] ?? 0;
+      for (const [dt, x] of deposits) {
+        if (dt > tt) break;
+        at = x;
+      }
+      return at;
+    };
+    const pl = points.map(([tt, nw]) => [tt, nw - putInAt(tt)]);
+    const span = Math.max(...pl.map(p => Math.abs(p[1])));
+    const { svg, frame } = lineChart([{ points: pl }], { width, height: 200, dir, base: 0, yFormat: x => (Math.abs(x) < 0.5 ? '0' : `${x > 0 ? '+' : '−'}${span < 10_000 ? num(Math.abs(x)) : compact(Math.abs(x))}`), xFormat: tt => shortDate(tt) });
+    box.innerHTML = `<div class="nw-now"><strong class="num ${dir}">${h(money(v.totalReturn, BASE, { sign: true }))}</strong><span class="num">${h(pct(v.totalReturnPct))} · ${h(t('putIn'))} ${h(money(v.deposits, BASE))}</span></div>${svg}`;
+    attachHover(box, [{ points: pl }], frame, (i, tt, [x]) => `<strong class="num chg ${dirClass(x)}">${money(x, BASE, { sign: true })}</strong><span>${h(fmtDate(tt))}</span><span class="num">${h(money(x + putInAt(tt), BASE))}</span>`);
+    return;
+  }
   const values = [...points, ...deposits].map(p => p[1]);
   const fine = Math.max(...values) - Math.min(...values) < Math.max(...values) * 0.05;
-  const { svg, frame } = lineChart([{ points }, { points: deposits, cls: 'ref' }], {
+  // The axis from where the total has been: not from a first deposit's small amount before the rest came in.
+  const shownDeposits = deposits.filter(([dt], i) => i === deposits.length - 1 || deposits[i + 1][0] - dt > 3_600_000 || dt >= points[0][0]);
+  const { svg, frame } = lineChart([{ points }, { points: shownDeposits, cls: 'ref' }], {
     width,
     height: 200,
     dir,
@@ -2390,7 +2414,7 @@ function renderNetWorthChart(v, s) {
     xFormat: tt => shortDate(tt)
   });
   box.innerHTML = `<ul class="legend-inline"><li><i class="sw ${dir}"></i>${h(t('netWorth'))}</li><li><i class="sw ref"></i>${h(t('putIn'))}</li></ul>${svg}`;
-  attachHover(box, [{ points }, { points: deposits }], frame, (i, tt, [nw, dep]) => `<strong class="num">${money(nw, BASE)}</strong><span>${h(fmtDate(tt))}</span><span class="chg ${dirClass(nw - dep)}">${money(nw - dep, BASE, { sign: true })}</span>`);
+  attachHover(box, [{ points }, { points: shownDeposits }], frame, (i, tt, [nw, dep]) => `<strong class="num">${money(nw, BASE)}</strong><span>${h(fmtDate(tt))}</span><span class="chg ${dirClass(nw - dep)}">${money(nw - dep, BASE, { sign: true })}</span>`);
 }
 
 function orderRow(o) {
@@ -3800,6 +3824,10 @@ document.addEventListener('click', event => {
       break;
     case 'recall':
       doRecall(el.dataset.id);
+      break;
+    case 'nw-view':
+      state.nwView = el.dataset.v;
+      renderPortfolio();
       break;
     case 'pos-sort':
       state.posSort = el.dataset.v;

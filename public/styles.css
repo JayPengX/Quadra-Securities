@@ -898,3 +898,8 @@ a.activity-row { color: inherit; text-decoration: none; }
 .credit-term { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--q-divider, var(--grid)); }
 .credit-term-main { display: grid; flex: 1; min-width: 0; }
 .credit-term-main small { color: var(--text-secondary); font-size: 0.8rem; }
+
+/* 資產走勢's 損益: the gain now over the chart. */
+.nw-now { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 6px; white-space: nowrap; }
+.nw-now strong { font-size: 1.25rem; font-weight: 750; }
+.nw-now span { color: var(--text-secondary); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; }

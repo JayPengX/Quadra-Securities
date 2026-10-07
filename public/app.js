@@ -174,7 +174,8 @@ function nameOf(symbol, quote = state.quotes.get(symbol)) {
   if (symbol.endsWith('=X') && symbol.length === 8) return `${symbol.slice(0, 3)}/${symbol.slice(3, 6)}`;
   return quote?.shortName || quote?.name || symbol;
 }
-const bareSymbol = s => (METALS[s] ? s : s.replace(/\.(TW|TWO)$/, ''));
+// (A coin by its own ticker: BTC, not BTC-USD.)
+const bareSymbol = s => (METALS[s] ? s : s.replace(/\.(TW|TWO)$/, '').replace(/^([A-Z0-9]{2,10})-USD$/, '$1'));
 const kindLabel = kind => t(`kind_${kind}`);
 const marketLabel = id => L(MARKETS[id] || MARKETS.INTL);
 const flagOf = (symbol, q) => {
@@ -962,7 +963,7 @@ function recCard(symbol, why) {
     ${whyText ? `<span class="q-rec-why">${h(whyText)}</span>` : ''}
     <p class="q-rec-title">${h(nameOf(symbol, q))}</p>
     <p class="q-rec-sub">${flagOf(symbol, q)} ${h(bareSymbol(symbol))}${info ? ` · ${h(L(CATEGORIES.find(c => c.id === info.category)))}` : ''}</p>
-    <span class="q-rec-foot"><span class="q-rec-big">${q ? fmtPrice(q.price, q.currency) : '…'}</span>${pctPill(q)}</span>
+    <span class="q-rec-foot"><span class="q-rec-big">${q ? fmtPrice(q.price, q.currency, { short: true }) : '…'}</span>${pctPill(q)}</span>
     ${q ? `<span class="rec-spark">${sparkline(q.line, q.kind === 'crypto' ? null : q.prev, { width: 200, height: 30 })}</span>` : ''}
   </button>`;
 }
@@ -4076,11 +4077,15 @@ const FIT_SELECTOR = '.stat-value, .big-price, .hero-value, .q-rec-big';
 function fitNumbers(nodes) {
   for (const node of nodes) node.style.fontSize = '';
   const sizes = nodes.map(node => {
-    const box = node.clientWidth;
-    const need = node.scrollWidth;
-    if (!box || need <= box + 0.5) return null;
+    // (Fractional widths: whole pixels rounded a 64.4px number into a 64px
+    // box, which then showed 11,7… instead of shrinking.)
+    const box = node.getBoundingClientRect().width;
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const need = range.getBoundingClientRect().width;
+    if (!box || need <= box) return null;
     const full = parseFloat(getComputedStyle(node).fontSize);
-    return Math.max(full * 0.6, Math.floor(((full * box) / need) * 10) / 10);
+    return Math.max(full * 0.6, Math.floor(((full * (box - 0.5)) / need) * 10) / 10);
   });
   nodes.forEach((node, i) => sizes[i] && (node.style.fontSize = `${sizes[i]}px`));
 }

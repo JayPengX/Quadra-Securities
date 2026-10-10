@@ -145,21 +145,21 @@ function syncPush() {
   const items = [];
   for (const a of activeAlerts(account)) {
     if (a.hit || BONDS[a.symbol]) continue;
-    items.push({ at: a.since, until: a.since + 30 * 86_400_000, title: `🔔 ${t('alertTitle')}`, body: t(a.op === 'above' ? 'alertHitAbove' : 'alertHitBelow', { name: nameOf(a.symbol), price: fmtPrice(a.price, state.quotes.get(a.symbol)?.currency) }), tag: `alert:${a.id}`, hash: 'portfolio', kind: 'alert', check: { yahoo: a.symbol, op: a.op, price: a.price } });
+    items.push({ at: a.since, until: a.since + 30 * 86_400_000, title: t(a.op === 'above' ? 'alertHitAbove' : 'alertHitBelow', { name: nameOf(a.symbol), price: fmtPrice(a.price, state.quotes.get(a.symbol)?.currency) }), body: t('alertNoticeBody'), tag: `alert:${a.id}`, hash: 'portfolio', kind: 'alert', check: { yahoo: a.symbol, op: a.op, price: a.price } });
   }
   for (const o of account.orders.filter(x => x.status === 'open' && !BONDS[x.symbol] && (x.type === 'limit' || x.type === 'stop'))) {
     const price = Number(o.type === 'limit' ? o.limit : o.stop);
     if (!(price > 0)) continue;
     const op = (o.type === 'limit') === (o.side === 'buy') ? 'below' : 'above';
-    items.push({ at: o.t, until: o.t + 30 * 86_400_000, title: t('noticeReached'), body: t('noticeReachedBody', { side: t(o.side).toLowerCase(), name: nameOf(o.symbol), price: fmtPrice(price, o.currency) }), tag: `fill:${o.id}`, hash: 'history', kind: 'fill', check: { yahoo: o.symbol, op, price } });
+    items.push({ at: o.t, until: o.t + 30 * 86_400_000, title: t('noticeReached', { name: nameOf(o.symbol), price: fmtPrice(price, o.currency) }), body: t('noticeReachedBody', { side: t(o.side).toLowerCase() }), tag: `fill:${o.id}`, hash: 'history', kind: 'fill', check: { yahoo: o.symbol, op, price } });
   }
   for (const p of activePlans(account)) {
     const next = nextPlanRun(p, now);
-    if (next) items.push({ at: next + 9 * 3_600_000, title: t('noticePlanTitle'), body: t('noticePlanDay', { name: nameOf(p.symbol), amount: money(p.amount, BASE) }), tag: `plan:${p.id}:${next}`, hash: 'portfolio', kind: 'fill' });
+    if (next) items.push({ at: next + 9 * 3_600_000, title: t('noticePlanTitle', { name: nameOf(p.symbol) }), body: t('noticePlanDay', { amount: money(p.amount, BASE) }), tag: `plan:${p.id}:${next}`, hash: 'portfolio', kind: 'fill' });
   }
   // Dividends on the way: the day each is paid.
   for (const e of pendingDividends(account, now)) {
-    items.push({ at: e.t, title: t('noticeDivPayTitle'), body: t('noticeDivPayBody', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), tag: `div:${e.symbol}:${e.t}`, hash: 'portfolio', kind: 'income' });
+    items.push({ at: e.t, title: t('noticeDivPayTitle', { name: nameOf(e.symbol), amount: money(e.net, e.currency) }), body: t('noticeDivPayBody'), tag: `div:${e.symbol}:${e.t}`, hash: 'portfolio', kind: 'income' });
   }
   schedulePush(q, items);
 }
@@ -472,14 +472,13 @@ function alertText(a) {
 // The kit's notices (quadra.mjs): a banner while the app is on screen, a
 // system notice when it isn't (once turned on in the account sheet).
 function alertFired(a, { late = false } = {}) {
-  const text = alertText(a) + (late ? ` · ${dateTime(a.hit.t)}` : '');
-  notify(q, { title: `🔔 ${t('alertTitle')}`, body: text, tag: `alert:${a.id}:${a.hit?.t || ''}`, hash: 'portfolio', kind: 'alert' });
+  notify(q, { title: alertText(a), body: [t('alertNoticeBody'), late ? dateTime(a.hit.t) : ''].filter(Boolean).join(' · '), tag: `alert:${a.id}:${a.hit?.t || ''}`, hash: 'portfolio', kind: 'alert' });
 }
 // An order filled: a toast on screen, a notice when the app is in the background.
 function filledNotice(text, fill) {
   if (!kindOn('stock', 'fill')) return;
   if (document.visibilityState === 'visible') return toast(text, 'good', 'history');
-  notify(q, { title: t('noticeFilled'), body: t('noticeFilledBody', { side: t(fill.side), name: nameOf(fill.symbol), qty: fmtQty(fill.qty), price: fmtPrice(fill.price, fill.currency) }), tag: `fill:${fill.id}`, hash: 'history', kind: 'fill' });
+  notify(q, { title: t('noticeFilledTitle', { side: t(fill.side), name: nameOf(fill.symbol) }), body: t('noticeFilledBody', { qty: fmtQty(fill.qty), price: fmtPrice(fill.price, fill.currency) }), tag: `fill:${fill.id}`, hash: 'history', kind: 'fill' });
 }
 // What happened in the account (an order lapsed, a forced sale, a dividend
 // in): a toast while the app is on screen (tap: where it happened), a

@@ -1207,18 +1207,20 @@ function renderDetail() {
     </div>`
         : `<p class="empty">${h(t('loadingQuote'))}</p>`
     }
-    <div class="card chart-card">
-      <div class="chart-controls">
-        <div class="segmented ranges" role="group">${['1d', '5d', '1mo', '6mo', 'ytd', '1y', '5y', 'max']
-          .map(r => `<button type="button" data-action="range" data-range="${r}" aria-pressed="${d.range === r}">${h(t(`range_${r}`))}</button>`)
-          .join('')}</div>
-        <div class="chart-style">
-          <div class="segmented small" role="group"><button type="button" data-action="chart-style" data-v="line" aria-pressed="${state.settings.chart === 'line'}">${h(t('chartLine'))}</button><button type="button" data-action="chart-style" data-v="candle" aria-pressed="${state.settings.chart === 'candle'}">${h(t('chartCandle'))}</button></div>
-          <button class="chip small" type="button" data-action="chart-ma" aria-pressed="${state.settings.ma}">${h(t('chartMa'))}</button>
+    <section class="chart-area">
+      <div class="range-bar" role="group">${['1d', '5d', '1mo', '6mo', 'ytd', '1y', '5y', 'max']
+        .map(r => `<button type="button" data-action="range" data-range="${r}" aria-pressed="${d.range === r}">${h(t(`range_${r}`))}</button>`)
+        .join('')}</div>
+      <div class="chart-top">
+        <p id="detail-chart-head" class="chart-change" data-own></p>
+        <div class="chart-tools" role="group">
+          <button class="tool" type="button" data-action="chart-style" data-v="line" aria-pressed="${state.settings.chart === 'line'}" aria-label="${h(t('chartLine'))}" title="${h(t('chartLine'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 4-7 5 5"/></svg></button>
+          <button class="tool" type="button" data-action="chart-style" data-v="candle" aria-pressed="${state.settings.chart === 'candle'}" aria-label="${h(t('chartCandle'))}" title="${h(t('chartCandle'))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3v4M8 15v6M16 3v7M16 17v4"/><rect x="5.5" y="7" width="5" height="8" rx="1"/><rect x="13.5" y="10" width="5" height="7" rx="1"/></svg></button>
+          <button class="tool text" type="button" data-action="chart-ma" aria-pressed="${state.settings.ma}">${h(t('chartMa'))}</button>
         </div>
       </div>
       <div id="detail-chart" class="chart-box" data-own></div>
-    </div>
+    </section>
     ${q ? factsHtml(q) : ''}
     ${positionHtml(d.symbol)}
     ${q ? (isTradable(q.kind) ? '<div id="ticket" data-own></div>' : trackersHtml(d.symbol)) : ''}
@@ -1236,6 +1238,9 @@ function renderChart() {
   const box = $('detail-chart');
   if (!d || !box) return;
   const q = state.quotes.get(d.symbol);
+  // (Its line kept the row's height while there's nothing to say: nothing moves when the chart comes.)
+  const said = $('detail-chart-head');
+  if (said && (d.chartError || !(d.chart?.points || (d.range === '1d' && q?.line?.length > 1)))) said.textContent = '';
   if (d.chartError) {
     box.innerHTML = `<p class="empty">${h(t('chartError'))}</p>`;
     return;
@@ -1260,7 +1265,10 @@ function renderChart() {
   const closes = bars ? bars.map(b => [b.t, b.c]) : points;
   const mas = state.settings.ma ? MA_PERIODS.filter(n => closes.length > n + 2).map((n, i) => ({ n, points: movingAverage(closes, n), cls: `ma${i + 1}` })) : [];
   const legend = mas.length ? `<ul class="legend-inline">${mas.map(m => `<li><i class="sw ${m.cls}"></i>MA${m.n}</li>`).join('')}</ul>` : '';
-  const head = `<p class="chart-change">${h(t('rangeChange', { range: t(`range_${d.range}`) }))} <span class="chg ${dir}">${pct(change)}</span></p>`;
+  // The range's change sits on the row above, beside the chart's tools.
+  const headBox = $('detail-chart-head');
+  if (headBox) headBox.innerHTML = `${h(t('rangeChange', { range: t(`range_${d.range}`) }))} <span class="chg ${dir}">${pct(change)}</span>`;
+  const head = '';
   const height = width < 480 ? 220 : 260;
   if (state.settings.chart === 'candle' && bars) {
     const { svg, frame } = candleChart(bars, { width, height, lines: mas, yFormat: v => fmtPrice(v, cur), xFormat });
@@ -1864,7 +1872,7 @@ function renderTicket() {
       ${d.type === 'limit' ? `<label class="field"><span>${h(t('limitPrice'))} (${h(q.currency)})</span><input id="t-limit" inputmode="decimal" autocomplete="off" value="${h(d.limit)}" /></label>` : ''}
       ${d.type === 'stop' ? `<label class="field"><span>${h(t('stopPrice'))} (${h(q.currency)})</span><input id="t-stop" inputmode="decimal" autocomplete="off" value="${h(d.stop)}" /></label>` : ''}
     </div>
-    <div class="qty-presets">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}">${h(label)}${label === t('max') || label === t('all') ? ` <small>${h(fmtQty(v))}</small>` : ''}</button>`).join('')}</div>
+    <div class="qty-presets one-row">${presets.filter(([, v]) => v > 0).map(([label, v]) => `<button class="chip small" type="button" data-action="qty" data-qty="${v}" title="${h(fmtQty(v))}">${h(label)}</button>`).join('')}</div>
     ${d.type !== 'market' && (band || tickSize(q.market, q.kind, q.price)) ? `<p class="muted">${h([band ? t('limitBand', { down: fmtPrice(band.down, q.currency), up: fmtPrice(band.up, q.currency) }) : '', tickSize(q.market, q.kind, q.price) ? t('tickIs', { tick: num(tickSize(q.market, q.kind, q.price), 4, 0) }) : ''].filter(Boolean).join(' · '))}</p>` : ''}
     <p class="muted">${h(d.side === 'buy' ? t('cashAvail', { amount: money(cash, q.currency) }) : t('sharesAvail', { qty: fmtQty(shares), unit }))}${q.market === 'TW' && q.kind !== 'metal' && t('lotNote') ? ` · ${h(t('lotNote'))}` : ''}${d.side === 'buy' && sources.length ? ` <button class="link-button" type="button" data-action="ticket-fx" data-from="${h(sources[0])}" data-to="${h(q.currency)}">${h(t('fxOpen'))}</button>` : ''}</p>
     ${covers.length ? `<div class="qty-presets fx-cover">${covers.slice(0, 3).map(c => `<button class="chip small" type="button" data-action="topup" data-from="${h(c.from)}" data-cur="${h(q.currency)}" data-need="${c.need}">${h(t('fxCover', { pay: money(c.need, c.from), get: money(c.get, q.currency) }))}</button>`).join('')}</div>` : ''}

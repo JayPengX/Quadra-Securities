@@ -298,15 +298,22 @@ footer { padding: 10px 0 0; text-align: center; }
 .mkt-status { display: inline-flex; align-items: center; gap: 6px; }
 .mkt-status.open { color: var(--accent); font-weight: 600; }
 .mkt-status small { color: var(--text-muted); font-weight: 400; }
-.chart-card { padding: 12px 12px 8px; }
-.ranges { margin-bottom: 8px; display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; max-width: 100%; }
-.ranges::-webkit-scrollbar { display: none; }
-.ranges button { padding: 5px 10px; flex: none; }
-@media (max-width: 520px) { .ranges button { padding: 5px 8px; font-size: 0.8rem; } }
 .first-day { display: grid; gap: 6px; place-content: center; text-align: center; min-height: 140px; color: var(--text-muted); font-size: 0.86rem; }
 .first-day strong { font-size: 1.4rem; color: var(--text-primary); }
 .chart-box { position: relative; min-height: 120px; }
-.chart-change { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+/* The chart as a stocks app draws it: on the sheet itself (no card in a
+   card), the ranges one flat row across it, the chart's kind and its
+   averages as small tools beside the range's change. */
+.chart-area { margin: 6px 0 14px; }
+.range-bar { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 2px; margin-bottom: 10px; }
+.range-bar button { min-width: 0; padding: 7px 0; border: 0; border-radius: 9px; background: none; color: var(--text-secondary); font: inherit; font-size: 0.86rem; font-weight: 650; white-space: nowrap; cursor: pointer; }
+.range-bar button[aria-pressed="true"] { background: var(--q-fill, var(--surface-sunken)); color: var(--text-primary); font-weight: 800; }
+.chart-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 30px; margin-bottom: 4px; }
+.chart-change { margin: 0; font-size: 0.84rem; color: var(--text-muted); white-space: nowrap; }
+.chart-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.chart-tools .tool { display: inline-grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border: 0; border-radius: 8px; background: none; color: var(--text-muted); font: inherit; font-size: 0.8rem; font-weight: 700; cursor: pointer; }
+.chart-tools .tool svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.chart-tools .tool[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
 .chart-svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
 .chart-svg .grid { stroke: var(--grid); stroke-width: 1; }
 .chart-svg .axis-label { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -352,14 +359,21 @@ footer { padding: 10px 0 0; text-align: center; }
 
 /* Trade ticket */
 .ticket { display: grid; gap: 10px; }
-.ticket-top { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
-.side-toggle button { min-width: 72px; }
+/* Each choice a full-width row of equal parts (buy or sell; the order's kind;
+   how long it stands), one under the other: nothing wraps, nothing stacked on a pill. */
+.ticket-top { display: grid; gap: 8px; }
+.ticket-top .segmented, .ticket .credit-toggle { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; flex-wrap: nowrap; }
+.ticket-top .segmented button, .ticket .credit-toggle button { min-width: 0; padding: 8px 4px; }
+.side-toggle button { font-size: 0.95rem; font-weight: 750; }
 .side-toggle .buy[aria-pressed='true'] { background: var(--up); color: #fff; }
 .side-toggle .sell[aria-pressed='true'] { background: var(--down); color: #fff; }
 .ticket .note { margin: 0; }
 .ticket-fields { display: flex; gap: 10px; flex-wrap: wrap; }
 .ticket-fields .field { flex: 1 1 160px; }
 .qty-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+/* A quantity's quick picks: one row of equal chips (最多's amount in its tooltip: with it they ran onto a second row). */
+.qty-presets.one-row { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+.qty-presets.one-row .chip { justify-content: center; min-width: 0; padding-inline: 4px; }
 .preview { display: grid; gap: 4px; margin: 0; padding: 10px 12px; background: var(--surface-raised); border-radius: 12px; font-size: 0.86rem; }
 .preview div { display: flex; justify-content: space-between; gap: 12px; }
 .preview dt { color: var(--text-secondary); }
@@ -496,8 +510,10 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 @media (max-width: 520px) { .rate-row .row-spark { display: none; } }
 /* A currency's name never breaks mid-word: its own line on a phone, cut short if it must. */
 @media (max-width: 420px) { .rate-row .row-title small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .rate-row .pill { min-width: 62px; } }
-.loan-form { display: flex; gap: 10px; flex-wrap: wrap; }
-.loan-form .field:first-child { flex: 0 1 220px; }
+/* Two fields side by side, each its half (they wrapped to two rows). */
+.loan-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); grid-auto-flow: column; gap: 10px; }
+.loan-form .field { min-width: 0; }
+.loan-form .field input, .loan-form .field select { width: 100%; min-width: 0; }
 
 /* ---- History ----------------------------------------------------------------------------- */
 .history-tabs { margin-bottom: 12px; }
@@ -535,9 +551,6 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .button-row.center { justify-content: center; margin-top: 10px; }
 
 /* ---- Charts: style toggle, candles, averages -------------------------------------------- */
-.chart-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.chart-controls .ranges { margin: 0; }
-.chart-style { display: flex; gap: 6px; align-items: center; }
 .chart-svg .candle line { stroke: var(--text-muted); stroke-width: 1; }
 .chart-svg .candle rect { fill: var(--text-muted); }
 .chart-svg .candle.up line { stroke: var(--up); }

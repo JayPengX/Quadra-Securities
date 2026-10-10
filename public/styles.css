@@ -285,8 +285,8 @@ footer { padding: 10px 0 0; text-align: center; }
 }
 @keyframes rise { from { transform: translateY(40px); opacity: 0.5; } to { transform: none; opacity: 1; } }
 .sheet-head {
-  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 14px 0 10px; margin-bottom: 4px;
-  background: var(--page);
+  position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; margin: 0 -16px 4px;
+  background: var(--q-sheet, var(--page));
 }
 .sheet-title { flex: 1 1 auto; min-width: 0; }
 .sheet-title h2 { font-size: 1.12rem; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }

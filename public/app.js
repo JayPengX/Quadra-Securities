@@ -2131,12 +2131,17 @@ function cashCardHtml(v, heldTWD, unsettledNow, heldFor) {
   const settlingTWD = Object.entries(unsettledNow).reduce((sum, [c, x]) => sum + x * (state.rates[c] ?? 0), 0);
   const free = v.cashTWD - heldTWD;
   const settleAt = settlesBy(state.account);
+  // The NT$ wallet earns the cash rate: about this much a month at today's balance, and what it's paid in the last year.
+  const twdCash = v.cash.find(c => c.currency === BASE)?.amount ?? 0;
+  const earned = incomeSummary(state.account).interest;
   return `<div class="card cash-card">
     <div class="card-head"><h3 class="card-title">${h(t('wallets'))}</h3><strong class="num cash-total">${h(money(free, BASE))}</strong></div>
-    <div class="cash-chips">
-      ${heldTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashHeld'))}</small><strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
-      ${settlingTWD > 0.5 ? `<span class="cash-chip"><small>${h(t('cashSettling'))}</small><strong class="num">${h(money(settlingTWD, BASE))}</strong></span>` : ''}
-      <span class="cash-chip"><small>${h(t('cashInterestRate'))}</small><strong class="num">${h(pct(CASH_RATE, { digits: 2, sign: false }))}</strong></span>
+    <div class="cash-stats">
+      <span class="cash-stat"><small>${h(t('cashInterestRate'))}</small><strong class="num">${h(pct(CASH_RATE, { digits: 2, sign: false }))}</strong></span>
+      <span class="cash-stat"><small>${h(t('cashMonthly'))}</small><strong class="num">${h(`≈${money(Math.max(0, twdCash) * CASH_RATE / 12, BASE)}`)}</strong></span>
+      <span class="cash-stat"><small>${h(t('cashEarned'))}</small><strong class="num">${h(money(earned, BASE))}</strong></span>
+      ${heldTWD > 0.5 ? `<span class="cash-stat"><small>${h(t('cashHeld'))}</small><strong class="num">${h(money(heldTWD, BASE))}</strong></span>` : ''}
+      ${settlingTWD > 0.5 ? `<span class="cash-stat"><small>${h(t('cashSettling'))}</small><strong class="num">${h(money(settlingTWD, BASE))}</strong></span>` : ''}
     </div>
     <div class="wallets">${v.cash.map(c => walletRow(c, heldFor(c), unsettledNow[c.currency] || 0, settleAt[c.currency])).join('')}${v.loans.map(loanWalletRow).join('')}</div>
     <p class="note">${h(t('poolNote'))}</p>

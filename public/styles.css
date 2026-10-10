@@ -446,10 +446,13 @@ body[data-updown='us'] .hero-card .down { color: #fecaca; }
 .donut-center small { font-size: 0.7rem; color: var(--text-muted); }
 /* Cash: the spendable total, what's held or settling, the pool, the rate. */
 .cash-total { font-size: 1.25rem; font-weight: 800; }
-.cash-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
-.cash-chip { display: grid; gap: 1px; padding: 6px 10px; border-radius: 10px; background: var(--surface-sunken); min-width: 0; }
-.cash-chip small { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; }
-.cash-chip strong { font-size: 0.9rem; }
+/* The cash rate and what it earns, then anything held or settling: one even row of facts (three a row). */
+.cash-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin: 0 0 12px; border-radius: 14px; overflow: hidden; background: var(--q-divider, rgba(127, 127, 127, 0.18)); }
+.cash-stat { display: grid; gap: 2px; padding: 9px 11px; min-width: 0; background: var(--surface-sunken); }
+.cash-stat small { font-size: 0.7rem; color: var(--text-muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cash-stat strong { font-size: 0.95rem; white-space: nowrap; }
+.cash-stats:has(.cash-stat:nth-child(4):last-child) .cash-stat:nth-child(4) { grid-column: 1 / -1; }
+.cash-stats:has(.cash-stat:nth-child(5)) .cash-stat:nth-child(5) { grid-column: 2 / -1; }
 /* Income: a year of months as small bars. */
 .mini-bars { display: flex; align-items: flex-end; gap: 4px; margin: 14px 0 4px; }
 .mini-bar { flex: 1 1 0; min-width: 0; border-radius: 3px 3px 1px 1px; background: var(--accent); opacity: 0.45; }

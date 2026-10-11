@@ -47,6 +47,9 @@ test('symbols to markets and kinds', () => {
   assert.equal(marketOf('2330.TW'), 'TW');
   assert.equal(marketOf('6488.TWO'), 'TW');
   assert.equal(marketOf('AAPL'), 'US');
+  assert.equal(marketOf('^TWII', 'index'), 'TW');
+  assert.equal(marketOf('^N225', 'index'), 'JP');
+  assert.equal(marketOf('^GSPC', 'index'), 'US');
   assert.equal(marketOf('BRK-B'), 'US');
   assert.equal(marketOf('HSBA.L'), 'UK');
   assert.equal(marketOf('0700.HK'), 'HK');

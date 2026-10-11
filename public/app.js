@@ -792,10 +792,10 @@ function nextOpen(q, now) {
 function holidayLine(q) {
   if (!q || q.kind === 'crypto' || q.market === 'FX') return '';
   const market = q.market === 'BOND' ? BONDS[q.symbol]?.issuer : q.market;
-  const days = upcomingHolidays(market, localDay(Date.now(), q.tz), 4);
+  const days = upcomingHolidays(market, localDay(Date.now(), q.tz), 3);
   if (!days.length) return '';
-  const fmt = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-TW' : 'en-US', { month: 'short', day: 'numeric', weekday: 'short', timeZone: 'UTC' });
-  return days.map(d => fmt.format(new Date(`${d}T00:00:00Z`))).join('、');
+  const wd = new Intl.DateTimeFormat(locale === 'zh' ? 'zh-TW' : 'en-US', { weekday: 'short', timeZone: 'UTC' });
+  return days.map(d => `${+d.slice(5, 7)}/${+d.slice(8, 10)} ${wd.format(new Date(`${d}T00:00:00Z`))}`).join(locale === 'zh' ? '、' : ', ');
 }
 
 // A holding's 融資 shares (the loan's collateral, sold first by the broker
@@ -1203,7 +1203,8 @@ function renderDetail() {
         ? `<div class="price-block">
       <div><strong class="big-price num">${fmtPrice(q.price, q.currency)}</strong> <span class="cur">${h(q.currency)}${METALS[d.symbol] ? ` / ${h(unitOf(d.symbol))}` : ''}</span></div>
       <div>${changeHtml(q, { big: true })}</div>
-      <div class="price-meta">${marketStatus(q)}${q.marketTime ? ` · <span>${h(t('asOf', { time: dateTime(q.marketTime) }))}</span>` : ''} · ${delayOf(q.market) ? `<span class="delay-tag" title="${h(t('delayHelp'))}">${h(t('delayed', { n: delayOf(q.market) }))}</span>` : `<span class="delay-tag live" title="${h(t('liveHelp'))}">${h(t('livePrice'))}</span>`}</div>
+      <div class="price-meta">${marketStatus(q)}</div>
+      <div class="price-meta">${q.marketTime ? `<span>${h(t('asOf', { time: dateTime(q.marketTime) }))}</span> · ` : ''}${delayOf(q.market) ? `<span class="delay-tag" title="${h(t('delayHelp'))}">${h(t('delayed', { n: delayOf(q.market) }))}</span>` : `<span class="delay-tag live" title="${h(t('liveHelp'))}">${h(t('livePrice'))}</span>`}</div>
     </div>`
         : `<p class="empty">${h(t('loadingQuote'))}</p>`
     }
@@ -1337,13 +1338,21 @@ function factsHtml(q) {
     [t('volume'), q.volume ? compact(q.volume) : '—'],
     [t('currency'), `${currencyInfo(q.currency).flag} ${q.currency} · ${L(currencyInfo(q.currency))}`],
     [t('market'), `${(MARKETS[q.market] || MARKETS.INTL).flag} ${marketLabel(q.market)}`],
-    ...(q.session && q.kind !== 'crypto' ? [[t('hours'), `${clock(q.session.start, q.tz)}–${clock(q.session.end, q.tz)} (${t('localTime')}) · ${clock(q.session.start)}–${clock(q.session.end)} ${t('taipeiTime')}`]] : []),
+    ...(q.session && q.kind !== 'crypto' ? [[t('hours'), hoursLine(q)]] : []),
     ...(q.session && holidayLine(q) ? [[t('holidaysNext'), holidayLine(q)]] : []),
     ...(isTradable(q.kind) ? [[t('costs'), feeSummary(q)]] : []),
     ...(isTradable(q.kind) ? [[t('rulesFact'), marketRules(q)]] : []),
     ...(state.rates[q.currency] && q.currency !== BASE ? [[t('inTwd'), `${money(q.price * state.rates[q.currency], BASE, { digits: q.price * state.rates[q.currency] < 100 ? 2 : 0 })} ${t('perUnit', { unit: unitOf(q.symbol) })}`]] : [])
   ];
-  return `<dl class="facts-grid">${rows.map(([k, v]) => `<div><dt>${h(k)}</dt><dd>${h(v)}</dd></div>`).join('')}</dl>`;
+  // Short facts two a row; a long one (hours, holidays, costs) the row's width.
+  return `<dl class="facts-grid">${rows.map(([k, v]) => `<div${String(v).length > 22 ? ' class="wide"' : ''}><dt>${h(k)}</dt><dd>${h(v)}</dd></div>`).join('')}</dl>`;
+}
+
+// Hours in Taiwan's time, and the market's own when it differs.
+function hoursLine(q) {
+  const tw = `${clock(q.session.start)}–${clock(q.session.end)}`;
+  const local = `${clock(q.session.start, q.tz)}–${clock(q.session.end, q.tz)}`;
+  return local === tw ? tw : `${tw} ${t('taipeiTime')} · ${t('localTime')} ${local}`;
 }
 
 function positionHtml(symbol) {

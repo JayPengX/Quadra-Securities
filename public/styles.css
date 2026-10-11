@@ -276,6 +276,9 @@ footer { padding: 10px 0 0; text-align: center; }
   background: var(--page); color: var(--text-primary); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.35); overflow-y: auto; overscroll-behavior: contain;
 }
 .sheet::backdrop { background: rgba(2, 6, 23, 0.55); backdrop-filter: blur(3px); }
+/* The kit's sheet pads itself; the detail pads its body instead (its head
+   runs edge to edge), so the sheet's own padding goes. */
+.sheet.q-sheet { padding: 0; }
 #detail-body { padding: 0 16px 18px; }
 #setup-body { position: relative; }
 @media (max-width: 720px) {
@@ -343,8 +346,11 @@ footer { padding: 10px 0 0; text-align: center; }
 .sw.down { background: var(--down); }
 .sw.ref { background: repeating-linear-gradient(90deg, var(--text-muted) 0 4px, transparent 4px 7px); }
 
-.facts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); margin: 0 0 14px; background: var(--surface); border-radius: var(--radius-sm); overflow: hidden; border: 1px solid transparent; }
-.facts-grid div { padding: 8px 12px; box-shadow: 1px 0 0 var(--grid), 0 1px 0 var(--grid); }
+/* Facts on the sheet itself, two a row with hairlines between, as a stocks
+   app lists them; a long one takes the row. */
+.facts-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; margin: 0 0 14px; }
+.facts-grid div { min-width: 0; padding: 9px 0; border-top: 1px solid var(--grid); }
+.facts-grid div.wide { grid-column: 1 / -1; }
 .facts-grid dt { font-size: 0.72rem; color: var(--text-muted); }
 .facts-grid dd { margin: 0; font-size: 0.86rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 10px 14px; }

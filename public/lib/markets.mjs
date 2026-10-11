@@ -309,7 +309,15 @@ export const CASH_RATE = 0.008;
 
 export const delayOf = market => (MARKETS[market] || MARKETS.INTL).delay ?? 15;
 
+// An index has no suffix: its home market by name (^TWII is Taiwan's, not
+// the US's), for its hours, holidays and flag.
+const INDEX_MARKET = {
+  '^TWII': 'TW', '^TWOII': 'TW', '^N225': 'JP', '^HSI': 'HK', '^KS11': 'KR', '^GDAXI': 'DE', '^FTSE': 'UK',
+  '^FCHI': 'FR', '^STOXX50E': 'DE', '^BSESN': 'IN', '^AXJO': 'AU', '^GSPTSE': 'CA', '^STI': 'SG', '^SSMI': 'CH'
+};
+
 export function marketOf(symbol, kind) {
+  if (INDEX_MARKET[symbol]) return INDEX_MARKET[symbol];
   if (kind === 'crypto') return 'CRYPTO';
   if (kind === 'govbond') return 'BOND';
   if (kind === 'metal') return 'METAL';
